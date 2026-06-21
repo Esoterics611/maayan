@@ -8,9 +8,15 @@ library code. No business logic lives here.
 
 from __future__ import annotations
 
+import asyncio
+from typing import cast
+
 import typer
 
 from maayan import __version__
+from maayan.config import Settings, get_settings
+from maayan.corpus.ingest import IngestResult
+from maayan.corpus.models import Lang
 
 app = typer.Typer(
     name="maayan",
@@ -33,8 +39,66 @@ def version() -> None:
     typer.echo(f"maayan {__version__}")
 
 
-# Subcommands (ingest, index, search, ask, annotate, ...) are registered by
-# their modules as each build prompt lands. Kept out of the skeleton on purpose.
+@app.command()
+def ingest(
+    book: str = typer.Option(None, "--book", help="A single Sefaria base ref to ingest."),
+    all_books: bool = typer.Option(False, "--all", help="Ingest every book in config.books."),
+    limit: int = typer.Option(
+        None, "--limit", help="Max chapters per book (handy for a quick sample)."
+    ),
+    sample: int = typer.Option(5, "--sample", help="How many ingested chunks to print."),
+) -> None:
+    """Pull chassidus/Kabbalah text from Sefaria, normalize, and store as chunks."""
+    settings = get_settings()
+    if all_books:
+        refs = settings.books
+    elif book:
+        refs = [book]
+    else:
+        raise typer.BadParameter("Pass --book '<ref>' or --all.")
+
+    langs = [cast(Lang, language) for language in settings.ingest_langs if language in ("he", "en")]
+    results = asyncio.run(_run_ingest(settings, refs, langs, limit))
+
+    for r in results:
+        typer.echo(f"  {r.book}: {r.sections} sections → {r.chunks} chunks upserted")
+
+    # Show a sample of what landed.
+    from maayan.corpus.store import ChunkStore
+
+    with ChunkStore(settings.db_path) as store:
+        typer.echo(f"\nTotal chunks in store: {store.count()}")
+        typer.echo(f"\nSample of {sample} chunks:")
+        for c in store.get_chunks(limit=sample):
+            preview = c.text[:90].replace("\n", " ")
+            typer.echo(f"  [{c.lang}] {c.ref}\n      {preview}…")
+
+
+async def _run_ingest(
+    settings: Settings, refs: list[str], langs: list[Lang], limit: int | None
+) -> list[IngestResult]:
+    import httpx
+
+    from maayan.clock import SystemClock
+    from maayan.corpus.ingest import ingest_books
+    from maayan.corpus.sefaria import SefariaClient
+    from maayan.corpus.store import ChunkStore
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        client = SefariaClient(
+            http,
+            SystemClock(),
+            base_url=settings.sefaria_base_url,
+            rate_limit_seconds=settings.sefaria_rate_limit_seconds,
+        )
+        with ChunkStore(settings.db_path) as store:
+            return await ingest_books(
+                refs, client=client, store=store, langs=langs, max_chapters=limit
+            )
+
+
+# Subcommands (index, search, ask, annotate, ...) are registered as each build
+# prompt lands.
 
 
 if __name__ == "__main__":

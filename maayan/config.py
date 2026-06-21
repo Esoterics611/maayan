@@ -73,8 +73,15 @@ class Settings(BaseSettings):
     )
 
     # ---- Corpus -------------------------------------------------------------
-    # Config-driven list of works to ingest from Sefaria.
-    books: list[str] = Field(default=["Tanya", "Likutei Torah", "Torah Or"])
+    # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
+    # (the node ref above the chapter level) that the client enumerates chapter
+    # by chapter. Initial focus: Likutei Amarim (Tanya, Part I) — the core text.
+    # Add e.g. "Likutei Torah", "Torah Or" later; complex texts need their full
+    # node ref (find it via `GET /api/shape/<title>`).
+    books: list[str] = Field(default=["Tanya, Part I; Likkutei Amarim"])
+    ingest_langs: list[str] = Field(
+        default=["he", "en"], description="Which languages to ingest when available."
+    )
     sefaria_base_url: str = Field(default="https://www.sefaria.org/api")
     sefaria_rate_limit_seconds: float = Field(
         default=0.5, description="Min delay between Sefaria requests (via injected Clock)."
