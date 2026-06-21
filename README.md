@@ -44,7 +44,7 @@ Built prompt-by-prompt — see the task list / `docs/BUILD_PLAN.md`:
 
 - [x] **Prompt 0** — Bootstrap, house rules, config, Docker, CI scaffolding
 - [x] **Prompt 1** — Sefaria ingestion (Likutei Amarim / Tanya focus)
-- [ ] Prompt 2 — Embedding + Qdrant indexing
+- [x] **Prompt 2** — Embedding (bge-m3, dense+sparse) + Qdrant indexing
 - [ ] Prompt 3 — Hybrid retrieval (+ optional rerank)
 - [ ] Prompt 4 — RAG generation via OpenRouter (grounded, cited, default-deny)
 - [ ] Prompt 5 — Expert capture loop

@@ -97,8 +97,55 @@ async def _run_ingest(
             )
 
 
-# Subcommands (index, search, ask, annotate, ...) are registered as each build
-# prompt lands.
+@app.command()
+def index(
+    rebuild: bool = typer.Option(
+        False, "--rebuild", help="Drop the collection and re-embed everything."
+    ),
+) -> None:
+    """Embed stored chunks and upsert them into Qdrant (hybrid dense + sparse)."""
+    from maayan.corpus.store import ChunkStore
+    from maayan.embed.factory import build_embedder
+    from maayan.index.pipeline import index_chunks
+    from maayan.index.qdrant import QdrantIndex, build_qdrant_client
+
+    settings = get_settings()
+    typer.echo(f"Embedder: {settings.embed_backend} ({settings.embed_model})")
+    embedder = build_embedder(settings)
+    client = build_qdrant_client(settings)
+    qindex = QdrantIndex(client, settings.collection_name, embedder.dim)
+
+    with ChunkStore(settings.db_path) as store:
+        pending = store.count(only_unindexed=True)
+        typer.echo(f"Chunks to index: {'all' if rebuild else pending}")
+        result = index_chunks(
+            store=store,
+            embedder=embedder,
+            index=qindex,
+            batch_size=settings.embed_batch_size,
+            rebuild=rebuild,
+        )
+
+    typer.echo(
+        f"\nEmbedded {result.embedded} chunks → collection "
+        f"'{settings.collection_name}' now has {result.total_points} points."
+    )
+
+    # Show a sample payload.
+    with ChunkStore(settings.db_path) as store:
+        sample = store.get_chunks(limit=1)
+    if sample:
+        payload = qindex.retrieve(sample[0].id)
+        if payload:
+            ref = payload.get("ref")
+            text = str(payload.get("text", ""))[:80]
+            typer.echo(f"\nSample payload @ {ref}:")
+            typer.echo(f"  lang={payload.get('lang')} source={payload.get('source')}")
+            typer.echo(f"  section_path={payload.get('section_path')}")
+            typer.echo(f"  text={text}…")
+
+
+# Subcommands (search, ask, annotate, ...) are registered as each build prompt lands.
 
 
 if __name__ == "__main__":

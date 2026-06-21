@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     collection_name: str = Field(default="maayan")
 
     # ---- Embeddings (local) -------------------------------------------------
+    embed_backend: str = Field(
+        default="bgem3",
+        description='Embedder implementation: "bgem3" (real) | "hashing" (dev/test, no GPU).',
+    )
     embed_model: str = Field(default="BAAI/bge-m3")
     embed_dim: int = Field(default=1024, description="Dense vector dim for bge-m3.")
     embed_batch_size: int = Field(default=16)
