@@ -175,15 +175,22 @@ def ask(
     book: str = typer.Option(None, "--book", help="Restrict to a book."),
 ) -> None:
     """Answer grounded ONLY in retrieved sources, with citations (refuses if unsupported)."""
+    from maayan.capture.factory import build_capture_service
+    from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
     from maayan.generate.rag import RAGService
     from maayan.retrieve.factory import build_retriever
 
     settings = get_settings()
-    retriever = build_retriever(settings)
+    embedder = build_embedder(settings)  # built once, shared with capture
+    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
     rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
     answer = rag.ask(question, k=k, book=book)
+
+    # Record the session so an expert can annotate it later.
+    capture = build_capture_service(settings, embedder=embedder)
+    session = capture.start_session(answer)
 
     if not answer.grounded:
         typer.echo(f"\n[refused] {answer.text}")
@@ -191,6 +198,7 @@ def ask(
             typer.echo("\n(Closest, but below the relevance threshold:)")
             for s in answer.sources[:3]:
                 typer.echo(f"  - {s.ref}")
+        typer.echo(f"\nSession: {session.id}")
         return
 
     typer.echo(f"\n{answer.text}\n")
@@ -201,9 +209,60 @@ def ask(
         typer.echo(f"  [{mark}] {s.ref}")
     if answer.cited_refs:
         typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
+    typer.echo(f"\nSession: {session.id}")
+    typer.echo("Annotate it:  maayan annotate --session "
+               f"{session.id} --kind connection --body '...' --refs '...'")
 
 
-# Subcommands (annotate, ...) are registered as each build prompt lands.
+@app.command()
+def annotate(
+    session: str = typer.Option(..., "--session", help="Session id (printed by `ask`)."),
+    body: str = typer.Option(..., "--body", help="The expert's note."),
+    kind: str = typer.Option(
+        "connection", "--kind", help="correction|connection|addition|objection"
+    ),
+    author: str = typer.Option("expert", "--author", help="Expert name/id."),
+    refs: str = typer.Option("", "--refs", help="Comma-separated source refs to link."),
+    move: str = typer.Option(None, "--move", help="Free move tag, e.g. 'pasuk->concept'."),
+) -> None:
+    """Record an expert annotation and index it as retrievable expert knowledge."""
+    from maayan.capture.factory import build_capture_service
+
+    settings = get_settings()
+    capture = build_capture_service(settings)
+    linked = [r.strip() for r in refs.split(",") if r.strip()]
+    ann = capture.add_annotation(
+        session, author=author, kind=kind, body=body, linked_refs=linked, move=move
+    )
+    typer.echo(f"Recorded annotation {ann.id} ({ann.kind}) by {ann.author}.")
+    typer.echo("Indexed as an expert chunk — it will now surface in retrieval.")
+    if linked:
+        typer.echo(f"Linked: {', '.join(linked)}")
+
+
+@app.command()
+def session(session_id: str = typer.Argument(..., help="Session id to display.")) -> None:
+    """Show a recorded session and its expert annotations."""
+    from maayan.capture.store import CaptureStore
+
+    settings = get_settings()
+    store = CaptureStore(settings.db_path)
+    s = store.get_session(session_id)
+    if s is None:
+        typer.echo("Session not found.")
+        return
+    typer.echo(f"Q: {s.question}")
+    typer.echo(f"A: {s.answer_text[:300]}")
+    typer.echo(f"Retrieved: {', '.join(s.retrieved_refs)}")
+    annotations = store.get_annotations(session_id)
+    typer.echo(f"\nAnnotations ({len(annotations)}):")
+    for a in annotations:
+        typer.echo(f"  - [{a.kind}] by {a.author}: {a.body[:120]}")
+        if a.linked_refs:
+            typer.echo(f"      links: {', '.join(a.linked_refs)}  move: {a.move}")
+
+
+# All CLI subcommands registered. UI (`maayan ui`) lands in Prompt 6.
 
 
 if __name__ == "__main__":

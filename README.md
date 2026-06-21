@@ -47,7 +47,7 @@ Built prompt-by-prompt — see the task list / `docs/BUILD_PLAN.md`:
 - [x] **Prompt 2** — Embedding (bge-m3, dense+sparse) + Qdrant indexing
 - [x] **Prompt 3** — Hybrid retrieval (RRF) + optional rerank + filters
 - [x] **Prompt 4** — RAG via OpenRouter (grounded, cited, default-deny in code)
-- [ ] Prompt 5 — Expert capture loop
+- [x] **Prompt 5** — Expert capture loop (annotations → indexed expert chunks)
 - [ ] Prompt 6 — Local chat + capture UI
 - [ ] Prompt 7 — Eval harness
 - [ ] Prompt 8 — Local generation via Ollama
