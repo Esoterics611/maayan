@@ -21,3 +21,15 @@ class SearchResult(BaseModel):
         """First line of the text, trimmed — handy for CLI output."""
         line = self.text.strip().splitlines()[0] if self.text.strip() else ""
         return line[:width]
+
+
+class RetrievalResult(BaseModel):
+    """Ranked results plus an absolute relevance score used for the answer/refuse gate.
+
+    `relevance` is the top dense-cosine similarity (0..1-ish), an *absolute* measure —
+    unlike the RRF fusion `score` on each result, which only reflects rank position
+    and so cannot tell "relevant" from "best of irrelevant".
+    """
+
+    results: list[SearchResult]
+    relevance: float

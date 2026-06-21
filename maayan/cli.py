@@ -168,7 +168,42 @@ def search(
         typer.echo(f"      {r.first_line(100)}")
 
 
-# Subcommands (ask, annotate, ...) are registered as each build prompt lands.
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Your question (Hebrew or English)."),
+    k: int = typer.Option(None, "--k", help="How many sources to ground on."),
+    book: str = typer.Option(None, "--book", help="Restrict to a book."),
+) -> None:
+    """Answer grounded ONLY in retrieved sources, with citations (refuses if unsupported)."""
+    from maayan.generate.factory import build_generation_backend
+    from maayan.generate.rag import RAGService
+    from maayan.retrieve.factory import build_retriever
+
+    settings = get_settings()
+    retriever = build_retriever(settings)
+    backend = build_generation_backend(settings)
+    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    answer = rag.ask(question, k=k, book=book)
+
+    if not answer.grounded:
+        typer.echo(f"\n[refused] {answer.text}")
+        if answer.sources:
+            typer.echo("\n(Closest, but below the relevance threshold:)")
+            for s in answer.sources[:3]:
+                typer.echo(f"  - {s.ref}")
+        return
+
+    typer.echo(f"\n{answer.text}\n")
+    typer.echo("Sources:")
+    cited = set(answer.cited_refs)
+    for s in answer.sources:
+        mark = "*" if s.ref in cited else " "
+        typer.echo(f"  [{mark}] {s.ref}")
+    if answer.cited_refs:
+        typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
+
+
+# Subcommands (annotate, ...) are registered as each build prompt lands.
 
 
 if __name__ == "__main__":

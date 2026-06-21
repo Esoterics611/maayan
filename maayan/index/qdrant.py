@@ -124,6 +124,24 @@ class QdrantIndex:
         )
         return response.points
 
+    def query_dense(
+        self,
+        dense: list[float],
+        *,
+        limit: int = 1,
+        query_filter: models.Filter | None = None,
+    ) -> list[models.ScoredPoint]:
+        """Dense-only search → cosine similarity scores (absolute relevance signal)."""
+        response = self._client.query_points(
+            collection_name=self._collection,
+            query=dense,
+            using=DENSE_VECTOR,
+            limit=limit,
+            query_filter=query_filter,
+            with_payload=True,
+        )
+        return response.points
+
     def count(self) -> int:
         return self._client.count(self._collection).count
 

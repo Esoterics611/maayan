@@ -70,8 +70,11 @@ class Settings(BaseSettings):
     # ---- Retrieval ----------------------------------------------------------
     top_k: int = Field(default=8, description="Candidates fused/returned by hybrid search.")
     score_threshold: float = Field(
-        default=0.3,
-        description="Min top score for RAG to answer; below this it refuses (default-deny).",
+        default=0.4,
+        description=(
+            "Min top *dense-cosine* relevance for RAG to answer; below this it refuses "
+            "(default-deny). Absolute measure, not the RRF rank score. Tune per corpus."
+        ),
     )
     expert_boost: float = Field(
         default=1.0,

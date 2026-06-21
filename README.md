@@ -46,7 +46,7 @@ Built prompt-by-prompt — see the task list / `docs/BUILD_PLAN.md`:
 - [x] **Prompt 1** — Sefaria ingestion (Likutei Amarim / Tanya focus)
 - [x] **Prompt 2** — Embedding (bge-m3, dense+sparse) + Qdrant indexing
 - [x] **Prompt 3** — Hybrid retrieval (RRF) + optional rerank + filters
-- [ ] Prompt 4 — RAG generation via OpenRouter (grounded, cited, default-deny)
+- [x] **Prompt 4** — RAG via OpenRouter (grounded, cited, default-deny in code)
 - [ ] Prompt 5 — Expert capture loop
 - [ ] Prompt 6 — Local chat + capture UI
 - [ ] Prompt 7 — Eval harness

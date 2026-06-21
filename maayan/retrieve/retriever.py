@@ -8,13 +8,29 @@ injected (index, embedder, optional reranker), per the DI house rule.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from qdrant_client import models
 
 from maayan.embed.base import Embedder
 from maayan.index.qdrant import QdrantIndex
-from maayan.retrieve.models import SearchResult
+from maayan.retrieve.models import RetrievalResult, SearchResult
 from maayan.retrieve.reranker import Reranker
+
+
+@runtime_checkable
+class Retrieving(Protocol):
+    """Minimal retrieval interface the RAG service depends on (DI seam)."""
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        k: int | None = None,
+        book: str | None = None,
+        source: str | None = None,
+    ) -> RetrievalResult:
+        ...
 
 
 def _build_filter(
@@ -50,7 +66,7 @@ class Retriever:
         self._rerank_candidates = rerank_candidates
         self._expert_boost = expert_boost
 
-    def search(
+    def retrieve(
         self,
         query: str,
         *,
@@ -58,7 +74,8 @@ class Retriever:
         book: str | None = None,
         source: str | None = None,
         langs: Sequence[str] | None = None,
-    ) -> list[SearchResult]:
+    ) -> RetrievalResult:
+        """Hybrid ranking + an absolute relevance score (top dense cosine) for gating."""
         final_k = k or self._top_k
         # Fetch a larger candidate pool when a reranker will reorder it.
         pool = max(final_k, self._rerank_candidates) if self._reranker else final_k
@@ -76,7 +93,23 @@ class Retriever:
         else:
             results.sort(key=lambda r: r.score, reverse=True)
 
-        return results[:final_k]
+        # Absolute relevance gate: top dense cosine similarity (reuses the same vector).
+        dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
+        relevance = float(dense_top[0].score) if dense_top else 0.0
+
+        return RetrievalResult(results=results[:final_k], relevance=relevance)
+
+    def search(
+        self,
+        query: str,
+        *,
+        k: int | None = None,
+        book: str | None = None,
+        source: str | None = None,
+        langs: Sequence[str] | None = None,
+    ) -> list[SearchResult]:
+        """Convenience wrapper returning just the ranked results (used by the CLI)."""
+        return self.retrieve(query, k=k, book=book, source=source, langs=langs).results
 
     # -- internals -----------------------------------------------------------
     @staticmethod
