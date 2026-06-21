@@ -89,13 +89,18 @@ class Retriever:
         results = self._apply_expert_boost(results)
 
         if self._reranker is not None and results:
-            results = self._rerank(query, results)
+            # The cross-encoder score is a far more discriminative relevance signal
+            # than bi-encoder cosine, so use it for the gate too (computed for free).
+            raw_scores = self._reranker.rerank(query, [r.text for r in results])
+            for r, s in zip(results, raw_scores, strict=True):
+                r.score = s * (self._expert_boost if r.source == "expert" else 1.0)
+            results.sort(key=lambda r: r.score, reverse=True)
+            relevance = max(raw_scores) if raw_scores else 0.0
         else:
             results.sort(key=lambda r: r.score, reverse=True)
-
-        # Absolute relevance gate: top dense cosine similarity (reuses the same vector).
-        dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
-        relevance = float(dense_top[0].score) if dense_top else 0.0
+            # Absolute relevance gate: top dense cosine similarity (reuses the vector).
+            dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
+            relevance = float(dense_top[0].score) if dense_top else 0.0
 
         return RetrievalResult(results=results[:final_k], relevance=relevance)
 
@@ -130,13 +135,4 @@ class Retriever:
         for r in results:
             if r.source == "expert":
                 r.score *= self._expert_boost
-        return results
-
-    def _rerank(self, query: str, results: list[SearchResult]) -> list[SearchResult]:
-        assert self._reranker is not None
-        scores = self._reranker.rerank(query, [r.text for r in results])
-        for r, s in zip(results, scores, strict=True):
-            # Expert boost still applies multiplicatively on top of rerank score.
-            r.score = s * (self._expert_boost if r.source == "expert" else 1.0)
-        results.sort(key=lambda r: r.score, reverse=True)
         return results
