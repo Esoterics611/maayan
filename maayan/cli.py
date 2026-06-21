@@ -262,7 +262,31 @@ def session(session_id: str = typer.Argument(..., help="Session id to display.")
             typer.echo(f"      links: {', '.join(a.linked_refs)}  move: {a.move}")
 
 
-# All CLI subcommands registered. UI (`maayan ui`) lands in Prompt 6.
+@app.command()
+def ui() -> None:
+    """Run the local chat + capture web UI (FastAPI)."""
+    import uvicorn
+
+    from maayan.capture.factory import build_capture_service
+    from maayan.embed.factory import build_embedder
+    from maayan.generate.factory import build_generation_backend
+    from maayan.generate.rag import RAGService
+    from maayan.retrieve.factory import build_retriever
+    from maayan.ui.app import create_app
+
+    settings = get_settings()
+    embedder = build_embedder(settings)
+    retriever = build_retriever(settings, embedder=embedder)
+    backend = build_generation_backend(settings)
+    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    capture = build_capture_service(settings, embedder=embedder)
+
+    application = create_app(rag, capture)
+    typer.echo(f"maayan UI → http://{settings.ui_host}:{settings.ui_port}")
+    uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)
+
+
+# All CLI subcommands registered.
 
 
 if __name__ == "__main__":

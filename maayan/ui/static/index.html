@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>maayan · מעיין</title>
+  <style>
+    :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
+            --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b; --expert:#2e6b4f; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+    header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--panel); }
+    h1 { margin:0; font-size:20px; font-weight:650; }
+    h1 small { color:var(--muted); font-weight:400; margin-left:8px; }
+    main { max-width:880px; margin:0 auto; padding:24px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+             padding:18px; margin-bottom:18px; }
+    textarea, input, select { font:inherit; width:100%; padding:10px 12px;
+             border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; }
+    .row { display:flex; gap:10px; }
+    .row > * { flex:1; }
+    button { font:inherit; cursor:pointer; padding:10px 18px; border:none; border-radius:8px;
+             background:var(--accent); color:#fff; font-weight:600; }
+    button.secondary { background:#efe9dd; color:var(--ink); }
+    button:disabled { opacity:.5; cursor:default; }
+    .hint { color:var(--muted); font-size:13px; }
+    .answer { white-space:pre-wrap; font-size:17px; }
+    .refused { color:#9a3b2f; }
+    .src { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:8px 0;
+           display:flex; gap:10px; align-items:flex-start; }
+    .src.expert { border-color:var(--expert); }
+    .src .meta { font-size:12px; color:var(--muted); }
+    .src .ref { font-weight:600; }
+    .src .ref .cited { color:var(--cited); }
+    .src .ref .badge { color:var(--expert); font-size:11px; border:1px solid var(--expert);
+            border-radius:6px; padding:0 5px; margin-left:6px; }
+    .src .body { font-size:14px; }
+    [dir=rtl] { text-align:right; }
+    .hidden { display:none; }
+    .ok { color:var(--expert); }
+    label.field { display:block; margin:10px 0 4px; font-size:13px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header><h1>מעיין · maayan <small>esoteric Torah RAG — grounded, cited, expert-in-the-loop</small></h1></header>
+  <main>
+    <div class="panel">
+      <div class="row">
+        <input id="q" placeholder="Ask in Hebrew or English…  e.g. מהי נפש הבהמית" dir="auto" />
+        <button id="askBtn" style="flex:0 0 auto">Ask</button>
+      </div>
+      <div class="hint">Answers come only from retrieved sources, with citations. If nothing supports an answer, it refuses.</div>
+    </div>
+
+    <div id="answerPanel" class="panel hidden">
+      <div id="answer" class="answer" dir="auto"></div>
+      <div id="sources" style="margin-top:14px"></div>
+    </div>
+
+    <div id="annotatePanel" class="panel hidden">
+      <strong>Add expert knowledge</strong>
+      <div class="hint">Tick sources above to link them. Your note is embedded and indexed — it will surface in future searches.</div>
+      <div class="row">
+        <div><label class="field">Author</label><input id="author" value="expert" /></div>
+        <div><label class="field">Kind</label><select id="kind"></select></div>
+        <div><label class="field">Move tag (optional)</label><input id="move" placeholder="pasuk-&gt;concept" /></div>
+      </div>
+      <label class="field">Note</label>
+      <textarea id="body" rows="3" dir="auto" placeholder="Correction / connection / addition / objection…"></textarea>
+      <div style="margin-top:10px; display:flex; gap:10px; align-items:center">
+        <button id="annBtn">Save annotation</button>
+        <span id="annStatus" class="ok"></span>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let session = null, sources = [];
+
+    async function loadKinds() {
+      try {
+        const kinds = await (await fetch('/kinds')).json();
+        $('kind').innerHTML = kinds.map(k => `<option value="${k}">${k}</option>`).join('');
+      } catch (e) { $('kind').innerHTML = '<option>connection</option>'; }
+    }
+
+    function renderSources() {
+      $('sources').innerHTML = sources.map((s, i) => `
+        <div class="src ${s.source === 'expert' ? 'expert' : ''}">
+          <input type="checkbox" data-ref="${encodeURIComponent(s.ref)}" title="link this source" />
+          <div style="flex:1">
+            <div class="ref"><span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${escapeHtml(s.ref)}</span>${s.source === 'expert' ? '<span class="badge">expert</span>' : ''}</div>
+            <div class="meta">${s.lang} · ${s.source} · score ${s.score.toFixed(3)}</div>
+            <div class="body" dir="auto">${escapeHtml(s.text)}</div>
+          </div>
+        </div>`).join('');
+    }
+
+    function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; }
+
+    async function ask() {
+      const question = $('q').value.trim();
+      if (!question) return;
+      $('askBtn').disabled = true; $('askBtn').textContent = '…';
+      try {
+        const r = await fetch('/ask', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ question }) });
+        const data = await r.json();
+        session = data.session_id; sources = data.sources;
+        $('answerPanel').classList.remove('hidden');
+        $('answer').className = 'answer' + (data.grounded ? '' : ' refused');
+        $('answer').textContent = data.answer;
+        renderSources();
+        $('annotatePanel').classList.remove('hidden');
+        $('annStatus').textContent = '';
+      } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'Ask'; }
+    }
+
+    async function annotate() {
+      if (!session) return;
+      const body = $('body').value.trim();
+      if (!body) { $('annStatus').textContent = 'Write a note first.'; return; }
+      const linked_refs = [...document.querySelectorAll('#sources input:checked')]
+        .map(c => decodeURIComponent(c.dataset.ref));
+      $('annBtn').disabled = true;
+      try {
+        const r = await fetch('/annotate', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ session_id: session, author: $('author').value || 'expert',
+            kind: $('kind').value, body, move: $('move').value || null, linked_refs }) });
+        if (r.ok) { const d = await r.json();
+          $('annStatus').textContent = `Saved & indexed (${d.kind}). It will now surface in retrieval.`;
+          $('body').value = '';
+        } else { const e = await r.json(); $('annStatus').textContent = 'Error: ' + (e.detail || r.status); }
+      } finally { $('annBtn').disabled = false; }
+    }
+
+    $('askBtn').onclick = ask;
+    $('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+    $('annBtn').onclick = annotate;
+    loadKinds();
+  </script>
+</body>
+</html>

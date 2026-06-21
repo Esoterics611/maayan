@@ -37,7 +37,9 @@ class CaptureStore:
     def __init__(self, db_path: str) -> None:
         if db_path not in (":memory:", "") and "mode=memory" not in db_path:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
+        # check_same_thread=False: shared safely across FastAPI worker threads
+        # (Python 3.12 sqlite3 is serialized). See corpus/store.py.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

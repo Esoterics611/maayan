@@ -42,7 +42,10 @@ class ChunkStore:
         self._db_path = db_path
         if db_path not in (":memory:", "") and "mode=memory" not in db_path:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
+        # check_same_thread=False: FastAPI runs sync handlers in worker threads;
+        # Python 3.12's sqlite3 is serialized (threadsafety=3), so sharing the
+        # connection across threads is safe.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

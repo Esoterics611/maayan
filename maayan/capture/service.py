@@ -41,6 +41,16 @@ class CaptureService:
         self._clock = clock
         self._allowed_kinds = tuple(allowed_kinds)
 
+    @property
+    def allowed_kinds(self) -> tuple[str, ...]:
+        return self._allowed_kinds
+
+    def get_session(self, session_id: str) -> Session | None:
+        return self._capture.get_session(session_id)
+
+    def get_annotations(self, session_id: str) -> list[Annotation]:
+        return self._capture.get_annotations(session_id)
+
     def start_session(self, answer: Answer) -> Session:
         """Record a session from a RAG Answer and return it (with its new id)."""
         session = Session(
