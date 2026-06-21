@@ -145,7 +145,30 @@ def index(
             typer.echo(f"  text={text}…")
 
 
-# Subcommands (search, ask, annotate, ...) are registered as each build prompt lands.
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="Query text (Hebrew or English)."),
+    k: int = typer.Option(None, "--k", help="How many results to return."),
+    book: str = typer.Option(None, "--book", help="Restrict to a book."),
+    source: str = typer.Option(None, "--source", help="Restrict to a source (sefaria/expert)."),
+) -> None:
+    """Hybrid (dense + sparse) retrieval over the indexed corpus."""
+    from maayan.retrieve.factory import build_retriever
+
+    settings = get_settings()
+    retriever = build_retriever(settings)
+    results = retriever.search(query, k=k, book=book, source=source)
+
+    if not results:
+        typer.echo("No results.")
+        return
+    typer.echo(f'Top {len(results)} for: "{query}"\n')
+    for i, r in enumerate(results, 1):
+        typer.echo(f"{i:>2}. [{r.score:.4f}] {r.ref}  ({r.lang}/{r.source})")
+        typer.echo(f"      {r.first_line(100)}")
+
+
+# Subcommands (ask, annotate, ...) are registered as each build prompt lands.
 
 
 if __name__ == "__main__":

@@ -95,6 +95,35 @@ class QdrantIndex:
         self._client.upsert(collection_name=self._collection, points=points)
         return len(points)
 
+    def query_hybrid(
+        self,
+        dense: list[float],
+        sparse_indices: list[int],
+        sparse_values: list[float],
+        *,
+        limit: int,
+        query_filter: models.Filter | None = None,
+    ) -> list[models.ScoredPoint]:
+        """Hybrid search: RRF fusion over the dense + sparse vectors (Query API)."""
+        response = self._client.query_points(
+            collection_name=self._collection,
+            prefetch=[
+                models.Prefetch(
+                    query=dense, using=DENSE_VECTOR, limit=limit, filter=query_filter
+                ),
+                models.Prefetch(
+                    query=models.SparseVector(indices=sparse_indices, values=sparse_values),
+                    using=SPARSE_VECTOR,
+                    limit=limit,
+                    filter=query_filter,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=limit,
+            with_payload=True,
+        )
+        return response.points
+
     def count(self) -> int:
         return self._client.count(self._collection).count
 

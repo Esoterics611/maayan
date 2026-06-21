@@ -63,7 +63,9 @@ class Settings(BaseSettings):
     # ---- Reranker (local, optional) -----------------------------------------
     rerank_enabled: bool = Field(default=False)
     rerank_model: str = Field(default="BAAI/bge-reranker-v2-m3")
-    rerank_top_n: int = Field(default=8)
+    rerank_candidates: int = Field(
+        default=30, description="Fused candidates fetched for the reranker to reorder."
+    )
 
     # ---- Retrieval ----------------------------------------------------------
     top_k: int = Field(default=8, description="Candidates fused/returned by hybrid search.")
