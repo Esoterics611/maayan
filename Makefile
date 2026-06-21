@@ -1,0 +1,61 @@
+.PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui sync
+
+# Allow `make search Q='...'` / `make ask Q='...'`
+Q ?=
+
+help:
+	@echo "maayan — make targets:"
+	@echo "  sync       Install deps (uv sync). Use 'uv sync --extra ml' for embeddings."
+	@echo "  up/down    Start/stop local Qdrant (docker compose)."
+	@echo "  logs       Tail Qdrant logs."
+	@echo "  test       Run pytest (network/models mocked)."
+	@echo "  typecheck  Run mypy --strict."
+	@echo "  lint/fmt   Run ruff check / ruff format."
+	@echo "  ingest     Pull + chunk corpus into SQLite.        (Prompt 1)"
+	@echo "  index      Embed + upsert chunks into Qdrant.      (Prompt 2)"
+	@echo "  search     Hybrid retrieval. Usage: make search Q='...'   (Prompt 3)"
+	@echo "  ask        Grounded, cited answer. Usage: make ask Q='...' (Prompt 4)"
+	@echo "  annotate   Add an expert annotation.               (Prompt 5)"
+	@echo "  ui         Run the local FastAPI chat + capture UI. (Prompt 6)"
+
+sync:
+	uv sync
+
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f qdrant
+
+test:
+	uv run pytest
+
+typecheck:
+	uv run mypy maayan
+
+lint:
+	uv run ruff check maayan tests
+
+fmt:
+	uv run ruff format maayan tests
+
+ingest:
+	uv run maayan ingest --all
+
+index:
+	uv run maayan index
+
+search:
+	uv run maayan search "$(Q)"
+
+ask:
+	uv run maayan ask "$(Q)"
+
+annotate:
+	uv run maayan annotate $(ARGS)
+
+ui:
+	uv run maayan ui
