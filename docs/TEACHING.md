@@ -140,14 +140,19 @@ small, independently testable pieces:
   matching is **prefix-aware**, so a chapter-level gold ref
   (`"...Likkutei Amarim 1"`) matches any segment retrieved within it (`"...1:13"`).
   That lets the gold set be written at the granularity a scholar actually knows.
-- **`goldset.py`** — a `GoldExample` model and a YAML/JSON loader. The seed set
-  (`eval/goldset.yaml`) is ~15 hand-curated questions over *Likutei Amarim*, in
-  both Hebrew and English, and is *meant to be edited* — better gold = more
-  trustworthy numbers.
-- **`harness.py`** — `run_eval` aggregates metrics over the gold set;
-  `run_comparison` evaluates several `VariantConfig`s (hybrid vs dense-only,
-  top-k, **swappable embedding model**) on the same questions and prints a
-  side-by-side table.
+- **`goldset.py`** — a `GoldExample` model and a YAML/JSON loader. The set
+  (`eval/goldset.yaml`) is now **52 hand-curated cases over all 53 chapters** of
+  *Likutei Amarim*, He + En, and is *meant to be edited*. Two kinds:
+  **positive** cases carry the chapter(s) that should rank; **negative** cases set
+  `should_refuse: true` — the right behavior is for the **default-deny gate to
+  refuse** (off-corpus questions: other texts, halacha, anachronisms). Negatives
+  measure the gate, not ranking, so they're excluded from hit/recall/MRR.
+- **`harness.py`** — `run_eval` aggregates ranking metrics over the *positives*
+  and, using the same `score_threshold` the RAG gate uses, reports two gate rates:
+  **answer-rate** (positives it would answer — over-refusal hurts this) and
+  **refusal-rate** (negatives it would refuse). `run_comparison` evaluates several
+  `VariantConfig`s (hybrid vs dense-only, top-k, **swappable embedding model**) on
+  the same questions and prints them side by side, gate rates included.
 
 Run it:
 
@@ -164,6 +169,12 @@ harness is the thing you run before *and after* every retrieval change so a
 ---
 
 ## 3. What the numbers actually say (measured, not claimed)
+
+> The tables below were measured on the **original 15-question seed**. The gold set
+> has since grown to **52 cases (42 positive + 10 negative)** spanning all 53
+> chapters (P2, below), and `make eval` now also prints the default-deny gate rates.
+> Re-run `make eval` for current figures; the seed numbers are kept here because the
+> *lesson* they teach (next page) doesn't change.
 
 Run on the live index (1,396 chunks of *Likutei Amarim*, bge-m3), 15-question
 seed gold set:
@@ -236,17 +247,29 @@ decision. How it actually went, because the method matters more than the result:
   guarantee it elsewhere (fp16/CUDA atomics). The cheap insurance — a CI smoke run
   that asserts `make eval` is stable across two invocations — is folded into P5.
 
-### P2 — Make the gold set worth trusting
-- Grow it from ~15 to ~50+ questions, spanning more of the corpus (not just the
-  early chapters), with a few **negative** questions whose correct behavior is a
-  *refusal* (so default-deny gets measured too).
-- Have the expert (the actual scholar) review/author the gold refs. Right now they
-  are reasonable but not authoritative; the file header already says so.
+### P2 — Make the gold set worth trusting (DONE — and it made the harness richer)
+- **Grown ~15 → 52 cases over all 53 chapters**, He + En, weighted toward the
+  previously-uncovered later chapters (33–53).
+- **Negatives added.** 10 cases marked `should_refuse: true` — off-corpus questions
+  (other texts, halacha, anachronisms, and a deliberate near-miss: Tanya Part III,
+  which isn't indexed). A negative question retrieving nothing relevant is a
+  *success*, so feeding negatives into hit/recall/MRR would be wrong — they'd score
+  0 and tank the averages. So the harness now **splits positives from negatives**:
+  ranking metrics over positives only, and a **default-deny gate** measured against
+  the same `score_threshold` the live system uses (answer-rate over positives,
+  refusal-rate over negatives). *Lesson: a new kind of test case can demand a new
+  metric — don't shoehorn it into the old one.*
+- **CI-guarded.** `test_shipped_goldset_is_well_formed` loads the real YAML in CI
+  (no model needed), so a typo in the gold set can't ship green even though the
+  other unit tests use synthetic gold.
+- **Still open:** the refs are reasonable but not yet scholar-authoritative — the
+  one step here that needs the actual expert, not the engineer.
 
 ### P3 — Measure the things the harness can't yet see
 - **Answer-grounding metrics**, not just retrieval: of the refs the model cited,
-  how many were actually retrieved? (catches hallucinated citations). And a
-  refusal-precision/recall pass over the negative questions.
+  how many were actually retrieved? (catches hallucinated citations). *(The refusal
+  side of this — a precision/recall view of the gate — landed early with P2's
+  negatives; grounding of cited refs is the remaining piece.)*
 - **Latency + token cost** per question, logged alongside quality, so a tradeoff
   table ("dense-only is faster *and* better here") is one command away.
 

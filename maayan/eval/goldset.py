@@ -10,8 +10,17 @@ from pydantic import BaseModel, Field
 
 
 class GoldExample(BaseModel):
+    """One eval case.
+
+    Positive cases carry the chapter(s) that should be retrieved (`expected_refs`).
+    Negative cases set `should_refuse: true` and leave `expected_refs` empty — the
+    correct behavior is for the default-deny gate to refuse (relevance below the
+    threshold), so they measure the gate rather than ranking.
+    """
+
     question: str
     expected_refs: list[str] = Field(default_factory=list)
+    should_refuse: bool = False
     note: str | None = None
 
 

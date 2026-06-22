@@ -152,9 +152,10 @@ the annotation lands in **SQLite + Qdrant** and surfaces in future retrieval.
 - **Capture** (`maayan/capture/`): sessions + annotations → expert chunks indexed
   into the **same** collection. This is the differentiator.
 - **UI** (`maayan/ui/`): thin FastAPI layer over the RAG + capture services.
-- **Eval** (`maayan/eval/`): a YAML/JSON gold set + pure metric functions
-  (hit@k / recall@k / MRR, prefix-aware ref matching) + a harness that compares
-  retrieval variants (hybrid vs dense-only, top-k, swappable embedding model) so
+- **Eval** (`maayan/eval/`): a YAML/JSON gold set (positive cases + `should_refuse`
+  negatives) + pure metric functions (hit@k / recall@k / MRR, prefix-aware ref
+  matching) + a harness that compares retrieval variants (hybrid vs dense-only,
+  top-k, swappable embedding model) and reports default-deny gate rates — so
   model/chunking choices are justified with numbers, not vibes.
 
 House rules (enforced): typed + `mypy --strict`, dependency injection everywhere,

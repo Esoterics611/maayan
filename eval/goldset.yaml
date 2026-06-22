@@ -1,20 +1,19 @@
-# Retrieval gold set for maayan — Likutei Amarim (Tanya, Part I).
-# Each example: a question + the chapter(s) that should be retrieved.
-# Refs are chapter-level; metrics match any segment within (e.g. "...1" matches "...1:13").
-# EDIT FREELY: better gold = more trustworthy numbers. Hand-curated, not authoritative.
+# Retrieval gold set for maayan — Likutei Amarim (Tanya, Part I), all 53 chapters.
+#
+# POSITIVE cases: a question + the chapter(s) that should be retrieved. Refs are
+#   chapter-level; metrics match any segment within (e.g. "...1" matches "...1:13").
+# NEGATIVE cases: set `should_refuse: true` with empty expected_refs. The correct
+#   behavior is for the default-deny gate to REFUSE (retrieval relevance below the
+#   threshold) — these measure the gate, not ranking, and are excluded from
+#   hit@k / recall@k / MRR.
+#
+# EDIT FREELY: better gold = more trustworthy numbers. Hand-curated, not
+# authoritative. The corpus is currently only Tanya Part I (Likutei Amarim).
 examples:
+  # ---- Souls, faculties, garments (ch 1-5) --------------------------------
   - question: "מהן שתי הנפשות של האדם?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 2"]
     note: two souls — divine and animal
-
-  - question: "מהי הגדרת הבינוני?"
-    expected_refs: ["Tanya, Part I; Likkutei Amarim 12", "Tanya, Part I; Likkutei Amarim 13", "Tanya, Part I; Likkutei Amarim 14"]
-
-  - question: "מה ההבדל בין צדיק לרשע?"
-    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 10"]
-
-  - question: "מהי נפש הבהמית ומה מקורה בקליפה?"
-    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 6", "Tanya, Part I; Likkutei Amarim 7"]
 
   - question: "מהי הנפש האלוקית חלק אלוק ממעל ממש?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 2"]
@@ -25,11 +24,12 @@ examples:
   - question: "מהם שלושת הלבושים מחשבה דיבור ומעשה?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 4"]
 
-  - question: "כיצד מתמודדים עם הרהורים רעים בשעת התפילה?"
-    expected_refs: ["Tanya, Part I; Likkutei Amarim 28"]
+  - question: "כיצד השכל תופס ומקיף את ההלכה בלימוד התורה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 5"]
 
-  - question: "מהי אהבת ישראל ו'ואהבת לרעך כמוך'?"
-    expected_refs: ["Tanya, Part I; Likkutei Amarim 32"]
+  # ---- The kelipot and the animal soul (ch 6-8) ---------------------------
+  - question: "מהי נפש הבהמית ומה מקורה בקליפה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 6", "Tanya, Part I; Likkutei Amarim 7"]
 
   - question: "What are the ten crowns of impurity in the kelipah?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 6"]
@@ -37,14 +37,153 @@ examples:
   - question: "What is kelipat nogah and the permitted versus the forbidden?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 7"]
 
+  - question: "מדוע מאכלות אסורות ודברים בטלים קשים להעלאה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 8"]
+
+  # ---- Tzaddik, beinoni, rasha (ch 9-15) ----------------------------------
   - question: "How does the beinoni wage the war between his two souls?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 9", "Tanya, Part I; Likkutei Amarim 13"]
+
+  - question: "מה ההבדל בין צדיק לרשע?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 10"]
+
+  - question: "מהו רשע וטוב לו ורשע ורע לו?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 11"]
+
+  - question: "מהי הגדרת הבינוני?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 12", "Tanya, Part I; Likkutei Amarim 13", "Tanya, Part I; Likkutei Amarim 14"]
 
   - question: "מהו עובד אלוקים לעומת מי שלא עבדו?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 15"]
 
+  # ---- The accessible love and fear (ch 16-19) ----------------------------
+  - question: "כיצד אהבה ויראה שכליות הן היסוד לקיום המצוות?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 16"]
+
+  - question: "מהו 'כי קרוב אליך הדבר מאוד' בעבודת הלב?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 17"]
+
   - question: "מהי האהבה המסותרת שבלב כל יהודי?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 18", "Tanya, Part I; Likkutei Amarim 19"]
 
+  - question: "What is the parable of the candle of God (ner Havaya) and the soul?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 19"]
+
+  # ---- Divine unity and continuous creation (ch 20-25) --------------------
+  - question: "מהו 'אין עוד מלבדו' וביטול הבריאה לאלוקות?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 20"]
+
+  - question: "What does it mean that God's word continually creates the world?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 21"]
+
+  - question: "כיצד מסירות נפש גנוזה בכל מצווה ומצווה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 25"]
+
+  # ---- Joy, sadness, and crushing the sitra achra (ch 26-31) --------------
+  - question: "מדוע העצבות מעכבת את עבודת ה' וכיצד עובדים בשמחה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 26"]
+
+  - question: "Why does sadness hinder serving God, and how does one serve with joy?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 26"]
+
+  - question: "מהי 'אתכפיא סטרא אחרא' ושמחת הבינוני בעת המלחמה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 27"]
+
+  - question: "כיצד מתמודדים עם הרהורים רעים בשעת התפילה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 28"]
+
   - question: "מהי שפלות הרוח וביטול הסטרא אחרא?"
     expected_refs: ["Tanya, Part I; Likkutei Amarim 29", "Tanya, Part I; Likkutei Amarim 30"]
+
+  - question: "מהי המרירות הראויה לעומת העצבות, וכיצד הופכים אותה לשמחה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 31"]
+
+  # ---- Love of Israel, joy, and the purpose of creation (ch 32-37) --------
+  - question: "מהי אהבת ישראל ו'ואהבת לרעך כמוך'?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 32"]
+
+  - question: "כיצד מגיעים לשמחה גדולה מהתבוננות באחדות ה'?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 33"]
+
+  - question: "What is the purpose of creation — a dwelling for God in the lower realms?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 36"]
+
+  - question: "כיצד מבררים את העולם ונפש הבהמית על ידי מעשה המצוות?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 37"]
+
+  # ---- Intent in prayer and service (ch 38-42) ----------------------------
+  - question: "מדוע הכוונה בתפילה היא נשמת המצווה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 38"]
+
+  - question: "מדוע תורה ומצוות בלא כוונה אינן עולות למעלה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 40"]
+
+  - question: "How does accepting the yoke of Heaven, and awe, begin divine service?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 41"]
+
+  - question: "כיצד לכל יהודי יש דעת והכרה בה'?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 42"]
+
+  # ---- Levels of love and arousing it (ch 43-50) --------------------------
+  - question: "מהן שתי האהבות — אהבת עולם ואהבה רבה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 44"]
+
+  - question: "מהו משל 'כמים הפנים לפנים' בעבודת האהבה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 46"]
+
+  - question: "מדוע בכל יום חייב אדם לראות עצמו כאילו יצא ממצרים?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 47"]
+
+  - question: "Why must one see himself each day as if he left Egypt?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 47"]
+
+  - question: "מהי האהבה כרשפי אש שהנפש כלה אל ה'?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 50"]
+
+  # ---- The indwelling of the Shechina (ch 51-53) --------------------------
+  - question: "כיצד הנפש משמשת משל להשראת אלוקות בעולמות?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 51"]
+
+  - question: "כיצד שורה השכינה בבית המקדש ובתורה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 53"]
+
+  # ---- NEGATIVE cases: the system should REFUSE (off-corpus) --------------
+  - question: "What is the boiling point of water at sea level?"
+    should_refuse: true
+    note: physics, wholly outside the corpus
+
+  - question: "מהי בירת צרפת?"
+    should_refuse: true
+    note: geography — capital of France; nothing in Tanya supports it
+
+  - question: "How do I sort a list in Python?"
+    should_refuse: true
+    note: programming, off-domain
+
+  - question: "Who won the FIFA World Cup in 2018?"
+    should_refuse: true
+    note: sports trivia, off-domain
+
+  - question: "מהם שלושים ותשעה אבות מלאכה האסורים בשבת?"
+    should_refuse: true
+    note: halacha (39 melachot) — Jewish but not in Likutei Amarim
+
+  - question: "כמה נרות מדליקים בכל לילה של חנוכה?"
+    should_refuse: true
+    note: halacha of Chanukah candles — not a Tanya topic
+
+  - question: "What are Maimonides' thirteen principles of faith?"
+    should_refuse: true
+    note: Rambam, a different text entirely
+
+  - question: "What does the Tanya say about using a smartphone on Shabbat?"
+    should_refuse: true
+    note: anachronistic + halachic — must not be answered from Tanya
+
+  - question: "מתי נאסר ונשתחרר אדמו\"ר הזקן בי\"ט כסלו?"
+    should_refuse: true
+    note: biography/history — the imprisonment is not discussed in the text itself
+
+  - question: "What does Iggeret HaTeshuvah teach about the two levels of teshuvah?"
+    should_refuse: true
+    note: a near-miss — Tanya Part III, which is NOT in the indexed corpus
