@@ -57,9 +57,10 @@ addopts = "-q"
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-# Third-party libs without type stubs we depend on.
+# Third-party libs without type stubs, or heavy ml-extra deps not installed in the
+# light CI (torch/FlagEmbedding). CI syncs core+dev+ui, so these stay ignorable.
 [[tool.mypy.overrides]]
-module = ["FlagEmbedding.*", "qdrant_client.*"]
+module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

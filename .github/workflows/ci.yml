@@ -16,8 +16,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync (core + dev)
-        run: uv sync
+      # core + dev + the light UI extra (fastapi/uvicorn) so ui/app.py typechecks
+      # with real types and tests/test_ui.py can import. The heavy ml extra
+      # (torch/FlagEmbedding) stays out — mypy ignores it; tests mock the model.
+      - name: Sync (core + dev + ui)
+        run: uv sync --extra ui
 
       - name: Lint
         run: uv run ruff check maayan tests
