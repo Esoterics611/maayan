@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     # ---- Storage / paths ----------------------------------------------------
     db_path: str = Field(default="data/maayan.sqlite3")
 
+    # ---- Evaluation ---------------------------------------------------------
+    eval_goldset_path: str = Field(default="eval/goldset.yaml")
+    eval_ks: list[int] = Field(default=[1, 3, 5, 10])
+
     # ---- UI -----------------------------------------------------------------
     ui_host: str = Field(default="127.0.0.1")
     ui_port: int = Field(default=8000)

@@ -10,22 +10,35 @@ from maayan.retrieve.reranker import Reranker
 from maayan.retrieve.retriever import Retriever
 
 
-def build_retriever(settings: Settings, *, embedder: Embedder | None = None) -> Retriever:
-    """Construct a Retriever wired to Qdrant, the embedder, and (optionally) a reranker."""
+def build_retriever(
+    settings: Settings,
+    *,
+    embedder: Embedder | None = None,
+    hybrid: bool | None = None,
+    rerank: bool | None = None,
+    top_k: int | None = None,
+) -> Retriever:
+    """Construct a Retriever wired to Qdrant, the embedder, and (optionally) a reranker.
+
+    The `hybrid`/`rerank`/`top_k` overrides exist for the eval harness to compare
+    variants; when None they fall back to config.
+    """
     embedder = embedder or build_embedder(settings)
     index = QdrantIndex(
         build_qdrant_client(settings), settings.collection_name, embedder.dim
     )
+    use_rerank = settings.rerank_enabled if rerank is None else rerank
     reranker: Reranker | None = None
-    if settings.rerank_enabled:
+    if use_rerank:
         from maayan.retrieve.reranker import BGEReranker
 
         reranker = BGEReranker(settings.rerank_model)
     return Retriever(
         index,
         embedder,
-        top_k=settings.top_k,
+        top_k=top_k if top_k is not None else settings.top_k,
         reranker=reranker,
         rerank_candidates=settings.rerank_candidates,
         expert_boost=settings.expert_boost,
+        hybrid=True if hybrid is None else hybrid,
     )

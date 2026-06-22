@@ -262,6 +262,45 @@ def session(session_id: str = typer.Argument(..., help="Session id to display.")
             typer.echo(f"      links: {', '.join(a.linked_refs)}  move: {a.move}")
 
 
+@app.command(name="eval")
+def evaluate(
+    goldset: str = typer.Option(
+        None, "--goldset", help="Gold set YAML/JSON path (default: config.eval_goldset_path)."
+    ),
+    compare: bool = typer.Option(
+        False, "--compare", help="Compare retrieval variants (hybrid/dense, top-k) side by side."
+    ),
+    k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
+) -> None:
+    """Score retrieval against a gold set: hit@k, recall@k, MRR (no model calls)."""
+    from maayan.eval.goldset import load_goldset
+    from maayan.eval.harness import (
+        default_variants,
+        format_comparison,
+        format_report,
+        run_comparison,
+        run_eval,
+    )
+    from maayan.retrieve.factory import build_retriever
+
+    settings = get_settings()
+    path = goldset or settings.eval_goldset_path
+    examples = load_goldset(path)
+    typer.echo(f"Gold set: {path} ({len(examples)} questions)\n")
+
+    if compare:
+        from maayan.embed.factory import build_embedder
+
+        embedder = build_embedder(settings)  # built once, shared across same-model variants
+        reports = run_comparison(
+            settings, default_variants(), examples, settings.eval_ks, embedder=embedder
+        )
+        typer.echo(format_comparison(reports, k=k))
+    else:
+        retriever = build_retriever(settings)
+        typer.echo(format_report(run_eval(retriever, examples, settings.eval_ks)))
+
+
 @app.command()
 def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
