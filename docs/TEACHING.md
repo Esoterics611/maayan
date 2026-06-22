@@ -171,11 +171,11 @@ seed gold set:
 ```
    k |   hit@k |  recall@k
 --------------------------
-   1 |   0.200 |     0.200
-   3 |   0.600 |     0.489
+   1 |   0.267 |     0.233
+   3 |   0.533 |     0.422
    5 |   0.800 |     0.600
   10 |   0.867 |     0.711
-MRR: 0.432
+MRR: 0.457
 ```
 
 Variant comparison at k=5:
@@ -183,25 +183,29 @@ Variant comparison at k=5:
 ```
 variant         |   hit@5 |  recall@5 |    MRR
 ----------------------------------------------
-hybrid k=10     |   0.800 |     0.600 |  0.393
-hybrid k=5      |   0.800 |     0.600 |  0.449
+hybrid k=10     |   0.800 |     0.600 |  0.457
+hybrid k=5      |   0.800 |     0.600 |  0.457
 dense-only k=10 |   0.867 |     0.678 |  0.608
 ```
 
 Two honest takeaways:
 
-1. **Dense-only currently beats hybrid on this gold set** (MRR 0.61 vs 0.39). That
+1. **Dense-only currently beats hybrid on this gold set** (MRR 0.61 vs 0.46). That
    is exactly the kind of counter-intuitive result the harness exists to surface —
    sparse fusion may be adding noise on short, conceptual Hebrew questions. This is
    a *finding to investigate*, not yet a config change to make (15 questions is a
    small n).
-2. **The two hybrid rows differ even though they shouldn't.** `run_eval` queries
-   at `k = max(eval_ks) = 10` for every variant, so "hybrid k=10" and "hybrid k=5"
-   issue an identical query and *must* score identically. They don't — which means
-   there is run-to-run **non-determinism** in the embed→fuse path (bge-m3's cosine
-   scores sit in a compressed band, so tiny float differences reorder near-ties).
-   The harness code is correct; the *measurement* isn't yet reproducible. That goes
-   straight onto the plan below.
+2. **These numbers are now reproducible — and getting there found a real bug.**
+   In the first run, the two hybrid rows differed (MRR 0.39 vs 0.45) even though
+   `run_eval` queries every variant at `k = max(eval_ks) = 10`, so they *must*
+   score identically. Diagnosis (see `§4 / P1`): the **embedder is fully
+   deterministic** (verified: identical vectors across calls), but **Qdrant returns
+   RRF-tied results in a nondeterministic order**, and a stable sort by score alone
+   preserved that arbitrary order. The fix is a deterministic tiebreaker —
+   `_rank_key = (-score, ref)` in `retriever.py` — so ties resolve the same way
+   every run. Two separate `make eval` processes now produce byte-identical tables.
+   *The lesson: the surprising eval result wasn't noise to wave away; it was a
+   reproducibility bug the harness flushed out.*
 
 **Skill — read your eval for surprises, not just for the headline number.** The
 most valuable output of a benchmark is the result you didn't expect.
@@ -213,14 +217,24 @@ most valuable output of a benchmark is the result you didn't expect.
 The phase (retrieval + grounded generation + capture + eval) *works*. To call it
 *done well*, in rough priority order:
 
-### P1 — Make eval reproducible (correctness of the measurement itself)
-- **Pin determinism.** Set `torch`/numpy seeds and `model.eval()` in the bge-m3
-  embedder; confirm two runs of `make eval` produce byte-identical tables. Until
-  then, no variant comparison is trustworthy.
-- **Tie-break deterministically.** When fused scores are within an epsilon, sort by
-  `ref` so near-ties don't reorder run-to-run.
-- **Add a tiny seeded harness test** (HashingEmbedder + in-memory Qdrant) that
-  asserts `run_comparison` is stable across two invocations — lock the property in.
+### P1 — Make eval reproducible (DONE — and a worked example of diagnosis)
+This was the first thing to fix: a benchmark you can't reproduce can't justify a
+decision. How it actually went, because the method matters more than the result:
+- **Reproduced and isolated, didn't guess.** A 12-line diagnostic embedded the same
+  query 4× (dense diff `0.0`, sparse identical → embedder is *not* the culprit) and
+  then ran `query_hybrid` 4× on that *fixed* embedding (order shuffled → Qdrant is).
+  This killed the original plan's assumption ("seed torch") before writing any code.
+- **Root cause.** RRF sums `1/(k+rank)` → many *exactly* tied scores; Qdrant returns
+  tied points in arbitrary order; Python's *stable* sort then faithfully preserves
+  that arbitrary order. The bug hid behind a correct-looking `sort`.
+- **Fix.** A deterministic total order — `_rank_key = (-score, ref)` in
+  `retriever.py` — applied wherever results are ranked. Ties now resolve by ref.
+- **Verified.** Two separate `make eval` processes produce byte-identical tables,
+  and the two hybrid variants now agree (MRR 0.457 each). Locked in by a unit test
+  (`test_rank_key_breaks_rrf_ties_deterministically`).
+- **Lesson worth keeping:** the embedder being deterministic on *this* GPU doesn't
+  guarantee it elsewhere (fp16/CUDA atomics). The cheap insurance — a CI smoke run
+  that asserts `make eval` is stable across two invocations — is folded into P5.
 
 ### P2 — Make the gold set worth trusting
 - Grow it from ~15 to ~50+ questions, spanning more of the corpus (not just the

@@ -11,7 +11,8 @@ from maayan.corpus.store import ChunkStore
 from maayan.embed.fake import HashingEmbedder
 from maayan.index.pipeline import index_chunks
 from maayan.index.qdrant import QdrantIndex
-from maayan.retrieve.retriever import Retriever
+from maayan.retrieve.models import SearchResult
+from maayan.retrieve.retriever import Retriever, _rank_key
 
 DIM = 128
 
@@ -55,6 +56,19 @@ def test_metadata_filter_by_source() -> None:
     expert_only = retriever.search("בחירה חופשית", source="expert")
     assert {r.source for r in expert_only} == {"expert"}
     assert all(r.ref == "Expert 1" for r in expert_only)
+
+
+def test_rank_key_breaks_rrf_ties_deterministically() -> None:
+    # RRF yields exact score ties; Qdrant returns them in arbitrary order. The rank
+    # key must impose score-desc, then ref-asc — independent of input order.
+    def _r(ref: str, score: float) -> SearchResult:
+        return SearchResult(ref=ref, text="", score=score, lang="he", source="sefaria", payload={})
+
+    scrambled = [_r("Tanya 5", 0.5), _r("Tanya 2", 0.9), _r("Tanya 1", 0.5), _r("Tanya 3", 0.9)]
+    ranked = [r.ref for r in sorted(scrambled, key=_rank_key)]
+    # Higher score first; within a tied score, refs ascending — and stable across runs.
+    assert ranked == ["Tanya 2", "Tanya 3", "Tanya 1", "Tanya 5"]
+    assert ranked == [r.ref for r in sorted(reversed(scrambled), key=_rank_key)]
 
 
 class _FakeReranker:
