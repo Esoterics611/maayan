@@ -46,6 +46,19 @@ def _build_filter(
     return models.Filter(must=must) if must else None
 
 
+def _rank_key(result: SearchResult) -> tuple[float, str]:
+    """Deterministic total order for ranking: score desc, then ref asc.
+
+    RRF fusion sums 1/(k+rank), which yields many *exactly* tied scores, and Qdrant
+    returns tied points in a nondeterministic order. A stable sort by score alone
+    therefore preserves that arbitrary order, so identical queries can rank
+    differently run to run. Breaking ties by the (unique) ref makes ranking — and
+    thus the eval harness — reproducible. The embedder is already deterministic, so
+    this is the only nondeterminism in the retrieve path.
+    """
+    return (-result.score, result.ref)
+
+
 class Retriever:
     """Hybrid retriever with optional rerank and expert-source boosting."""
 
@@ -58,6 +71,7 @@ class Retriever:
         reranker: Reranker | None = None,
         rerank_candidates: int = 30,
         expert_boost: float = 1.0,
+        hybrid: bool = True,
     ) -> None:
         self._index = index
         self._embedder = embedder
@@ -65,6 +79,7 @@ class Retriever:
         self._reranker = reranker
         self._rerank_candidates = rerank_candidates
         self._expert_boost = expert_boost
+        self._hybrid = hybrid
 
     def retrieve(
         self,
@@ -82,9 +97,12 @@ class Retriever:
 
         emb = self._embedder.embed_query(query)
         flt = _build_filter(book, source, langs)
-        points = self._index.query_hybrid(
-            emb.dense, emb.sparse_indices, emb.sparse_values, limit=pool, query_filter=flt
-        )
+        if self._hybrid:
+            points = self._index.query_hybrid(
+                emb.dense, emb.sparse_indices, emb.sparse_values, limit=pool, query_filter=flt
+            )
+        else:
+            points = self._index.query_dense(emb.dense, limit=pool, query_filter=flt)
         results = [self._to_result(p) for p in points]
         results = self._apply_expert_boost(results)
 
@@ -94,13 +112,17 @@ class Retriever:
             raw_scores = self._reranker.rerank(query, [r.text for r in results])
             for r, s in zip(results, raw_scores, strict=True):
                 r.score = s * (self._expert_boost if r.source == "expert" else 1.0)
-            results.sort(key=lambda r: r.score, reverse=True)
+            results.sort(key=_rank_key)
             relevance = max(raw_scores) if raw_scores else 0.0
         else:
-            results.sort(key=lambda r: r.score, reverse=True)
-            # Absolute relevance gate: top dense cosine similarity (reuses the vector).
-            dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
-            relevance = float(dense_top[0].score) if dense_top else 0.0
+            results.sort(key=_rank_key)
+            if self._hybrid:
+                # Absolute relevance gate: top dense cosine (RRF scores are rank-based).
+                dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
+                relevance = float(dense_top[0].score) if dense_top else 0.0
+            else:
+                # Dense-only: result scores already are cosine similarities.
+                relevance = results[0].score if results else 0.0
 
         return RetrievalResult(results=results[:final_k], relevance=relevance)
 

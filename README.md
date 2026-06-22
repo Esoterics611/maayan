@@ -125,10 +125,11 @@ the annotation lands in **SQLite + Qdrant** and surfaces in future retrieval.
 | `maayan annotate --session <id> --body "..."` `[--kind --author --refs --move]` | Add expert knowledge; indexes it |
 | `maayan session <id>` | Show a session and its annotations |
 | `maayan ui` | Run the local FastAPI chat + capture UI |
+| `maayan eval` `[--goldset path] [--compare] [--k N]` | Score retrieval vs a gold set (hit@k/recall@k/MRR); `--compare` tables variants |
 | `maayan version` | Print version |
 
 `make help` lists the Make targets (`up/down/logs`, `test/typecheck/lint/fmt`,
-`ingest/index/search/ask/ui`).
+`ingest/index/search/ask/ui/eval`).
 
 ---
 
@@ -151,6 +152,10 @@ the annotation lands in **SQLite + Qdrant** and surfaces in future retrieval.
 - **Capture** (`maayan/capture/`): sessions + annotations → expert chunks indexed
   into the **same** collection. This is the differentiator.
 - **UI** (`maayan/ui/`): thin FastAPI layer over the RAG + capture services.
+- **Eval** (`maayan/eval/`): a YAML/JSON gold set + pure metric functions
+  (hit@k / recall@k / MRR, prefix-aware ref matching) + a harness that compares
+  retrieval variants (hybrid vs dense-only, top-k, swappable embedding model) so
+  model/chunking choices are justified with numbers, not vibes.
 
 House rules (enforced): typed + `mypy --strict`, dependency injection everywhere,
 no `time.sleep` in logic (injected `Clock`), config-driven, no secrets in code,
@@ -196,7 +201,7 @@ CI (GitHub Actions) runs lint + typecheck + tests on every push/PR.
 - [x] **Prompt 4** — RAG via OpenRouter (grounded, cited, default-deny in code)
 - [x] **Prompt 5** — Expert capture loop (annotations → indexed expert chunks)
 - [x] **Prompt 6** — Local chat + capture UI (FastAPI)
-- [ ] Prompt 7 — Eval harness (retrieval metrics + variant comparison)
+- [x] **Prompt 7** — Eval harness (retrieval metrics + variant comparison)
 - [ ] Prompt 8 — Local generation via Ollama
 
 ---

@@ -1,0 +1,50 @@
+# Retrieval gold set for maayan — Likutei Amarim (Tanya, Part I).
+# Each example: a question + the chapter(s) that should be retrieved.
+# Refs are chapter-level; metrics match any segment within (e.g. "...1" matches "...1:13").
+# EDIT FREELY: better gold = more trustworthy numbers. Hand-curated, not authoritative.
+examples:
+  - question: "מהן שתי הנפשות של האדם?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 2"]
+    note: two souls — divine and animal
+
+  - question: "מהי הגדרת הבינוני?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 12", "Tanya, Part I; Likkutei Amarim 13", "Tanya, Part I; Likkutei Amarim 14"]
+
+  - question: "מה ההבדל בין צדיק לרשע?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 10"]
+
+  - question: "מהי נפש הבהמית ומה מקורה בקליפה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 6", "Tanya, Part I; Likkutei Amarim 7"]
+
+  - question: "מהי הנפש האלוקית חלק אלוק ממעל ממש?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 2"]
+
+  - question: "מהן עשר הספירות שבנפש — חב\"ד ומדות?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 3"]
+
+  - question: "מהם שלושת הלבושים מחשבה דיבור ומעשה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 4"]
+
+  - question: "כיצד מתמודדים עם הרהורים רעים בשעת התפילה?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 28"]
+
+  - question: "מהי אהבת ישראל ו'ואהבת לרעך כמוך'?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 32"]
+
+  - question: "What are the ten crowns of impurity in the kelipah?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 6"]
+
+  - question: "What is kelipat nogah and the permitted versus the forbidden?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 7"]
+
+  - question: "How does the beinoni wage the war between his two souls?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 9", "Tanya, Part I; Likkutei Amarim 13"]
+
+  - question: "מהו עובד אלוקים לעומת מי שלא עבדו?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 15"]
+
+  - question: "מהי האהבה המסותרת שבלב כל יהודי?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 18", "Tanya, Part I; Likkutei Amarim 19"]
+
+  - question: "מהי שפלות הרוח וביטול הסטרא אחרא?"
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 29", "Tanya, Part I; Likkutei Amarim 30"]

@@ -1,4 +1,4 @@
-.PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui sync
+.PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui eval sync
 
 # Allow `make search Q='...'` / `make ask Q='...'`
 Q ?=
@@ -17,6 +17,8 @@ help:
 	@echo "  ask        Grounded, cited answer. Usage: make ask Q='...' (Prompt 4)"
 	@echo "  annotate   Add an expert annotation.               (Prompt 5)"
 	@echo "  ui         Run the local FastAPI chat + capture UI. (Prompt 6)"
+	@echo "  eval       Score retrieval vs gold set (hit@k/MRR). (Prompt 7)"
+	@echo "             Add ARGS='--compare' for a variant table."
 
 sync:
 	uv sync
@@ -59,3 +61,6 @@ annotate:
 
 ui:
 	uv run maayan ui
+
+eval:
+	uv run maayan eval $(ARGS)
