@@ -125,6 +125,58 @@ make eval                           # single report
 make eval ARGS='--compare'          # hybrid vs dense-only vs top-k, side by side
 ```
 
+### Phase 2: the develop loop + term lexicon (CLI, end to end)
+
+This is the heart of the project — an expert plants a **seed**, the model **develops**
+it grounded in the corpus, and on **approval** it becomes retrievable corpus. Threads
+hold the line of inquiry; the **lexicon** teaches the system its Holy Names.
+
+```bash
+# A. Start a topic thread and ask within it (prior turns become NON-citable context).
+uv run maayan ask "מהי אהבה בתענוגים?" --topic "ahava b'ta'anugim"
+#   → prints the answer + a Session id + a Thread id. Continue the thread:
+uv run maayan ask "ואיך זה קשור לשם ע\"ב?" --thread <THREAD_ID>
+
+# B. Plant a SEED on that session — knowledge PLUS a directive to develop later.
+#    --opens-aspect marks it a seed; --directive is kept OUT of the embedded text.
+uv run maayan annotate --session <SESSION_ID> --author "R. Ginsburgh" \
+    --kind connection --opens-aspect \
+    --body 'אהבה בתענוגים היא גילוי שם ע"ב לאחר יחוד מ"ה וב"ן' \
+    --directive "מצא היכן זה נרמז בתניא"
+#   → prints a contribution id (the seed). It is indexed as a source="expert" chunk.
+
+# C. DEVELOP the seed — the model grounds it in retrieved Tanya sources and cites them,
+#    OR refuses honestly if the corpus doesn't support it (default-deny, no model call).
+uv run maayan develop --seed <CONTRIBUTION_ID>
+#   → prints the proposed development, its grounded-in refs + citations, a Development id.
+
+# D. APPROVE it → indexed as a source="derived" chunk with full provenance
+#    (seed author, developing model, grounded_in refs). Or `reject` to index nothing.
+uv run maayan approve <DEVELOPMENT_ID>           # (or: uv run maayan reject <DEVELOPMENT_ID>)
+uv run maayan search "אהבה בתענוגים" --source derived   # the derived knowledge now surfaces
+
+# E. Inspect threads + sessions any time.
+uv run maayan threads                  # list topic threads
+uv run maayan thread <THREAD_ID>       # show its ordered turns (ask / seed / development)
+uv run maayan session <SESSION_ID>     # show a session + its contributions
+
+# F. TERM LEXICON — define a Holy Name / technical term as an entity so it is never
+#    expanded as an abbreviation, and its definition surfaces in retrieval.
+uv run maayan add-term \
+    --canonical 'ע"ב (Name of 72 / Ab)' \
+    --definition 'the Ab expansion of Havayah, gematria 72; sibling to ס"ג/מ"ה/ב"ן' \
+    --type expansion --gematria 72 --sacred \
+    --surface 'ע"ב' --surface 'עב' \
+    --related 'ס"ג' --related 'מ"ה' --related 'ב"ן' \
+    --author "R. Ginsburgh"
+uv run maayan terms                    # list curated terms
+uv run maayan term <TERM_ID>           # show one term
+uv run maayan search 'יחוד מ"ה וב"ן' --source term     # the term definition surfaces
+
+# G. Measure the develop step (no DB writes; supported seeds should develop, unsupported refuse).
+uv run maayan eval --develop
+```
+
 ### The web UI
 
 ```bash
@@ -136,12 +188,16 @@ The UI is organized around **topic threads**. Start (or reopen) a topic from the
 sidebar, then within that thread you can:
 
 - **Ask** — a grounded, cited answer; follow-ups use the thread as context but still
-  refuse when unsupported. Sources are badged **sefaria / expert / derived**.
+  refuse when unsupported. Sources are badged **sefaria / expert / derived / term**.
 - **Seed a new aspect** — author (required, remembered via localStorage) + the seed
   knowledge + a *directive* (kept out of the embedded text).
 - **Develop this** on a seed — the model proposes a grounded, cited elaboration.
 - **Approve / Reject** the proposal — approving indexes it as a `derived` chunk that
   future questions retrieve; rejecting indexes nothing. Printed text is never edited.
+- **Define a term** (the *Term ▾* composer) — register a Holy Name / technical term as
+  an entity (canonical, type, definition, surface forms, gematria). Select text in a
+  source first to pre-fill its surface form. Defined terms show in the sidebar lexicon
+  and surface in retrieval, badged **term**.
 
 ---
 
@@ -151,7 +207,7 @@ sidebar, then within that thread you can:
 |---|---|
 | `maayan ingest --all` / `--book "<ref>"` `[--limit N]` `[--sample K]` | Pull + normalize + chunk from Sefaria into SQLite |
 | `maayan index` `[--rebuild]` | Embed (bge-m3) + upsert into Qdrant (hybrid schema) |
-| `maayan search "<q>"` `[--k N] [--book ..] [--source sefaria\|expert]` | Hybrid retrieval (RRF), prints refs + scores |
+| `maayan search "<q>"` `[--k N] [--book ..] [--source sefaria\|expert\|derived\|term]` | Hybrid retrieval (RRF), prints refs + scores + provenance |
 | `maayan ask "<q>"` `[--k N] [--book ..] [--thread <id> \| --topic "<title>"]` | Grounded, cited answer (or a refusal); records a session. `--topic` starts a thread, `--thread` continues one — using prior turns as **non-citable** context |
 | `maayan annotate --session <id> --author "<name>" --body "..."` `[--kind --ref (repeatable) --refs "a \| b" --move --opens-aspect --directive "..."]` | Add an expert contribution or **seed**; indexes it. `--author` required; refs keep their commas (repeatable `--ref`, or `--refs` split on ` \| `) |
 | `maayan session <id>` | Show a session and its contributions (seeds flagged, directives shown) |
@@ -160,8 +216,12 @@ sidebar, then within that thread you can:
 | `maayan develop --seed <id>` `[--thread <id>]` | Develop a seed under its directive — grounded + cited (a **proposal**, not corpus; refuses honestly if unsupported) |
 | `maayan approve <development_id>` | Approve a proposal → index it as a retrievable `derived` corpus chunk |
 | `maayan reject <development_id>` | Reject a proposal; nothing is indexed |
+| `maayan add-term --canonical "<form>" --definition "..." --author "<name>"` `[--type .. --surface (repeatable) --related (repeatable) --source-ref (repeatable) --gematria N --sacred]` | Define a **term / Holy Name** as an entity; indexes it as a `term` chunk and protects its surface forms from expansion |
+| `maayan terms` | List curated lexicon terms |
+| `maayan term <id>` | Show one lexicon term (definition, surface forms, related, sources) |
 | `maayan ui` | Run the local FastAPI chat + capture UI |
-| `maayan eval` `[--goldset path] [--compare] [--k N]` | Score retrieval vs a gold set (hit@k/recall@k/MRR); `--compare` tables variants |
+| `maayan eval` `[--goldset path] [--compare] [--k N]` | Score **retrieval** vs a gold set (hit@k/recall@k/MRR + gate rates); `--compare` tables variants |
+| `maayan eval --develop` `[--goldset path]` | Score the **develop step**: develop rate, refusal rate, grounding (no DB writes) |
 | `maayan version` | Print version |
 
 `make help` lists the Make targets (`up/down/logs`, `test/typecheck/lint/fmt`,
@@ -202,9 +262,12 @@ sidebar, then within that thread you can:
   developing model, `grounded_in` refs) — while `reject` indexes nothing. Printed text
   stays immutable; derived knowledge layers on as a separate, badged chunk, and
   `DERIVED_BOOST` lets reviewed-and-approved knowledge be preferred in ranking.
-- **Lexicon** (`maayan/lexicon/`, Prompt 16, *planned*): expert-defined **terms /
-  Holy Names** as `source="term"` chunks, plus a protected-terms deny-list so they're
-  never mangled by abbreviation expansion.
+- **Lexicon** (`maayan/lexicon/`): expert-defined **terms / Holy Names** (ע״ב, ס״ג,
+  sefirot, partzufim, …) as `source="term"` chunks in the same collection, with full
+  provenance. Surface-form matching folds gershayim/quote/nikkud variants, and those
+  folded forms become a **protected-terms deny-list** that the abbreviation-expansion
+  hook may never expand — so a registered Name is structurally safe from being mangled.
+  `TERM_BOOST` lets curated definitions be preferred in ranking.
 - **UI** (`maayan/ui/`): thin FastAPI layer over the RAG / capture / thread / develop
   services — a thread-centric loop (ask, seed, develop, approve/reject) with sources
   badged by provenance. Route handlers carry no logic.
@@ -212,7 +275,11 @@ sidebar, then within that thread you can:
   negatives) + pure metric functions (hit@k / recall@k / MRR, prefix-aware ref
   matching) + a harness that compares retrieval variants (hybrid vs dense-only,
   top-k, swappable embedding model) and reports default-deny gate rates — so
-  model/chunking choices are justified with numbers, not vibes.
+  model/chunking choices are justified with numbers, not vibes. A second gold set of
+  **seeds** (`eval/develop_goldset.yaml`, supported / unsupported) scores the *develop*
+  step (`maayan eval --develop`): **develop rate** (supported seeds developed),
+  **refusal rate** (unsupported seeds honestly refused), and **grounding** (cited refs
+  that were actually retrieved — catches fabricated citations).
 
 House rules (enforced): typed + `mypy --strict`, dependency injection everywhere,
 no `time.sleep` in logic (injected `Clock`), config-driven, no secrets in code,
@@ -273,8 +340,12 @@ CI (GitHub Actions) runs lint + typecheck + tests on every push/PR.
 - [x] **Prompt 12** — The **Develop** step (expert-directed, grounded, refuses honestly → a proposal)
 - [x] **Prompt 13** — Approval gate → `derived` corpus chunks (provenance + `derived_boost`)
 - [x] **Prompt 14** — UI: topic threads, seed, develop, approve (thin routes over the services)
-- [ ] Prompt 15 — Eval: measure development quality (grounding + honest refusal)
-- [ ] Prompt 16 — Term lexicon: Holy Names & technical terms (don't expand them)
+- [x] **Prompt 15** — Eval: measure development quality (grounding + honest refusal)
+- [x] **Prompt 16** — Term lexicon: Holy Names & technical terms (don't expand them)
+
+**Phase 2 is complete.** The seed → develop → approve loop runs end-to-end (CLI + UI),
+is measured by the develop eval, and the term lexicon protects Holy Names from
+expansion while surfacing their definitions in retrieval.
 
 ---
 

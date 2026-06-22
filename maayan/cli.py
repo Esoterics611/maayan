@@ -467,7 +467,7 @@ def thread(thread_id: str = typer.Argument(..., help="Thread id to display.")) -
 
 @app.command(name="add-term")
 def add_term(
-    canonical: str = typer.Option(..., "--canonical", help='Display form, e.g. \'ע"ב (Name of 72)\'.'),
+    canonical: str = typer.Option(..., "--canonical", help="Display form, e.g. the Name of 72."),
     definition: str = typer.Option(..., "--definition", help="What the term means."),
     author: str = typer.Option(..., "--author", help="Who defined it (required — provenance)."),
     term_type: str = typer.Option(
@@ -528,7 +528,8 @@ def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None
     if t is None:
         typer.echo("Term not found.")
         return
-    typer.echo(f"{t.canonical}   [{t.term_type}]" + (f"  ·  gematria {t.gematria}" if t.gematria is not None else ""))
+    gem = f"  ·  gematria {t.gematria}" if t.gematria is not None else ""
+    typer.echo(f"{t.canonical}   [{t.term_type}]{gem}")
     typer.echo(f"  {t.definition}")
     if t.surface_forms:
         typer.echo(f"  surface forms: {', '.join(t.surface_forms)}")
@@ -542,14 +543,33 @@ def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None
 @app.command(name="eval")
 def evaluate(
     goldset: str = typer.Option(
-        None, "--goldset", help="Gold set YAML/JSON path (default: config.eval_goldset_path)."
+        None, "--goldset", help="Gold set YAML/JSON path (default: per-mode config path)."
     ),
     compare: bool = typer.Option(
         False, "--compare", help="Compare retrieval variants (hybrid/dense, top-k) side by side."
     ),
+    develop: bool = typer.Option(
+        False, "--develop", help="Score the DEVELOP step (grounding + honest refusal) instead."
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
-    """Score retrieval against a gold set: hit@k, recall@k, MRR (no model calls)."""
+    """Score retrieval (hit@k, recall@k, MRR) or, with --develop, the develop step."""
+    settings = get_settings()
+
+    if develop:
+        from maayan.develop.factory import build_develop_eval_setup
+        from maayan.eval.develop_goldset import load_develop_goldset
+        from maayan.eval.develop_harness import format_develop_report, run_develop_eval
+
+        dev_path = goldset or settings.eval_develop_goldset_path
+        dev_examples = load_develop_goldset(dev_path)
+        typer.echo(f"Develop gold set: {dev_path} ({len(dev_examples)} seeds)")
+        typer.echo(f"Default-deny gate threshold: {settings.score_threshold}\n")
+        service, dev_threads, clock = build_develop_eval_setup(settings)
+        dev_report = run_develop_eval(service, dev_threads, clock, dev_examples)
+        typer.echo(format_develop_report(dev_report))
+        return
+
     from maayan.eval.goldset import load_goldset
     from maayan.eval.harness import (
         default_variants,
@@ -560,7 +580,6 @@ def evaluate(
     )
     from maayan.retrieve.factory import build_retriever
 
-    settings = get_settings()
     path = goldset or settings.eval_goldset_path
     examples = load_goldset(path)
     typer.echo(f"Gold set: {path} ({len(examples)} questions)")

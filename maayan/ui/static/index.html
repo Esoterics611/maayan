@@ -7,7 +7,7 @@
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
             --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
-            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; }
+            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
            font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
@@ -43,11 +43,13 @@
     .badge { font-size:11px; border-radius:6px; padding:1px 6px; margin-left:6px; border:1px solid; }
     .badge.expert { color:var(--expert); border-color:var(--expert); }
     .badge.derived { color:var(--derived); border-color:var(--derived); }
+    .badge.term { color:var(--term); border-color:var(--term); }
     .badge.proposed { color:var(--seed); border-color:var(--seed); }
     .badge.approved { color:var(--expert); border-color:var(--expert); }
     .badge.rejected { color:#9a3b2f; border-color:#9a3b2f; }
     .src { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; font-size:14px; }
     .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
+    .src.term { border-color:var(--term); }
     .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
     .actions { margin-top:8px; display:flex; gap:8px; }
     .refused { color:#9a3b2f; }
@@ -57,7 +59,7 @@
   </style>
 </head>
 <body>
-  <header><h1>מעיין · maayan <small>topic threads — seed → develop → approve, grounded & cited</small></h1></header>
+  <header><h1>מעיין · maayan <small>topic threads — seed → develop → approve · term lexicon · grounded & cited</small></h1></header>
   <div class="layout">
     <aside>
       <div class="row" style="margin-bottom:10px">
@@ -65,6 +67,10 @@
         <button id="newBtn" title="Start a topic">＋</button>
       </div>
       <div id="threadList"></div>
+      <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
+        <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Lexicon</div>
+        <div id="termList"></div>
+      </div>
     </aside>
 
     <main>
@@ -76,6 +82,7 @@
           <input id="q" placeholder="Ask within this topic…  e.g. מהי נפש הבהמית" dir="auto" />
           <button id="askBtn">Ask</button>
           <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
+          <button id="termToggle" class="secondary" title="Define a term / Holy Name">Term ▾</button>
         </div>
         <div class="hint">Answers come only from retrieved sources, with citations; follow-ups use the thread as context but never bypass the refusal gate.</div>
 
@@ -89,6 +96,35 @@
           <label class="field">Directive — what should the model develop? <span class="hint">(kept out of the embedded text)</span></label>
           <input id="directive" dir="auto" placeholder="e.g. find where this is hinted at in Tanya" />
           <div class="actions"><button id="seedBtn">Plant seed</button><span id="seedStatus" class="hint"></span></div>
+        </div>
+
+        <div id="termBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
+          <div class="hint" style="margin-bottom:6px">Define a Holy Name / technical term as an entity — it becomes a retrievable <span class="badge term">term</span> and is protected from abbreviation expansion. Tip: select text in a source above, then click “Term ▾” to prefill the surface form.</div>
+          <div class="row">
+            <div><label class="field">Author <span class="hint">(required)</span></label><input id="termAuthor" placeholder="Your name" /></div>
+            <div><label class="field">Type</label>
+              <select id="termType">
+                <option value="concept">concept</option>
+                <option value="name">name</option>
+                <option value="sefirah">sefirah</option>
+                <option value="partzuf">partzuf</option>
+                <option value="expansion">expansion</option>
+                <option value="other">other</option>
+              </select>
+            </div>
+          </div>
+          <label class="field">Surface forms <span class="hint">(comma-separated; gershayim/quote/nikkud-insensitive)</span></label>
+          <input id="termSurfaces" dir="auto" placeholder='e.g. ע"ב, עב' />
+          <label class="field">Canonical (display form)</label>
+          <input id="termCanonical" dir="auto" placeholder='e.g. ע"ב (Name of 72 / Ab)' />
+          <label class="field">Definition <span class="hint">(the knowledge — what gets embedded)</span></label>
+          <textarea id="termDef" rows="2" dir="auto" placeholder='e.g. the Ab expansion of Havayah, gematria 72'></textarea>
+          <div class="row">
+            <div><label class="field">Related terms <span class="hint">(comma-separated)</span></label><input id="termRelated" dir="auto" placeholder='ס"ג, מ"ה, ב"ן' /></div>
+            <div><label class="field">Gematria <span class="hint">(optional)</span></label><input id="termGematria" type="number" placeholder="e.g. 72" /></div>
+          </div>
+          <label class="field" style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="termSacred" style="width:auto" /> Holy Name (handle with care)</label>
+          <div class="actions"><button id="termBtn">Define term</button><span id="termStatus" class="hint"></span></div>
         </div>
       </div>
     </main>
@@ -113,8 +149,18 @@
       $('threadList').innerHTML = ts.length ? ts.map(t =>
         `<div class="thread-item ${t.id === active ? 'active' : ''}" data-id="${t.id}">${esc(t.title)}</div>`
       ).join('') : '<div class="hint">No topics yet.</div>';
-      [...document.querySelectorAll('.thread-item')].forEach(el =>
+      [...document.querySelectorAll('#threadList .thread-item')].forEach(el =>
         el.onclick = () => openThread(el.dataset.id));
+    }
+
+    async function loadTerms() {
+      try {
+        const ts = await j(await fetch('/terms'));
+        $('termList').innerHTML = ts.length ? ts.map(t =>
+          `<div class="thread-item" title="${esc(t.term_type)} · by ${esc(t.author)}">`
+          + `${esc(t.canonical)} <span class="badge term">${esc(t.term_type)}</span></div>`
+        ).join('') : '<div class="hint">No terms yet.</div>';
+      } catch (e) { $('termList').innerHTML = '<div class="hint">No terms yet.</div>'; }
     }
 
     async function newTopic(title) {
@@ -157,7 +203,8 @@
       const cls = data.grounded ? '' : ' refused';
       const srcs = (data.sources || []).map(s => {
         const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
-                    : s.source === 'derived' ? '<span class="badge derived">derived</span>' : '';
+                    : s.source === 'derived' ? '<span class="badge derived">derived</span>'
+                    : s.source === 'term' ? '<span class="badge term">term</span>' : '';
         return `<div class="src ${s.source}">
           <div class="ref"><span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
@@ -193,6 +240,30 @@
       } else { const e = await j(r); $('seedStatus').textContent = 'Error: ' + (e.detail || r.status); }
     }
 
+    const splitList = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
+
+    async function defineTerm() {
+      const author = $('termAuthor').value.trim();
+      if (!author) { $('termStatus').textContent = 'Author is required.'; $('termAuthor').focus(); return; }
+      const canonical = $('termCanonical').value.trim();
+      const definition = $('termDef').value.trim();
+      if (!canonical || !definition) { $('termStatus').textContent = 'Canonical form and definition are required.'; return; }
+      localStorage.setItem(AUTHOR_KEY, author);
+      const gem = $('termGematria').value.trim();
+      const body = {
+        canonical, definition, author, term_type: $('termType').value,
+        surface_forms: splitList($('termSurfaces').value),
+        related_terms: splitList($('termRelated').value),
+        gematria: gem ? parseInt(gem, 10) : null, sacred: $('termSacred').checked,
+      };
+      const r = await fetch('/terms', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (r.ok) { const t = await j(r);
+        $('termStatus').textContent = `Defined “${t.canonical}” — it will now surface in retrieval.`;
+        ['termCanonical','termDef','termSurfaces','termRelated','termGematria'].forEach(id => $(id).value = '');
+        $('termSacred').checked = false; await loadTerms();
+      } else { const e = await j(r); $('termStatus').textContent = 'Error: ' + (e.detail || r.status); }
+    }
+
     async function developSeed(seedId) {
       const r = await fetch('/threads/' + active + '/develop', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ seed_id: seedId }) });
@@ -212,8 +283,19 @@
     $('newBtn').onclick = () => { const t = $('newTitle').value.trim(); if (t) { $('newTitle').value=''; newTopic(t); } };
     $('seedToggle').onclick = () => $('seedBox').classList.toggle('hidden');
     $('seedBtn').onclick = plantSeed;
-    $('author').value = localStorage.getItem(AUTHOR_KEY) || '';
-    loadKinds(); loadThreads();
+    $('termBtn').onclick = defineTerm;
+    $('termToggle').onclick = () => {
+      // Pre-fill surface forms from any text selected in a source/answer above.
+      const sel = (window.getSelection && window.getSelection().toString().trim()) || '';
+      if (sel) {
+        if (!$('termSurfaces').value) $('termSurfaces').value = sel;
+        if (!$('termCanonical').value) $('termCanonical').value = sel;
+      }
+      $('termBox').classList.toggle('hidden');
+    };
+    const savedAuthor = localStorage.getItem(AUTHOR_KEY) || '';
+    $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
+    loadKinds(); loadThreads(); loadTerms();
   </script>
 </body>
 </html>

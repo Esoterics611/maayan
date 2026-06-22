@@ -1,0 +1,61 @@
+# Develop gold set for maayan — does the DEVELOP step ground honestly or refuse?
+#
+# Each case is an expert SEED (knowledge + a directive) plus a judgement:
+#   supported: true   → the corpus (Likutei Amarim / Tanya, Part I) genuinely hints
+#                       at the seed, so develop should return a GROUNDED, CITED
+#                       development.
+#   supported: false  → nothing in the corpus supports it (it needs outside texts,
+#                       or it is off-topic), so develop should REFUSE (default-deny)
+#                       rather than force a connection.
+#
+# This mirrors the positive / should_refuse split of eval/goldset.yaml, but for the
+# `develop` verb. `body` is the seed knowledge (often from OUTSIDE the corpus) and
+# `directive` is the separate "now develop X" instruction (kept out of retrieval).
+#
+# EDIT FREELY: the corpus is currently only Tanya Part I, so "supported" means
+# "Tanya Part I hints at it". Hand-curated, not authoritative — better labels =
+# more trustworthy develop numbers. Run with:  maayan eval --develop
+examples:
+  # ---- SUPPORTED: Tanya Part I genuinely grounds these ---------------------
+  - body: "האדם הישראלי יש בו שתי נפשות — נפש אלוקית שהיא חלק אלוק ממעל ממש, ונפש הבהמית שמקליפת נוגה."
+    directive: "פתח כיצד התניא מתאר את שתי הנפשות ואת המאבק ביניהן"
+    supported: true
+    note: "two souls — divine (ch 2) and animal from kelipat nogah (ch 1)"
+
+  - body: "לנפש יש שלושה לבושים שבהם היא מתלבשת ופועלת: מחשבה, דיבור ומעשה."
+    directive: "מצא היכן התניא מבסס את שלושת הלבושים מחשבה דיבור ומעשה"
+    supported: true
+    note: "three garments of the soul (ch 4)"
+
+  - body: "הבינוני לעולם אינו עובר עבירה בפועל במחשבה דיבור ומעשה, אף שנפשו הבהמית לא נתבטלה."
+    directive: "פתח את הגדרת הבינוני בתניא — שאין הרע שולט בלבושי הנפש"
+    supported: true
+    note: "the beinoni never sins in the three garments though the animal soul is undefeated (ch 12-13)"
+
+  - body: "אהבת עולם היא אהבה הנולדת מהתבוננות בגדולת ה' אין סוף, להבדיל מאהבה מסותרת שבטבע הנפש האלוקית."
+    directive: "מצא היכן התניא משרש את אהבת עולם ואת האהבה המסותרת"
+    supported: true
+    note: "ahavat olam born of contemplation; the hidden love (ch 18-19, 44)"
+
+  # ---- UNSUPPORTED: needs outside texts, or off-topic → expect a refusal ---
+  - body: 'אהבה בתענוגים היא גילוי שם ע"ב לאחר יחוד מ"ה וב"ן, על ידי אהבת עולם — כמבואר באריכות בלקוטי תורה / תורה אור, ויחי.'
+    directive: "מצא היכן זה נרמז בתניא"
+    supported: false
+    note: >-
+      THE driving example (annotation c3d520c0). The shem Ab/Mah/Ban framework is
+      Lurianic + Likutei Torah, NOT explicit in Tanya Part I — honest refusal expected.
+
+  - body: "ספירת הכתר מכוונת כנגד פרצוף אריך אנפין, וחכמה ובינה כנגד אבא ואמא."
+    directive: "בסס את מערכת הפרצופים הזו מתוך התניא"
+    supported: false
+    note: "partzufim (Arich Anpin, Abba/Imma) are Etz Chaim / Lurianic, not Tanya Part I"
+
+  - body: "מנגנון גלגול הנשמות ותיקון הניצוצות בכל גלגול וגלגול."
+    directive: "פתח את פרטי הגלגול מתוך התניא"
+    supported: false
+    note: "detailed gilgul mechanics live in Shaar HaGilgulim, not Likutei Amarim"
+
+  - body: "The laws of when and how to light Shabbat candles, and who is obligated."
+    directive: "Develop the halachic details from Tanya."
+    supported: false
+    note: "off-topic halacha — Tanya Part I is not a halachic code; default-deny"

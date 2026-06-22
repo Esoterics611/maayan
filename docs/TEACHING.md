@@ -471,12 +471,13 @@ one structural fact.)
 
 The browser UI (`maayan/ui/`) is rebuilt around topic threads: a sidebar of threads, a
 scrollable turn list (ask / seed / development / refinement), and one composer that can
-ask *or* plant a seed. Each user action is one `fetch` to one route, and **every route
-is a thin wrapper over a service** — `create_app(rag, capture, threads, develop)` wires
-them, and the handlers do nothing but translate HTTP ↔ service call. The seed→develop→
-approve loop you ran from the CLI (§5.6–5.7) is the same services, now clickable;
-sources are badged sefaria / expert / derived, and a development renders as a *proposal*
-with Approve/Reject until it's promoted.
+ask *or* plant a seed *or* define a term. Each user action is one `fetch` to one route,
+and **every route is a thin wrapper over a service** —
+`create_app(rag, capture, threads, develop, terms)` wires them, and the handlers do
+nothing but translate HTTP ↔ service call. The seed→develop→approve loop you ran from
+the CLI (§5.6–5.7) is the same services, now clickable; sources are badged
+sefaria / expert / derived / term, and a development renders as a *proposal* with
+Approve/Reject until it's promoted.
 
 Two design points worth lifting out:
 - **The generator never learns about threads.** Asking in a thread goes through
@@ -492,22 +493,66 @@ Two design points worth lifting out:
 called, right status on the refusal/reject paths). When the handler is thin, that's all
 there is to test — the behavior is tested once, in the service.
 
-### 5.9 The term lexicon — encode expertise as data, not as a clever heuristic (Prompt 16 — PLANNED)
+### 5.9 The term lexicon — encode expertise as data, not as a clever heuristic (Prompt 16 — DONE)
 
 Tokens like **ע״ב** carry gershayim (״) and *look* like rashei-teivot, but they are
 **terms / Holy Names** (ע״ב is the *Ab* expansion of the Tetragrammaton, gematria 72;
 sibling to ס״ג/מ״ה/ב״ן). Expanding them as abbreviations mangles meaning; the embedder
-alone doesn't know them. The fix is a curated `Term` lexicon — define a term once as a
-`source="term"` entity and every future question retrieves that definition — plus a
+alone doesn't know them. The fix (`maayan/lexicon/`) is a curated `Term` lexicon —
+`maayan add-term` defines a term once as a `source="term"` chunk in the *same*
+collection, so every future question retrieves that definition — plus a
 **protected-terms deny-list** that the documented rashei-teivot hook (CLAUDE.md) must
 never expand.
+
+Three details make it robust:
+- **Surface-form folding** (`corpus/normalize.py::fold_surface`). `ע״ב` (gershayim),
+  `ע"ב` (ASCII quote) and `עב` (bare) all fold equal — nikkud, gershayim/geresh, and
+  quote marks are stripped and the result casefolded. So a lookup, the deny-list, and a
+  query all match the same term regardless of how it's typed.
+- **The deny-list is built *from the data*.** `TermService.protected_terms()` returns
+  the folded surface forms of every registered term; `expand_rashei_teivot(...,
+  protected=…)` skips anything in that set. The hook is therefore a deny-list, *not a
+  guesser* — and it stays correct automatically as the lexicon grows.
+- **Same provenance + boost machinery as the rest.** A term carries a required `author`,
+  rides in the same Qdrant collection, and `TERM_BOOST` (like `EXPERT_BOOST` /
+  `DERIVED_BOOST`) lets curated definitions be preferred in ranking.
 
 **Skill — when a heuristic would be wrong, reach for a curated table instead.**
 "Expand abbreviations" is a tempting rule that silently corrupts a whole category of
 sacred terms. The disciplined move is not a smarter guesser but an *expert-maintained
 deny-list / glossary*: domain knowledge lives as data the pipeline consults, with a
 named author, not as code nobody can audit. (This is also the one *non-speculative*
-reason to touch that hook at all.)
+reason to touch that hook at all.) The protected-term test
+(`tests/test_lexicon.py::test_protected_term_is_never_expanded`) pins the contract:
+with the term registered the token survives untouched; without it, the same expansion
+table *would* mangle it — proof the deny-list bites.
+
+### 5.10 The develop eval — measuring a generative step, not just retrieval (Prompt 15 — DONE)
+
+Retrieval eval (§2.7) scores *ranking*. But the develop step (§5.6) is generative, so it
+needs its own gold set and its own metrics. `eval/develop_goldset.yaml` is a set of
+**seeds** labelled `supported` (the corpus genuinely hints at it → expect a grounded
+development) or `unsupported` (nothing supports it → expect an honest refusal) — the
+exact analogue of the positive / `should_refuse` split, but for `develop`. `maayan eval
+--develop` runs each seed and reports three numbers (`maayan/eval/develop_harness.py`):
+
+- **develop rate** — of the supported seeds, how many produced a grounded development
+  (over-refusal hurts it);
+- **refusal rate** — of the unsupported seeds, how many were honestly refused (the same
+  default-deny discipline as `ask`, now measured for `develop`);
+- **grounding** — over the developments produced, the mean fraction of *cited* refs that
+  were *actually retrieved* (`develop_metrics.py::grounding_score`). A citation to a ref
+  that was never retrieved is a fabrication; 1.0 means every citation is backed by a
+  source the model was actually given.
+
+**Skill — measure the property you actually care about, with a pure function.** "Did it
+hallucinate a citation?" becomes `grounding_score(cited, retrieved)` — three lines, no
+network, hand-checkable in a test. The harness runs the *real* `DevelopmentService`
+against a fake retriever/backend, so the default-deny gate and citation extraction are
+exercised for real while staying offline; and the CLI wiring uses **in-memory** develop/
+thread stores so running an eval never writes proposals into your DB. As with retrieval,
+a CI guard (`test_shipped_develop_goldset_is_well_formed`) keeps the shipped gold set
+from going stale silently.
 
 ---
 
@@ -734,6 +779,90 @@ Predict each, then verify with
    by the **service's** injected `Clock`. The store stays a pure mechanism, so tests
    drive it with `FakeClock` and replays/reorderings stay deterministic; a store that
    read the wall clock could not be (house rule #2, and §5.4).
+</details>
+
+### L. The develop loop — seed → develop → approve ⭐⭐
+> Steps 2–3 call the model for *supported* seeds, so they need `OPENROUTER_API_KEY`.
+> The refusal path (an unsupported seed) needs **no key** — default-deny short-circuits.
+1. Predict: when you `maayan develop --seed <id>` on a seed the corpus *doesn't* support
+   (e.g. the ע״ב/מ״ה/ב״ן seed against Tanya Part I), does it call OpenRouter? What does
+   it return, and what is `Development.grounded`?
+2. Run the full loop: `ask --topic` → `annotate --opens-aspect --directive` →
+   `develop --seed` → `approve`. After approving, `search --source derived` for a related
+   query. Name the `Chunk.source` of the new result and three provenance fields it carries.
+3. ⭐⭐⭐ `develop()` and `ask()` share the *same* default-deny gate, yet they live in
+   different services. What is the single shared seam that guarantees they refuse on the
+   same condition — and why is duplicating the threshold check in each a smell?
+
+<details><summary>Answers</summary>
+
+1. **No model call.** Below `score_threshold` the develop step returns a refusal
+   `Development` with `grounded=False`, `model=""`, empty `cited_refs`/`grounded_in` —
+   persisted, but nothing indexed (`develop/service.py`, the default-deny branch).
+2. `source="derived"`, carrying `seed_id`, `author` (the seed's author), `developed_by`
+   (the model id), `grounded_in` (the retrieved refs it cited), `thread_id`,
+   `development_id`. Printed text was never touched — the development layered on as a new
+   chunk.
+3. Both gate on `RetrievalResult.relevance < score_threshold` from the **same injected
+   `Retriever`** (the absolute top-cosine signal, §C.2). The retriever owns "how relevant
+   is this?"; the services own "what do we do about it." Re-deriving relevance in each
+   service would let the two drift apart — the gate must read one source of truth.
+</details>
+
+### M. The term lexicon — folding & the deny-list ⭐⭐
+Pure-function first (no setup needed):
+1. Predict, then run
+   `uv run python -c "from maayan.corpus.normalize import fold_surface as f; print(f('ע\"ב')==f('ע״ב')==f('עב'))"`.
+   Why must all three fold equal for the lexicon to work?
+2. Predict the two outputs, then run
+   `uv run python -c "from maayan.corpus.normalize import expand_rashei_teivot as e, fold_surface as f; t='כתוב ע\"ב כאן'; print(e(t, enabled=True, expansions={'ע\"ב':'X'})); print(e(t, enabled=True, expansions={'ע\"ב':'X'}, protected={f('ע״ב')}))"`.
+   Which call mangles the term and which protects it?
+3. With the index up: `maayan add-term` for ע״ב (see the README §3.F block), then
+   `maayan search 'יחוד מ"ה וב"ן' --source term`. Why does the definition surface even
+   though the *query* never literally said "ע״ב"?
+4. ⭐⭐⭐ The deny-list comes from `TermService.protected_terms()`, not a hardcoded set.
+   What maintenance bug does sourcing it *from the data* prevent as the lexicon grows?
+
+<details><summary>Answers</summary>
+
+1. `True`. A term is typed many ways (gershayim, ASCII quote, bare, with/without nikkud);
+   folding normalizes all variants so lookup, the deny-list, and queries match the one
+   registered entity.
+2. First call → the term is replaced by `X` (mangled); second call → unchanged, because
+   its folded form is in `protected`. That's the deny-list biting
+   (`test_protected_term_is_never_expanded`).
+3. The embedded text is `canonical + definition`, which *contains* יחוד מ״ה וב״ן; dense
+   retrieval matches on **meaning**, not surface string. Surface forms drive lookup and
+   the deny-list, not the embedding.
+4. A hardcoded deny-list would silently fall out of date — define a new Holy Name and the
+   expansion hook could mangle it until someone remembered to edit code. Deriving it from
+   the registered terms makes "registered ⇒ protected" automatic.
+</details>
+
+### N. The develop eval — scoring a generative step ⭐⭐⭐
+1. Predict each, then run
+   `uv run python -c "from maayan.eval.develop_metrics import grounding_score as g; print(g(['Tanya 1:6','Tanya 9:1'],['Tanya 1:6','Tanya 9:1']), g(['Tanya 1:6','Tanya 99:9'],['Tanya 1:6','Tanya 9:1']), g([],['Tanya 1:6']))"`.
+   What does the middle number mean about the model's behavior?
+2. `maayan eval --develop` reports a **develop rate** and a **refusal rate**. Map each to
+   a side of `eval/develop_goldset.yaml`, and say which way each moves if you raise
+   `SCORE_THRESHOLD`.
+3. Why does the develop harness run the *real* `DevelopmentService` (with a fake
+   retriever/backend) instead of a fully-fake developer — and why does the CLI wire it
+   with **in-memory** stores?
+
+<details><summary>Answers</summary>
+
+1. `1.0  0.5  1.0`. The middle `0.5` means half the cited refs were **fabricated** —
+   cited but never retrieved. The empty-citation case is a vacuous `1.0` (nothing to
+   fabricate).
+2. **develop rate** = of the `supported` seeds, the fraction developed; **refusal rate** =
+   of the `unsupported` seeds, the fraction refused. Raising the threshold pushes
+   *develop rate down* (more supported seeds wrongly refused) and *refusal rate up* — the
+   same trade-off as the retrieval gate (§E).
+3. Running the real service exercises the actual gate + citation-extraction path, so the
+   eval measures the code that ships — only the network (retriever/backend) is faked.
+   In-memory stores keep the eval **side-effect-free**: scoring your corpus never litters
+   the DB with proposal/thread rows.
 </details>
 
 ---

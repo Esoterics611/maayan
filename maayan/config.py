@@ -137,6 +137,10 @@ class Settings(BaseSettings):
 
     # ---- Evaluation ---------------------------------------------------------
     eval_goldset_path: str = Field(default="eval/goldset.yaml")
+    eval_develop_goldset_path: str = Field(
+        default="eval/develop_goldset.yaml",
+        description="Seeds (supported/unsupported) for scoring the develop step (Prompt 15).",
+    )
     eval_ks: list[int] = Field(default=[1, 3, 5, 10])
 
     # ---- UI -----------------------------------------------------------------
