@@ -286,19 +286,28 @@ def evaluate(
     settings = get_settings()
     path = goldset or settings.eval_goldset_path
     examples = load_goldset(path)
-    typer.echo(f"Gold set: {path} ({len(examples)} questions)\n")
+    typer.echo(f"Gold set: {path} ({len(examples)} questions)")
+    typer.echo(f"Default-deny gate threshold: {settings.score_threshold}\n")
 
     if compare:
         from maayan.embed.factory import build_embedder
 
         embedder = build_embedder(settings)  # built once, shared across same-model variants
         reports = run_comparison(
-            settings, default_variants(), examples, settings.eval_ks, embedder=embedder
+            settings,
+            default_variants(),
+            examples,
+            settings.eval_ks,
+            score_threshold=settings.score_threshold,
+            embedder=embedder,
         )
         typer.echo(format_comparison(reports, k=k))
     else:
         retriever = build_retriever(settings)
-        typer.echo(format_report(run_eval(retriever, examples, settings.eval_ks)))
+        report = run_eval(
+            retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
+        )
+        typer.echo(format_report(report))
 
 
 @app.command()

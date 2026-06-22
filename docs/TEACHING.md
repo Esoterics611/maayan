@@ -140,14 +140,19 @@ small, independently testable pieces:
   matching is **prefix-aware**, so a chapter-level gold ref
   (`"...Likkutei Amarim 1"`) matches any segment retrieved within it (`"...1:13"`).
   That lets the gold set be written at the granularity a scholar actually knows.
-- **`goldset.py`** — a `GoldExample` model and a YAML/JSON loader. The seed set
-  (`eval/goldset.yaml`) is ~15 hand-curated questions over *Likutei Amarim*, in
-  both Hebrew and English, and is *meant to be edited* — better gold = more
-  trustworthy numbers.
-- **`harness.py`** — `run_eval` aggregates metrics over the gold set;
-  `run_comparison` evaluates several `VariantConfig`s (hybrid vs dense-only,
-  top-k, **swappable embedding model**) on the same questions and prints a
-  side-by-side table.
+- **`goldset.py`** — a `GoldExample` model and a YAML/JSON loader. The set
+  (`eval/goldset.yaml`) is now **52 hand-curated cases over all 53 chapters** of
+  *Likutei Amarim*, He + En, and is *meant to be edited*. Two kinds:
+  **positive** cases carry the chapter(s) that should rank; **negative** cases set
+  `should_refuse: true` — the right behavior is for the **default-deny gate to
+  refuse** (off-corpus questions: other texts, halacha, anachronisms). Negatives
+  measure the gate, not ranking, so they're excluded from hit/recall/MRR.
+- **`harness.py`** — `run_eval` aggregates ranking metrics over the *positives*
+  and, using the same `score_threshold` the RAG gate uses, reports two gate rates:
+  **answer-rate** (positives it would answer — over-refusal hurts this) and
+  **refusal-rate** (negatives it would refuse). `run_comparison` evaluates several
+  `VariantConfig`s (hybrid vs dense-only, top-k, **swappable embedding model**) on
+  the same questions and prints them side by side, gate rates included.
 
 Run it:
 
@@ -164,6 +169,12 @@ harness is the thing you run before *and after* every retrieval change so a
 ---
 
 ## 3. What the numbers actually say (measured, not claimed)
+
+> The tables below were measured on the **original 15-question seed**. The gold set
+> has since grown to **52 cases (42 positive + 10 negative)** spanning all 53
+> chapters (P2, below), and `make eval` now also prints the default-deny gate rates.
+> Re-run `make eval` for current figures; the seed numbers are kept here because the
+> *lesson* they teach (next page) doesn't change.
 
 Run on the live index (1,396 chunks of *Likutei Amarim*, bge-m3), 15-question
 seed gold set:
@@ -236,17 +247,29 @@ decision. How it actually went, because the method matters more than the result:
   guarantee it elsewhere (fp16/CUDA atomics). The cheap insurance — a CI smoke run
   that asserts `make eval` is stable across two invocations — is folded into P5.
 
-### P2 — Make the gold set worth trusting
-- Grow it from ~15 to ~50+ questions, spanning more of the corpus (not just the
-  early chapters), with a few **negative** questions whose correct behavior is a
-  *refusal* (so default-deny gets measured too).
-- Have the expert (the actual scholar) review/author the gold refs. Right now they
-  are reasonable but not authoritative; the file header already says so.
+### P2 — Make the gold set worth trusting (DONE — and it made the harness richer)
+- **Grown ~15 → 52 cases over all 53 chapters**, He + En, weighted toward the
+  previously-uncovered later chapters (33–53).
+- **Negatives added.** 10 cases marked `should_refuse: true` — off-corpus questions
+  (other texts, halacha, anachronisms, and a deliberate near-miss: Tanya Part III,
+  which isn't indexed). A negative question retrieving nothing relevant is a
+  *success*, so feeding negatives into hit/recall/MRR would be wrong — they'd score
+  0 and tank the averages. So the harness now **splits positives from negatives**:
+  ranking metrics over positives only, and a **default-deny gate** measured against
+  the same `score_threshold` the live system uses (answer-rate over positives,
+  refusal-rate over negatives). *Lesson: a new kind of test case can demand a new
+  metric — don't shoehorn it into the old one.*
+- **CI-guarded.** `test_shipped_goldset_is_well_formed` loads the real YAML in CI
+  (no model needed), so a typo in the gold set can't ship green even though the
+  other unit tests use synthetic gold.
+- **Still open:** the refs are reasonable but not yet scholar-authoritative — the
+  one step here that needs the actual expert, not the engineer.
 
 ### P3 — Measure the things the harness can't yet see
 - **Answer-grounding metrics**, not just retrieval: of the refs the model cited,
-  how many were actually retrieved? (catches hallucinated citations). And a
-  refusal-precision/recall pass over the negative questions.
+  how many were actually retrieved? (catches hallucinated citations). *(The refusal
+  side of this — a precision/recall view of the gate — landed early with P2's
+  negatives; grounding of cited refs is the remaining piece.)*
 - **Latency + token cost** per question, logged alongside quality, so a tradeoff
   table ("dense-only is faster *and* better here") is one command away.
 
@@ -265,6 +288,202 @@ decision. How it actually went, because the method matters more than the result:
 When P1–P3 are green, this phase is not just working — it's *defensible*: every
 retrieval and model choice in the system can be backed by a number anyone can
 reproduce. That's the bar.
+
+---
+
+## 5. Exercises — test your understanding
+
+The goal: be able to explain, and *change*, every part of what we built. Work top
+to bottom; each group maps to a section above. **Predict the answer first, then run
+the command to check.** Answers are collapsed — open them only after you've
+committed to a guess. ⭐ = warm-up, ⭐⭐ = solid, ⭐⭐⭐ = you really get it.
+
+> Setup once: `uv sync --extra ml --extra ui`, `make up`, `make ingest`, `make
+> index`. Exercises that only touch pure functions need none of that.
+
+### A. Orient yourself ⭐
+1. Without grepping, list the six stages a question passes through from `maayan
+   ask` to a printed answer, and name the module that owns each.
+2. What is the single data type that flows through corpus → embed → index →
+   retrieve? Why does that choice make the expert-capture loop possible?
+
+<details><summary>Answers</summary>
+
+1. Retriever (`retrieve/`) → [RAG default-deny gate] (`generate/rag.py`) →
+   Generation backend (`generate/`) → answer; the question was first embedded
+   (`embed/`) and searched in Qdrant (`index/`). Capture (`capture/`) records the
+   session afterward.
+2. `Chunk` (`corpus/models.py`). Expert annotations become `Chunk`s with
+   `source="expert"` in the *same* collection, so retrieval can't tell them from
+   printed text — that's the loop.
+</details>
+
+### B. Dependency injection ⭐⭐
+1. Run `grep -rn "build_retriever\|build_embedder\|build_generation_backend"
+   maayan/`. Every hit is in `cli.py`, the UI wiring, or a factory — none inside
+   `generate/rag.py` or `retrieve/retriever.py`. Why is that the whole point?
+2. `RAGService` takes a `Retrieving` and a `GenerationBackend` in its constructor.
+   What would break about the Ollama swap (Prompt 8) if it instead constructed an
+   `OpenRouterBackend` inside `ask()`?
+3. ⭐⭐⭐ Write three lines of pseudocode for a test that checks default-deny
+   *without any network or model*. Which fakes do you inject?
+
+<details><summary>Answers</summary>
+
+1. Business logic depends only on *protocols*; concretions are built at the edges
+   and passed in. That's what lets real↔mock and OpenRouter↔Ollama swap with no
+   change to the logic.
+2. The `GENERATION_BACKEND` config switch would be dead — you couldn't select
+   Ollama without editing `ask()`. DI is what makes the swap "config only."
+3. Inject a fake `Retrieving` that returns `RetrievalResult(results=[],
+   relevance=0.0)` and a `GenerationBackend` mock; assert `ask()` returns a refusal
+   and the mock was **never called**. (See `tests/test_rag.py`.)
+</details>
+
+### C. Typed boundaries ⭐⭐
+1. Add a `GoldExample` to a YAML file with `expected_refs: "Tanya 1"` (a string,
+   not a list). Run `make eval`. What happens, and *where* — at load or deep in the
+   loop? Why is that good?
+2. ⭐⭐⭐ `RetrievalResult` carries both per-result `score` and a top-level
+   `relevance`. Why can't the gate just use `max(score)` of the results?
+
+<details><summary>Answers</summary>
+
+1. It fails immediately in `load_goldset` via `GoldExample.model_validate` with a
+   clear validation error — at the boundary, not three layers deep as a `KeyError`.
+2. In hybrid mode the per-result `score` is an **RRF rank** score (best-of-list),
+   which can't distinguish "relevant" from "best of irrelevant". `relevance` is an
+   *absolute* top dense-cosine, which is what an absolute gate needs.
+</details>
+
+### D. Inject time ⭐⭐
+1. The Sefaria client rate-limits itself. Find where it waits (`grep -rn "clock"
+   maayan/corpus/`). Why does its rate-limit test run in microseconds?
+2. ⭐⭐⭐ You add exponential backoff to a future API client. Per the house rules,
+   what *must not* appear in it, and what do you inject instead?
+
+<details><summary>Answers</summary>
+
+1. It `await`s the injected `Clock`; tests inject `FakeClock`, which advances
+   virtual time instantly — no real sleeping.
+2. No `time.sleep`. Inject a `Clock` and drive all waiting through it (async), so a
+   "what happens after N seconds" path is a unit test.
+</details>
+
+### E. Default-deny gate ⭐⭐
+1. Predict: with `SCORE_THRESHOLD=0.99`, what does `uv run maayan ask "What is the
+   capital of France?"` do, and does it spend an OpenRouter token? Run it.
+2. Now run `SCORE_THRESHOLD=0.99 make eval`. Predict the direction of `answered (of
+   positives)` and `refused (of negatives)` versus the default threshold. Why?
+3. ⭐⭐⭐ Conversely, `SCORE_THRESHOLD=0.0`: what do the two gate rates become, and
+   what real-world failure does that represent?
+
+<details><summary>Answers</summary>
+
+1. It refuses — and spends **zero** tokens; default-deny short-circuits before the
+   model call (`rag.py:108`).
+2. `answered` drops (real questions now wrongly refused — over-refusal) while
+   `refused` rises toward 1.0. The threshold trades the two off.
+3. `answered → 1.0`, `refused → 0.0`: the system answers everything, including
+   off-corpus junk — i.e. it would hallucinate-from-nothing. That's exactly what
+   default-deny exists to prevent.
+</details>
+
+### F. Hybrid retrieval & RRF ⭐⭐
+1. In one sentence each: what does the *dense* vector catch that the *sparse* one
+   misses, and vice-versa? Why does RRF fuse by **rank** rather than raw score?
+2. ⭐⭐⭐ `run_eval` queries every variant at `k = max(eval_ks)`. Explain why
+   "hybrid k=10" and "hybrid k=5" must therefore produce identical rankings — and
+   what it meant when an early run showed they didn't.
+
+<details><summary>Answers</summary>
+
+1. Dense catches "means the same thing" (semantics); sparse catches "uses the same
+   rare term" (lexical, key for Hebrew technical words). Scores from two different
+   models aren't comparable; ranks always are, so RRF fuses ranks.
+2. Both issue the *same* query at limit 10 (top_k is overridden by the `k=10`
+   passed in), so identical results → identical metrics. When they differed, it
+   exposed a **reproducibility bug** (next group).
+</details>
+
+### G. The eval metrics ⭐⭐
+Predict each, then verify with
+`uv run python -c "from maayan.eval.metrics import *; print(<expr>)"`:
+1. `hit_at_k(["b","a","c"], ["a"], 1)` and `…k=2`
+2. `recall_at_k(["a","x"], ["a","b"], 2)`
+3. `mrr(["b","a"], ["a"])` and `mrr(["x","y"], ["a"])`
+4. `ref_matches("Tanya 1", "Tanya 1:13")` and `ref_matches("Tanya 1", "Tanya 12")`
+5. ⭐⭐⭐ Why does #4's second case return `False`, and what bug would a naive
+   `retrieved.startswith(expected)` introduce?
+
+<details><summary>Answers</summary>
+
+1. `0.0` (a is rank 2), then `1.0`.
+2. `0.5` (found `a`, not `b`).
+3. `0.5` (first hit at rank 2), then `0.0` (no hit).
+4. `True`, then `False`.
+5. Matching requires the expected ref followed by `":"` (or exact). Naive
+   `startswith("Tanya 1")` would wrongly match `"Tanya 12"`, `"Tanya 13"`, … —
+   chapter 1 would "match" chapters 12–19.
+</details>
+
+### H. Reproducibility — re-derive the fix ⭐⭐⭐
+1. Run `make eval ARGS='--compare'` twice; confirm the tables are byte-identical.
+2. Temporarily change both `results.sort(key=_rank_key)` lines in
+   `retriever.py` back to `results.sort(key=lambda r: r.score, reverse=True)`,
+   re-run twice, and watch the hybrid MRR wobble. **Revert.**
+3. Explain the chain: RRF score ties → Qdrant's order for ties → Python's *stable*
+   sort → why a `(-score, ref)` key fixes it but `model.eval()`/seeding would not.
+
+<details><summary>Answers</summary>
+
+3. RRF sums `1/(k+rank)`, producing many exact ties; Qdrant returns tied points in
+   an arbitrary order; a stable sort by score alone preserves that arbitrary order,
+   so runs differ. The embedder was *verified deterministic*, so seeding fixes
+   nothing — only a deterministic tiebreaker (`ref`) imposes a total order.
+</details>
+
+### I. Negatives & the gate (P2) ⭐⭐
+1. Add one negative to `eval/goldset.yaml` (`should_refuse: true`, no
+   `expected_refs`) with a clearly off-corpus question. Run `make eval`. Which
+   numbers move — the hit@k table, or the gate rates? Why only those?
+2. Add a *near-miss* negative (a real Tanya-adjacent topic that isn't in Part I).
+   If `refused (of negatives)` drops, what have you learned about the threshold?
+3. ⭐⭐⭐ A teammate "improves" recall by adding every example to `expected_refs`.
+   Why is the harness's positive/negative split what stops that from silently
+   inflating the score?
+
+<details><summary>Answers</summary>
+
+1. Only the gate rates (`refused (of negatives)`); negatives are excluded from
+   hit/recall/MRR by design, since "retrieved nothing relevant" is *success* for
+   them, not a miss.
+2. The gate is too permissive for that query (it would answer something off-corpus)
+   — a real, actionable finding: raise the threshold or improve the relevance
+   signal (e.g. the reranker).
+3. Negatives have no `expected_refs` and are never scored on ranking; you can't
+   pad recall with them. Inflating positives' refs is visible in the diff and
+   defeats the purpose — the split keeps the two concerns honest.
+</details>
+
+### J. Capstone ⭐⭐⭐
+1. Set `EXPERT_BOOST=5`, capture an expert connection on a question (`ask` →
+   `annotate`), then re-`search` a related query. Trace *why* the expert chunk now
+   ranks where it does — name every step from `embed_query` to the final sort.
+2. You want to claim "dense-only beats hybrid for this corpus." List the exact
+   commands and the two things you must check before the claim is trustworthy
+   (hint: one is about the gold set, one about the run).
+
+<details><summary>Answers</summary>
+
+1. `embed_query` → `query_hybrid` (RRF) → `_to_result` → `_apply_expert_boost`
+   (multiplies expert scores ×5) → `results.sort(key=_rank_key)` → top-k. The boost
+   raises the expert chunk's score so the deterministic sort ranks it higher.
+2. `make eval ARGS='--compare'`. Check (a) the gold set is large/representative
+   enough that the gap isn't noise (n, chapter coverage, expert-reviewed refs), and
+   (b) the run is reproducible (two runs identical) so the gap is real, not tie
+   jitter.
+</details>
 
 ---
 
