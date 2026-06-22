@@ -99,6 +99,10 @@ uv run maayan annotate --session <SESSION_ID> --author "R. Ginsburgh" \
 
 # 6. Re-search a related query → the expert connection now surfaces
 uv run maayan search "אתהפכא חשוכא לנהורא נפש הבהמית"
+
+# 7. Measure retrieval quality against the gold set (hit@k / recall@k / MRR + gate)
+make eval                           # single report
+make eval ARGS='--compare'          # hybrid vs dense-only vs top-k, side by side
 ```
 
 ### The web UI
@@ -162,6 +166,10 @@ House rules (enforced): typed + `mypy --strict`, dependency injection everywhere
 no `time.sleep` in logic (injected `Clock`), config-driven, no secrets in code,
 default-deny generation, tests mock network + models. See **[CLAUDE.md](CLAUDE.md)**
 and the original plan + prompts in **[docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)**.
+
+> **New here?** **[docs/TEACHING.md](docs/TEACHING.md)** is a guided walkthrough of
+> the whole system — every engineering pattern it uses, the measured eval results,
+> and **hands-on exercises to test your understanding.** Start there.
 
 ---
 
