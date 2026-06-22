@@ -19,6 +19,14 @@ expert's knowledge surfaces alongside the printed text. That feedback loop — n
 the model — is the product. Everything else (typing, DI, config, eval) exists so
 that loop stays trustworthy as it grows.
 
+**Phase 2 (§5) gives that loop teeth.** A note that just *sits there* becomes a
+**seed**: knowledge (often from outside the corpus) plus a **directive** the model
+**develops** — grounded in freshly-retrieved sources, cited, and refused if the
+corpus doesn't support it. Once the expert **approves**, the development becomes new
+*attributed* corpus. Lines of inquiry are organized into persistent **topic
+threads**, and a **term lexicon** teaches the system which tokens are Holy
+Names/terms rather than acronyms.
+
 ---
 
 ## 1. The data spine: one model, end to end
@@ -291,7 +299,219 @@ reproduce. That's the bar.
 
 ---
 
-## 5. Exercises — test your understanding
+## 5. Phase 2 — developing the corpus (notes → knowledge)
+
+Phase 1 made a trustworthy *reader*: ask, retrieve, ground, cite, refuse. Phase 2
+([docs/BUILD_PLAN_PHASE2.md](BUILD_PLAN_PHASE2.md)) makes a trustworthy *writer*: the
+expert's input stops being inert text and starts **growing the corpus** — under the
+same grounded/cited/default-deny discipline. Status as you read this: **Prompts 9–10
+are built; 11–16 are specified and in progress.** Each subsection below names what's
+done vs planned.
+
+### 5.1 The shift: a seed is knowledge *plus a directive* (Prompt 9 — DONE)
+
+The discovery that drove the whole phase: during testing an expert saved a note that
+fused two different things in one text field — **knowledge** ("ahava b'ta'anugim is
+the revelation of the Name ע״ב after the unification of מ״ה and ב״ן…", a framework
+from texts *not* in the corpus) and a **directive** ("now find where this is hinted
+in Tanya"). The old system embedded the whole blob as one passive `source="expert"`
+chunk and did nothing with the directive.
+
+So a `Contribution` (the evolved `Annotation`, `maayan/capture/models.py`) now carries
+`directive: str | None` and `opens_aspect: bool` *separately* from `body`. The
+converter (`capture/convert.py`) keeps a seed's **embedded text = the knowledge
+(`body`) only**; the directive rides in **metadata**, never in the retrievable text.
+
+**Skill — separate the data from the instruction about the data.** A "find X" command
+is not knowledge; if you embed it, you pollute retrieval (now every search for that
+topic surfaces an imperative sentence). Keep executable intent in a typed field, out
+of the content. Verify it yourself:
+
+```bash
+uv run python -c "
+from datetime import UTC, datetime
+from maayan.capture.models import Annotation
+from maayan.capture.convert import annotation_to_chunks
+a = Annotation(id='x', session_id='s', timestamp=datetime.now(UTC), author='R. G',
+    kind='connection', body='the knowledge', directive='find the hint in Tanya', opens_aspect=True)
+[c] = annotation_to_chunks(a)
+print('text :', repr(c.text))            # -> 'the knowledge'  (directive absent)
+print('meta :', c.metadata['directive']) # -> 'find the hint in Tanya'
+"
+```
+
+### 5.2 Provenance is the point — required author, and a four-value taxonomy
+
+Two related rules landed in Prompt 9 and frame the rest of the phase:
+
+- **`author` is required**, validated at the model boundary (a `field_validator`
+  rejects blank/whitespace). There is no silent `"expert"` default any more —
+  anonymous knowledge can't enter the corpus. *Skill — make attribution a validation
+  invariant, not a convention.* An unattributed contribution should be *impossible to
+  construct*, the same way a malformed `GoldExample` is (§2.2).
+- **`Chunk.source` becomes a four-value taxonomy**: `sefaria` (printed, immutable) ·
+  `expert` (a human seed/correction) · `derived` (a model development, **approved**) ·
+  `term` (a lexicon entry). Retrieval and UI keep these **distinct and badged**, and
+  printed text is **never edited** — expert/derived/term knowledge *layers on top* as
+  separate chunks. *Skill — model provenance as first-class data.* "Who said this and
+  on what basis" is a field you can filter, boost, and display — not a comment.
+
+### 5.3 A real bug, a real lesson: never split on a delimiter your data contains (Prompt 9 — DONE)
+
+The CLI `annotate` used to read `--refs "a, b"` and split on commas. But canonical
+Sefaria refs *contain commas*: `"Tanya, Part I; Likkutei Amarim 1:13"`. The split
+shredded one ref into three fragments — a silent provenance corruption. The fix: a
+**repeatable `--ref`** option (each value taken verbatim) plus a `--refs` that splits
+on `" | "`, a delimiter refs never contain.
+
+**Skill — your delimiter must be outside your data's alphabet.** Before splitting on
+a character, ask "can a legitimate value contain it?" For human-authored domain
+strings the answer is usually yes for `,` `;` `:` `-`. Prefer repeated flags, or a
+separator the domain guarantees it won't use. Cheap to get right, expensive to debug
+later (the corruption is invisible until someone reads the stored refs).
+
+### 5.4 Topic threads: persist the line of inquiry (Prompt 10 — DONE)
+
+A single question is Phase 1; a *line of inquiry* that accumulates over many turns is
+Phase 2. `maayan/threads/` adds a `Thread` (id, title, timestamps) and ordered
+`ThreadTurn`s — each typed `ask | seed | development | refinement`, each carrying its
+`author`, a `record_id` pointing at the underlying record (session / contribution /
+development), and a **text snapshot** so the thread renders without re-joining. They
+persist in SQLite (`maayan threads` to list, `maayan thread <id>` to show).
+
+Note the layering, which mirrors the rest of the codebase:
+
+- **`ThreadStore` is pure persistence** — it takes no `Clock` and makes no decisions.
+  It even bumps a thread's `updated_at` from *the turn's own timestamp*, so it never
+  needs to know the time.
+- **`ThreadService` owns policy** — it injects the `Clock` (house rule #2), stamps
+  timestamps, and assigns 1-based ordinals. The new `thread_context_turns` config
+  (default 6) is the knob Prompt 11 will read.
+
+**Skill — push time and numbering into the service, keep the store dumb.** A store
+that knows the clock is a store you can't reorder, replay, or test deterministically.
+Decisions (when, in what order) are policy; storage is mechanism — keep the seam.
+
+### 5.5 Context-aware follow-ups — conversational, still grounded (Prompt 11 — DONE)
+
+A thread is only useful if turn 2 can say "and the animal soul?" and be understood.
+`RAGService.ask` now takes `context_turns: Sequence[ContextTurn]` — prior turns handed
+to the model **only to interpret the current question**. The hard rules are enforced
+in code, not hoped for in the prompt:
+
+- **Retrieval still runs fresh on the current question alone.** The context never
+  feeds retrieval, so grounding can't drift onto what was said earlier.
+- **Default-deny is unchanged.** The below-threshold refusal returns *before any
+  prompt is built*, so context can never sneak a model call past the gate (tested:
+  empty retrieval + context present ⇒ still refuses, zero backend calls).
+- **The context is non-citable.** It's rendered as a clearly-labelled "CONVERSATION
+  SO FAR (do NOT cite…)" block *before* the citable `SOURCES:` block, and the system
+  prompt forbids citing it. `cited_refs` is resolved only against the fresh sources —
+  a ref that appears *only* in the conversation is never cited.
+
+`ContextTurn` is deliberately a separate model from `threads.ThreadTurn`: the
+generator must not depend on the thread layer. The bridge lives in one place,
+`threads/flow.py::ask_in_thread`, which reads the last `thread_context_turns` (config)
+turns, maps them to `ContextTurn`s, asks, and appends the new `ask` turn.
+
+**Skill — when you relax a constraint for usefulness, re-pin it in code.** "See the
+conversation" is exactly the kind of feature that quietly erodes grounding ("well, it
+*was* in the context…"). The discipline is to make the relaxation *structural*:
+separate blocks, a citation resolver that only knows the fresh sources, and a gate
+that fires before the prompt exists. Convenience for the reader, zero give on trust.
+
+### 5.6 The develop step — the same discipline, a new verb (Prompt 12 — DONE)
+
+`DevelopmentService.develop(seed, *, thread_id)` (`maayan/develop/`) is `RAGService`'s
+twin, with a new verb. It builds a query from the seed's body + directive, retrieves
+fresh, and **if relevance is below `score_threshold`, returns a refusal `Development`
+with no model call** — default-deny (§2.4) re-applied to a *new* operation. Otherwise
+it asks the model to fulfil the directive with a prompt that **separates** the
+retrieved corpus SOURCES (cite these) from the expert SEED ("framework — attribute it,
+do **not** cite it as a retrieved source"). The output is a `Development` carrying
+`status="proposed"`, `grounded`, `cited_refs`, `grounded_in`, and provenance
+(`seed_id`, `author`, `thread_id`, `model`). It is persisted and appended to the
+thread as a `development` turn — but **not indexed as corpus**. Approval does that
+(§5.7).
+
+Notice what made this cheap to build correctly: the citation resolver
+(`extract_cited_refs`) and the numbered-sources renderer (`build_context`) were
+*reused* from `rag.py`, so `develop`'s citations resolve against the fresh sources by
+the exact same logic — a context- or seed-only ref can't be cited.
+
+**Skill — re-apply your invariants to every new code path; don't assume they
+generalize for free.** "Grounded, cited, refuses honestly" is true of `ask` because
+it's *enforced* there; `develop` only inherits it because it enforces it again (and a
+test asserts the below-threshold path makes zero backend calls). Same with citation
+hygiene: the seed framework, like the conversation context in §5.5, is **attributed
+but never cited** — only retrieved sources are citable. An invariant is a property of
+code, not of a phase.
+
+### 5.7 The approval gate — human-in-the-loop before knowledge becomes authoritative (Prompt 13 — DONE)
+
+A development is a *proposal* until the expert approves it (`develop_auto_approve`
+defaults `false`). `DevelopmentService.approve(id)` converts it into a
+`source="derived"` chunk — with full provenance (`seed_id`, `author`,
+`developed_by=<model>`, `grounded_in=[refs]`, `thread_id`, `development_id`) — and
+embeds + upserts it into the *same* Qdrant collection (the exact pattern
+`CaptureService` uses for expert chunks). `reject()` indexes nothing. The fourth
+source value is now real end to end: `search --source derived` filters to it, results
+badge it, and `derived_boost` (sibling to `expert_boost`, both resolved in
+`Retriever._source_boost`) lets reviewed knowledge be preferred. Approving a *refusal*
+is refused — there's nothing grounded to promote.
+
+**Skill — put a human gate between "the model produced this" and "the system believes
+this."** The model develops; the *expert* decides what becomes corpus. The gate is
+what lets you trust the derived layer later — and it's why printed text stays
+immutable and derived knowledge is a separate, labelled chunk, never an edit to the
+source. (`approve`/`reject` + `develop_auto_approve` are just the *policy* over that
+one structural fact.)
+
+### 5.8 The thread UI — thin routes, logic in the services (Prompt 14 — DONE)
+
+The browser UI (`maayan/ui/`) is rebuilt around topic threads: a sidebar of threads, a
+scrollable turn list (ask / seed / development / refinement), and one composer that can
+ask *or* plant a seed. Each user action is one `fetch` to one route, and **every route
+is a thin wrapper over a service** — `create_app(rag, capture, threads, develop)` wires
+them, and the handlers do nothing but translate HTTP ↔ service call. The seed→develop→
+approve loop you ran from the CLI (§5.6–5.7) is the same services, now clickable;
+sources are badged sefaria / expert / derived, and a development renders as a *proposal*
+with Approve/Reject until it's promoted.
+
+Two design points worth lifting out:
+- **The generator never learns about threads.** Asking in a thread goes through
+  `threads/flow.py::ask_in_thread` (§5.5), so the route just calls it — the thread layer
+  composes the RAG layer, never the other way round.
+- **The turn snapshot vs. the live record.** A `ThreadTurn` stores a display snapshot;
+  on `GET /threads/{id}` the route *enriches* development turns with the live
+  `Development` (status + citations, to drive the buttons) and seed turns with their
+  directive. The snapshot keeps reads cheap; the enrichment keeps the buttons correct.
+
+**Skill — the route is plumbing; resist putting logic in it.** Every test in
+`tests/test_ui_threads.py` mocks the services and asserts the *wiring* (right service
+called, right status on the refusal/reject paths). When the handler is thin, that's all
+there is to test — the behavior is tested once, in the service.
+
+### 5.9 The term lexicon — encode expertise as data, not as a clever heuristic (Prompt 16 — PLANNED)
+
+Tokens like **ע״ב** carry gershayim (״) and *look* like rashei-teivot, but they are
+**terms / Holy Names** (ע״ב is the *Ab* expansion of the Tetragrammaton, gematria 72;
+sibling to ס״ג/מ״ה/ב״ן). Expanding them as abbreviations mangles meaning; the embedder
+alone doesn't know them. The fix is a curated `Term` lexicon — define a term once as a
+`source="term"` entity and every future question retrieves that definition — plus a
+**protected-terms deny-list** that the documented rashei-teivot hook (CLAUDE.md) must
+never expand.
+
+**Skill — when a heuristic would be wrong, reach for a curated table instead.**
+"Expand abbreviations" is a tempting rule that silently corrupts a whole category of
+sacred terms. The disciplined move is not a smarter guesser but an *expert-maintained
+deny-list / glossary*: domain knowledge lives as data the pipeline consults, with a
+named author, not as code nobody can audit. (This is also the one *non-speculative*
+reason to touch that hook at all.)
+
+---
+
+## 6. Exercises — test your understanding
 
 The goal: be able to explain, and *change*, every part of what we built. Work top
 to bottom; each group maps to a section above. **Predict the answer first, then run
@@ -483,6 +703,37 @@ Predict each, then verify with
    enough that the gap isn't noise (n, chapter coverage, expert-reviewed refs), and
    (b) the run is reproducible (two runs identical) so the gap is real, not tie
    jitter.
+</details>
+
+### K. Phase 2 — seeds, threads, provenance ⭐⭐
+1. Predict, then run the §5.1 snippet: where does a seed's `directive` end up — the
+   embedded chunk **text** or its **metadata** — and why must it not be in the text?
+2. Predict, then run:
+   `uv run python -c "from maayan.cli import _parse_refs; print(_parse_refs([], 'Tanya, Part I; Likkutei Amarim 1:13 | X, Y'))"`.
+   How many refs come out, and what happened to the commas?
+3. ⭐⭐⭐ `author` is validated on the `Annotation` **model** (a `field_validator`),
+   not only in the CLI/UI. What class of bug does the model-level check prevent that a
+   CLI-only check would not?
+4. ⭐⭐⭐ `ThreadStore` takes no `Clock`, yet appending a turn advances the thread's
+   `updated_at`. How does it get the time, and why would "the store reads the clock"
+   be an anti-pattern here?
+
+<details><summary>Answers</summary>
+
+1. **Metadata.** The embedded text is the knowledge (`body`) only. If the directive
+   were embedded, every retrieval on that topic would surface an imperative ("find
+   the hint in Tanya…") and pollute both ranking and the grounded answer.
+2. **Two** refs — `['Tanya, Part I; Likkutei Amarim 1:13', 'X, Y']`. `--refs` splits
+   only on `" | "`, so the commas *inside* each ref are preserved (the old comma
+   split would have produced four broken fragments).
+3. Contributions are constructed in several places (CLI, the UI route, and future
+   import/develop paths). A model-level validator makes an unattributed contribution
+   **unrepresentable everywhere at once**; a CLI-only check leaves every other caller
+   free to create blank-author records. Same principle as §2.2 — validate at the type.
+4. `append_turn` writes `updated_at = turn.timestamp`, and that timestamp was stamped
+   by the **service's** injected `Clock`. The store stays a pure mechanism, so tests
+   drive it with `FakeClock` and replays/reorderings stay deterministic; a store that
+   read the wall clock could not be (house rule #2, and §5.4).
 </details>
 
 ---

@@ -6,143 +6,214 @@
   <title>maayan · מעיין</title>
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
-            --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b; --expert:#2e6b4f; }
+            --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
+            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
            font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-    header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--panel); }
-    h1 { margin:0; font-size:20px; font-weight:650; }
+    header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel); }
+    h1 { margin:0; font-size:19px; font-weight:650; }
     h1 small { color:var(--muted); font-weight:400; margin-left:8px; }
-    main { max-width:880px; margin:0 auto; padding:24px; }
-    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px;
-             padding:18px; margin-bottom:18px; }
-    textarea, input:not([type=checkbox]):not([type=radio]), select { font:inherit; width:100%;
-             padding:10px 12px;
-             border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; }
-    .row { display:flex; gap:10px; }
+    .layout { display:flex; height:calc(100vh - 56px); }
+    aside { width:260px; border-right:1px solid var(--line); background:var(--panel);
+            padding:14px; overflow-y:auto; flex:0 0 auto; }
+    main { flex:1; display:flex; flex-direction:column; min-width:0; }
+    .turns { flex:1; overflow-y:auto; padding:20px; max-width:900px; width:100%; margin:0 auto; }
+    .composer { border-top:1px solid var(--line); background:var(--panel); padding:14px 20px;
+                max-width:900px; width:100%; margin:0 auto; }
+    textarea, input:not([type=checkbox]), select { font:inherit; width:100%; padding:9px 11px;
+            border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; }
+    .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
-    button { font:inherit; cursor:pointer; padding:10px 18px; border:none; border-radius:8px;
-             background:var(--accent); color:#fff; font-weight:600; }
+    button { font:inherit; cursor:pointer; padding:9px 15px; border:none; border-radius:8px;
+             background:var(--accent); color:#fff; font-weight:600; flex:0 0 auto; }
     button.secondary { background:#efe9dd; color:var(--ink); }
+    button.ghost { background:transparent; color:var(--accent); padding:4px 8px; font-size:13px; }
     button:disabled { opacity:.5; cursor:default; }
     .hint { color:var(--muted); font-size:13px; }
-    .answer { white-space:pre-wrap; font-size:17px; }
+    .thread-item { padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; }
+    .thread-item:hover { background:var(--bg); }
+    .thread-item.active { background:#efe9dd; font-weight:600; }
+    .turn { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:0 0 14px; background:var(--panel); }
+    .turn .who { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:5px; }
+    .turn .body { white-space:pre-wrap; }
+    .turn.seed { border-left:4px solid var(--seed); }
+    .turn.development { border-left:4px solid var(--derived); }
+    .turn.ask { border-left:4px solid var(--accent); }
+    .badge { font-size:11px; border-radius:6px; padding:1px 6px; margin-left:6px; border:1px solid; }
+    .badge.expert { color:var(--expert); border-color:var(--expert); }
+    .badge.derived { color:var(--derived); border-color:var(--derived); }
+    .badge.proposed { color:var(--seed); border-color:var(--seed); }
+    .badge.approved { color:var(--expert); border-color:var(--expert); }
+    .badge.rejected { color:#9a3b2f; border-color:#9a3b2f; }
+    .src { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; font-size:14px; }
+    .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
+    .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
+    .actions { margin-top:8px; display:flex; gap:8px; }
     .refused { color:#9a3b2f; }
-    .src { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:8px 0;
-           display:flex; gap:10px; align-items:flex-start; }
-    .src > input[type=checkbox] { flex:0 0 auto; width:auto; margin-top:4px; }
-    .src > div { flex:1; min-width:0; }
-    .src.expert { border-color:var(--expert); }
-    .src .meta { font-size:12px; color:var(--muted); }
-    .src .ref { font-weight:600; }
-    .src .ref .cited { color:var(--cited); }
-    .src .ref .badge { color:var(--expert); font-size:11px; border:1px solid var(--expert);
-            border-radius:6px; padding:0 5px; margin-left:6px; }
-    .src .body { font-size:14px; }
-    [dir=rtl] { text-align:right; }
+    label.field { display:block; margin:8px 0 3px; font-size:13px; color:var(--muted); }
     .hidden { display:none; }
-    .ok { color:var(--expert); }
-    label.field { display:block; margin:10px 0 4px; font-size:13px; color:var(--muted); }
+    .empty { color:var(--muted); text-align:center; margin-top:40px; }
   </style>
 </head>
 <body>
-  <header><h1>מעיין · maayan <small>esoteric Torah RAG — grounded, cited, expert-in-the-loop</small></h1></header>
-  <main>
-    <div class="panel">
-      <div class="row">
-        <input id="q" placeholder="Ask in Hebrew or English…  e.g. מהי נפש הבהמית" dir="auto" />
-        <button id="askBtn" style="flex:0 0 auto">Ask</button>
+  <header><h1>מעיין · maayan <small>topic threads — seed → develop → approve, grounded & cited</small></h1></header>
+  <div class="layout">
+    <aside>
+      <div class="row" style="margin-bottom:10px">
+        <input id="newTitle" placeholder="New topic title…" dir="auto" />
+        <button id="newBtn" title="Start a topic">＋</button>
       </div>
-      <div class="hint">Answers come only from retrieved sources, with citations. If nothing supports an answer, it refuses.</div>
-    </div>
+      <div id="threadList"></div>
+    </aside>
 
-    <div id="answerPanel" class="panel hidden">
-      <div id="answer" class="answer" dir="auto"></div>
-      <div id="sources" style="margin-top:14px"></div>
-    </div>
+    <main>
+      <div id="turns" class="turns"><div class="empty">Pick or start a topic to begin.</div></div>
 
-    <div id="annotatePanel" class="panel hidden">
-      <strong>Add expert knowledge</strong>
-      <div class="hint">Tick sources above to link them. Your note is embedded and indexed — it will surface in future searches.</div>
-      <div class="row">
-        <div><label class="field">Author</label><input id="author" value="expert" /></div>
-        <div><label class="field">Kind</label><select id="kind"></select></div>
-        <div><label class="field">Move tag (optional)</label><input id="move" placeholder="pasuk-&gt;concept" /></div>
+      <div class="composer">
+        <div id="answerSources"></div>
+        <div class="row">
+          <input id="q" placeholder="Ask within this topic…  e.g. מהי נפש הבהמית" dir="auto" />
+          <button id="askBtn">Ask</button>
+          <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
+        </div>
+        <div class="hint">Answers come only from retrieved sources, with citations; follow-ups use the thread as context but never bypass the refusal gate.</div>
+
+        <div id="seedBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
+          <div class="row">
+            <div><label class="field">Author <span class="hint">(required)</span></label><input id="author" placeholder="Your name" /></div>
+            <div><label class="field">Kind</label><select id="kind"></select></div>
+          </div>
+          <label class="field">Seed knowledge (often from outside the corpus)</label>
+          <textarea id="seedBody" rows="2" dir="auto" placeholder="e.g. אהבה בתענוגים היא גילוי שם ע&quot;ב…"></textarea>
+          <label class="field">Directive — what should the model develop? <span class="hint">(kept out of the embedded text)</span></label>
+          <input id="directive" dir="auto" placeholder="e.g. find where this is hinted at in Tanya" />
+          <div class="actions"><button id="seedBtn">Plant seed</button><span id="seedStatus" class="hint"></span></div>
+        </div>
       </div>
-      <label class="field">Note</label>
-      <textarea id="body" rows="3" dir="auto" placeholder="Correction / connection / addition / objection…"></textarea>
-      <div style="margin-top:10px; display:flex; gap:10px; align-items:center">
-        <button id="annBtn">Save annotation</button>
-        <span id="annStatus" class="ok"></span>
-      </div>
-    </div>
-  </main>
+    </main>
+  </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    let session = null, sources = [];
+    const AUTHOR_KEY = 'maayan.author';
+    let active = null;  // active thread id
+
+    const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
+    const j = (r) => r.json();
 
     async function loadKinds() {
-      try {
-        const kinds = await (await fetch('/kinds')).json();
-        $('kind').innerHTML = kinds.map(k => `<option value="${k}">${k}</option>`).join('');
+      try { const ks = await j(await fetch('/kinds'));
+        $('kind').innerHTML = ks.map(k => `<option>${k}</option>`).join('');
       } catch (e) { $('kind').innerHTML = '<option>connection</option>'; }
     }
 
-    function renderSources() {
-      $('sources').innerHTML = sources.map((s, i) => `
-        <div class="src ${s.source === 'expert' ? 'expert' : ''}">
-          <input type="checkbox" data-ref="${encodeURIComponent(s.ref)}" title="link this source" />
-          <div style="flex:1">
-            <div class="ref"><span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${escapeHtml(s.ref)}</span>${s.source === 'expert' ? '<span class="badge">expert</span>' : ''}</div>
-            <div class="meta">${s.lang} · ${s.source} · score ${s.score.toFixed(3)}</div>
-            <div class="body" dir="auto">${escapeHtml(s.text)}</div>
-          </div>
-        </div>`).join('');
+    async function loadThreads() {
+      const ts = await j(await fetch('/threads'));
+      $('threadList').innerHTML = ts.length ? ts.map(t =>
+        `<div class="thread-item ${t.id === active ? 'active' : ''}" data-id="${t.id}">${esc(t.title)}</div>`
+      ).join('') : '<div class="hint">No topics yet.</div>';
+      [...document.querySelectorAll('.thread-item')].forEach(el =>
+        el.onclick = () => openThread(el.dataset.id));
     }
 
-    function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; }
+    async function newTopic(title) {
+      const t = await j(await fetch('/threads', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ title }) }));
+      active = t.id; await loadThreads(); await openThread(t.id); return t.id;
+    }
+
+    async function openThread(id) {
+      active = id; $('answerSources').innerHTML = '';
+      const d = await j(await fetch('/threads/' + id));
+      [...document.querySelectorAll('.thread-item')].forEach(el =>
+        el.classList.toggle('active', el.dataset.id === id));
+      renderTurns(d.turns);
+    }
+
+    function renderTurns(turns) {
+      if (!turns.length) { $('turns').innerHTML = '<div class="empty">Ask a question or plant a seed to begin.</div>'; return; }
+      $('turns').innerHTML = turns.map(t => {
+        let extra = '';
+        if (t.turn_type === 'seed' && t.is_seed) {
+          if (t.directive) extra += `<div class="hint">directive: ${esc(t.directive)}</div>`;
+          extra += `<div class="actions"><button class="ghost" onclick="developSeed('${t.record_id}')">Develop this →</button></div>`;
+        }
+        if (t.turn_type === 'development') {
+          if (t.grounded_in && t.grounded_in.length) extra += `<div class="hint">grounded in: ${esc(t.grounded_in.join(', '))}</div>`;
+          if (t.status === 'proposed' && t.grounded)
+            extra += `<div class="actions"><button onclick="decide('${t.record_id}','approve')">Approve</button>`
+                   + `<button class="secondary" onclick="decide('${t.record_id}','reject')">Reject</button></div>`;
+        }
+        const statusBadge = t.status ? `<span class="badge ${t.status}">${t.status}</span>` : '';
+        return `<div class="turn ${t.turn_type}">
+          <div class="who">${t.turn_type} · ${esc(t.author)}${statusBadge}</div>
+          <div class="body" dir="auto">${esc(t.text)}</div>${extra}</div>`;
+      }).join('');
+      $('turns').scrollTop = $('turns').scrollHeight;
+    }
+
+    function renderAnswerSources(data) {
+      const cls = data.grounded ? '' : ' refused';
+      const srcs = (data.sources || []).map(s => {
+        const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
+                    : s.source === 'derived' ? '<span class="badge derived">derived</span>' : '';
+        return `<div class="src ${s.source}">
+          <div class="ref"><span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}</div>
+          <div dir="auto">${esc(s.text)}</div></div>`;
+      }).join('');
+      $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer</div>
+        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}</div>`;
+    }
 
     async function ask() {
-      const question = $('q').value.trim();
-      if (!question) return;
+      const q = $('q').value.trim(); if (!q) return;
+      if (!active) await newTopic(q.slice(0, 48));
       $('askBtn').disabled = true; $('askBtn').textContent = '…';
       try {
-        const r = await fetch('/ask', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ question }) });
-        const data = await r.json();
-        session = data.session_id; sources = data.sources;
-        $('answerPanel').classList.remove('hidden');
-        $('answer').className = 'answer' + (data.grounded ? '' : ' refused');
-        $('answer').textContent = data.answer;
-        renderSources();
-        $('annotatePanel').classList.remove('hidden');
-        $('annStatus').textContent = '';
+        const data = await j(await fetch('/threads/' + active + '/ask',
+          { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question: q }) }));
+        $('q').value = '';
+        await openThread(active);
+        renderAnswerSources(data);
       } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'Ask'; }
     }
 
-    async function annotate() {
-      if (!session) return;
-      const body = $('body').value.trim();
-      if (!body) { $('annStatus').textContent = 'Write a note first.'; return; }
-      const linked_refs = [...document.querySelectorAll('#sources input:checked')]
-        .map(c => decodeURIComponent(c.dataset.ref));
-      $('annBtn').disabled = true;
-      try {
-        const r = await fetch('/annotate', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ session_id: session, author: $('author').value || 'expert',
-            kind: $('kind').value, body, move: $('move').value || null, linked_refs }) });
-        if (r.ok) { const d = await r.json();
-          $('annStatus').textContent = `Saved & indexed (${d.kind}). It will now surface in retrieval.`;
-          $('body').value = '';
-        } else { const e = await r.json(); $('annStatus').textContent = 'Error: ' + (e.detail || r.status); }
-      } finally { $('annBtn').disabled = false; }
+    async function plantSeed() {
+      const author = $('author').value.trim();
+      if (!author) { $('seedStatus').textContent = 'Author is required.'; $('author').focus(); return; }
+      const body = $('seedBody').value.trim();
+      if (!body) { $('seedStatus').textContent = 'Write the seed knowledge first.'; return; }
+      if (!active) await newTopic(body.slice(0, 48));
+      localStorage.setItem(AUTHOR_KEY, author);
+      const r = await fetch('/threads/' + active + '/seed', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ author, kind: $('kind').value, body, directive: $('directive').value.trim() || null }) });
+      if (r.ok) { $('seedBody').value = ''; $('directive').value = '';
+        $('seedStatus').textContent = 'Seed planted — click “Develop this”.'; await openThread(active);
+      } else { const e = await j(r); $('seedStatus').textContent = 'Error: ' + (e.detail || r.status); }
     }
+
+    async function developSeed(seedId) {
+      const r = await fetch('/threads/' + active + '/develop', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ seed_id: seedId }) });
+      if (r.ok) await openThread(active);
+      else { const e = await j(r); alert('Error: ' + (e.detail || r.status)); }
+    }
+
+    async function decide(devId, action) {
+      const r = await fetch('/developments/' + devId + '/' + action, { method:'POST' });
+      if (r.ok) await openThread(active);
+      else { const e = await j(r); alert('Error: ' + (e.detail || r.status)); }
+    }
+    window.developSeed = developSeed; window.decide = decide;
 
     $('askBtn').onclick = ask;
     $('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
-    $('annBtn').onclick = annotate;
-    loadKinds();
+    $('newBtn').onclick = () => { const t = $('newTitle').value.trim(); if (t) { $('newTitle').value=''; newTopic(t); } };
+    $('seedToggle').onclick = () => $('seedBox').classList.toggle('hidden');
+    $('seedBtn').onclick = plantSeed;
+    $('author').value = localStorage.getItem(AUTHOR_KEY) || '';
+    loadKinds(); loadThreads();
   </script>
 </body>
 </html>

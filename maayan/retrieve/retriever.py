@@ -71,6 +71,8 @@ class Retriever:
         reranker: Reranker | None = None,
         rerank_candidates: int = 30,
         expert_boost: float = 1.0,
+        derived_boost: float = 1.0,
+        term_boost: float = 1.0,
         hybrid: bool = True,
     ) -> None:
         self._index = index
@@ -79,6 +81,8 @@ class Retriever:
         self._reranker = reranker
         self._rerank_candidates = rerank_candidates
         self._expert_boost = expert_boost
+        self._derived_boost = derived_boost
+        self._term_boost = term_boost
         self._hybrid = hybrid
 
     def retrieve(
@@ -104,14 +108,14 @@ class Retriever:
         else:
             points = self._index.query_dense(emb.dense, limit=pool, query_filter=flt)
         results = [self._to_result(p) for p in points]
-        results = self._apply_expert_boost(results)
+        results = self._apply_source_boosts(results)
 
         if self._reranker is not None and results:
             # The cross-encoder score is a far more discriminative relevance signal
             # than bi-encoder cosine, so use it for the gate too (computed for free).
             raw_scores = self._reranker.rerank(query, [r.text for r in results])
             for r, s in zip(results, raw_scores, strict=True):
-                r.score = s * (self._expert_boost if r.source == "expert" else 1.0)
+                r.score = s * self._source_boost(r.source)
             results.sort(key=_rank_key)
             relevance = max(raw_scores) if raw_scores else 0.0
         else:
@@ -151,10 +155,21 @@ class Retriever:
             payload=payload,
         )
 
-    def _apply_expert_boost(self, results: list[SearchResult]) -> list[SearchResult]:
-        if self._expert_boost == 1.0:
+    def _source_boost(self, source: str) -> float:
+        """Score multiplier per source: expert (human), derived (reviewed), term (curated)."""
+        if source == "expert":
+            return self._expert_boost
+        if source == "derived":
+            return self._derived_boost
+        if source == "term":
+            return self._term_boost
+        return 1.0
+
+    def _apply_source_boosts(self, results: list[SearchResult]) -> list[SearchResult]:
+        if self._expert_boost == 1.0 and self._derived_boost == 1.0 and self._term_boost == 1.0:
             return results
         for r in results:
-            if r.source == "expert":
-                r.score *= self._expert_boost
+            boost = self._source_boost(r.source)
+            if boost != 1.0:
+                r.score *= boost
         return results

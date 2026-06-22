@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
 
+    @property
+    def generation_model(self) -> str:
+        """The model id of the selected generation backend (for provenance/logging)."""
+        return self.ollama_model if self.generation_backend == "ollama" else self.openrouter_model
+
     # ---- Vector DB (local) --------------------------------------------------
     qdrant_url: str = Field(default="http://localhost:6333")
     qdrant_api_key: SecretStr = Field(default=SecretStr(""))
@@ -82,6 +87,14 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier applied to source='expert' chunk scores (>1 prefers humans).",
     )
+    derived_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='derived' chunks (reviewed+approved developments).",
+    )
+    term_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='term' chunks (curated lexicon entries / Holy Names).",
+    )
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
@@ -101,6 +114,22 @@ class Settings(BaseSettings):
     # ---- Capture loop -------------------------------------------------------
     annotation_kinds: list[str] = Field(
         default=["correction", "connection", "addition", "objection"]
+    )
+
+    # ---- Topic threads ------------------------------------------------------
+    thread_context_turns: int = Field(
+        default=6,
+        description="How many prior thread turns to pass as conversation context (Prompt 11).",
+    )
+
+    # ---- Develop step -------------------------------------------------------
+    develop_top_k: int = Field(
+        default=8,
+        description="How many corpus sources to retrieve + ground a seed development on.",
+    )
+    develop_auto_approve: bool = Field(
+        default=False,
+        description="If true, develop() approves immediately; else it waits for approve().",
     )
 
     # ---- Storage / paths ----------------------------------------------------

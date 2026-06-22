@@ -23,27 +23,38 @@ def detect_lang(text: str) -> Lang:
 
 
 def annotation_to_chunks(annotation: Annotation) -> list[Chunk]:
-    """Turn an annotation into one retrievable expert chunk.
+    """Turn a contribution into one retrievable expert chunk.
 
-    The embedded text is the expert's body plus the linked refs and move tag, so
-    the note is retrievable both by its content and by the sources it connects.
+    For a *correction/connection*, the embedded text is the expert's body plus the
+    linked refs and move tag, so the note is retrievable both by its content and by
+    the sources it connects.
+
+    For a *seed* (``opens_aspect``), the embedded text is the knowledge (``body``)
+    ONLY: the directive ("now develop X") is a model instruction, not knowledge, so
+    it is stored in metadata and kept out of the retrievable text to avoid polluting
+    retrieval. All provenance still travels in metadata.
     """
-    linked = ", ".join(annotation.linked_refs)
-    parts = [annotation.body]
-    if linked:
-        parts.append(f"[{annotation.kind} ↔ {linked}]")
-    if annotation.move:
-        parts.append(f"(move: {annotation.move})")
-    text = " ".join(parts)
+    if annotation.opens_aspect:
+        text = annotation.body
+    else:
+        linked = ", ".join(annotation.linked_refs)
+        parts = [annotation.body]
+        if linked:
+            parts.append(f"[{annotation.kind} ↔ {linked}]")
+        if annotation.move:
+            parts.append(f"(move: {annotation.move})")
+        text = " ".join(parts)
 
     ref = f"Expert · {annotation.kind} · {annotation.id[:8]}"
     metadata: dict[str, object] = {
         "author": annotation.author,
         "kind": annotation.kind,
+        "opens_aspect": annotation.opens_aspect,
+        "directive": annotation.directive,
         "linked_refs": annotation.linked_refs,
         "move": annotation.move,
         "session_id": annotation.session_id,
-        "annotation_id": annotation.id,
+        "contribution_id": annotation.id,
     }
     return [
         Chunk.make(

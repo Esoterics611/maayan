@@ -54,13 +54,15 @@ class FakeCapture:
         return s
 
     def add_annotation(
-        self, session_id: str, *, author, kind, body, linked_refs: Sequence[str] = (), move=None
+        self, session_id: str, *, author, kind, body, linked_refs: Sequence[str] = (),
+        move=None, directive=None, opens_aspect=False,
     ) -> Annotation:
         if kind not in self.allowed_kinds:
             raise ValueError(f"Unknown kind {kind!r}")
         a = Annotation(
             id="ann-1", session_id=session_id, timestamp=NOW, author=author, kind=kind,
             body=body, linked_refs=list(linked_refs), move=move,
+            directive=directive, opens_aspect=opens_aspect,
         )
         self.annotations.append(a)
         return a
@@ -72,10 +74,33 @@ class FakeCapture:
         return [a for a in self.annotations if a.session_id == session_id]
 
 
+class _StubThreads:
+    """No-op thread service; the one-shot routes below don't touch it."""
+
+    def list_threads(self):  # noqa: ANN201
+        return []
+
+    def get_thread_with_turns(self, thread_id):  # noqa: ANN001, ANN201
+        return None
+
+
+class _StubDevelop:
+    def get_development(self, development_id):  # noqa: ANN001, ANN201
+        return None
+
+
+class _StubTerms:
+    def list_terms(self):  # noqa: ANN201
+        return []
+
+
 def _client(grounded: bool = True) -> tuple[TestClient, FakeRag, FakeCapture]:
     rag = FakeRag(_answer(grounded))
     capture = FakeCapture()
-    return TestClient(create_app(rag, capture)), rag, capture  # type: ignore[arg-type]
+    app = create_app(  # type: ignore[arg-type]
+        rag, capture, _StubThreads(), _StubDevelop(), _StubTerms()
+    )
+    return TestClient(app), rag, capture
 
 
 def test_index_serves_html() -> None:
@@ -124,8 +149,41 @@ def test_annotate_wires_capture() -> None:
 def test_annotate_bad_kind_returns_400() -> None:
     client, _, _ = _client()
     client.post("/ask", json={"question": "q"})
-    r = client.post("/annotate", json={"session_id": "sess-1", "body": "x", "kind": "bogus"})
+    r = client.post(
+        "/annotate",
+        json={"session_id": "sess-1", "body": "x", "kind": "bogus", "author": "R. G"},
+    )
     assert r.status_code == 400
+
+
+def test_annotate_missing_author_rejected() -> None:
+    client, _, _ = _client()
+    client.post("/ask", json={"question": "q"})
+    # No author at all → request-model validation (422).
+    missing = client.post(
+        "/annotate", json={"session_id": "sess-1", "body": "x", "kind": "connection"}
+    )
+    assert missing.status_code == 422
+    # Blank author → model validator raises, surfaced as 400.
+    blank = client.post(
+        "/annotate",
+        json={"session_id": "sess-1", "body": "x", "kind": "connection", "author": "  "},
+    )
+    assert blank.status_code == 400
+
+
+def test_annotate_seed_passes_directive_and_opens_aspect() -> None:
+    client, _, capture = _client()
+    client.post("/ask", json={"question": "מהי בחירה"})
+    r = client.post("/annotate", json={
+        "session_id": "sess-1", "body": "ahava b'ta'anugim framework", "kind": "connection",
+        "author": "R. G", "opens_aspect": True, "directive": "find the hint in Tanya",
+    })
+    assert r.status_code == 200
+    assert r.json()["opens_aspect"] is True
+    saved = capture.annotations[0]
+    assert saved.opens_aspect is True
+    assert saved.directive == "find the hint in Tanya"
 
 
 def test_get_session() -> None:

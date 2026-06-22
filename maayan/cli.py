@@ -150,7 +150,9 @@ def search(
     query: str = typer.Argument(..., help="Query text (Hebrew or English)."),
     k: int = typer.Option(None, "--k", help="How many results to return."),
     book: str = typer.Option(None, "--book", help="Restrict to a book."),
-    source: str = typer.Option(None, "--source", help="Restrict to a source (sefaria/expert)."),
+    source: str = typer.Option(
+        None, "--source", help="Restrict to a source (sefaria/expert/derived/term)."
+    ),
 ) -> None:
     """Hybrid (dense + sparse) retrieval over the indexed corpus."""
     from maayan.retrieve.factory import build_retriever
@@ -166,6 +168,9 @@ def search(
     for i, r in enumerate(results, 1):
         typer.echo(f"{i:>2}. [{r.score:.4f}] {r.ref}  ({r.lang}/{r.source})")
         typer.echo(f"      {r.first_line(100)}")
+        prov = _provenance_line(r)
+        if prov:
+            typer.echo(prov)
 
 
 @app.command()
@@ -173,6 +178,12 @@ def ask(
     question: str = typer.Argument(..., help="Your question (Hebrew or English)."),
     k: int = typer.Option(None, "--k", help="How many sources to ground on."),
     book: str = typer.Option(None, "--book", help="Restrict to a book."),
+    thread_id: str = typer.Option(
+        None, "--thread", help="Ask within an existing topic thread (uses prior turns as context)."
+    ),
+    topic: str = typer.Option(
+        None, "--topic", help="Start a new topic thread with this title, then ask within it."
+    ),
 ) -> None:
     """Answer grounded ONLY in retrieved sources, with citations (refuses if unsupported)."""
     from maayan.capture.factory import build_capture_service
@@ -186,7 +197,24 @@ def ask(
     retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
     rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
-    answer = rag.ask(question, k=k, book=book)
+
+    # Within a thread, prior turns are passed as NON-citable context; retrieval and
+    # default-deny are unchanged. Outside a thread, this is a plain one-shot ask.
+    active_thread: str | None = None
+    if thread_id or topic:
+        from maayan.threads.factory import build_thread_service
+        from maayan.threads.flow import ask_in_thread
+
+        threads = build_thread_service(settings)
+        active_thread = threads.start_thread(topic).id if topic else thread_id
+        if active_thread is None:  # defensive; one of thread_id/topic is always set here
+            raise typer.BadParameter("Pass --thread <id> or --topic '<title>'.")
+        answer = ask_in_thread(
+            rag, threads, active_thread, question,
+            max_context_turns=settings.thread_context_turns,
+        ).answer
+    else:
+        answer = rag.ask(question, k=k, book=book)
 
     # Record the session so an expert can annotate it later.
     capture = build_capture_service(settings, embedder=embedder)
@@ -199,6 +227,8 @@ def ask(
             for s in answer.sources[:3]:
                 typer.echo(f"  - {s.ref}")
         typer.echo(f"\nSession: {session.id}")
+        if active_thread:
+            typer.echo(f"Thread:  {active_thread}  (turn appended)")
         return
 
     typer.echo(f"\n{answer.text}\n")
@@ -210,34 +240,85 @@ def ask(
     if answer.cited_refs:
         typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
     typer.echo(f"\nSession: {session.id}")
+    if active_thread:
+        typer.echo(f"Thread:  {active_thread}  (ask turn appended; "
+                   "follow up with `maayan ask '...' --thread " + active_thread + "`)")
     typer.echo("Annotate it:  maayan annotate --session "
-               f"{session.id} --kind connection --body '...' --refs '...'")
+               f"{session.id} --author 'Your Name' --kind connection --body '...' "
+               "--ref '<ref>' --ref '<ref>'")
+
+
+def _provenance_line(result: object) -> str:
+    """A one-line provenance note for expert/derived search results (empty for sefaria)."""
+    # result is a retrieve.models.SearchResult; typed loosely to keep cli imports thin.
+    r = result
+    source = getattr(r, "source", "")
+    meta = getattr(r, "payload", {}).get("metadata", {}) or {}
+    if source == "derived":
+        grounded = ", ".join(meta.get("grounded_in", []))
+        return (f"      ↳ derived from an expert seed by {meta.get('author', '?')}, "
+                f"developed by {meta.get('developed_by', '?')}, grounded in {grounded}")
+    if source == "expert":
+        return f"      ↳ expert: {meta.get('author', '?')}"
+    if source == "term":
+        surfaces = ", ".join(meta.get("surface_forms", []))
+        return (f"      ↳ term [{meta.get('term_type', '?')}] by {meta.get('author', '?')}"
+                + (f"; surfaces: {surfaces}" if surfaces else ""))
+    return ""
+
+
+def _parse_refs(ref: list[str], refs: str) -> list[str]:
+    """Collect linked refs from a repeatable --ref plus a ' | '-delimited --refs.
+
+    Sefaria refs CONTAIN commas (e.g. "Tanya, Part I; Likkutei Amarim 1:13"), so a
+    comma split shreds them. We instead take each --ref verbatim and split --refs on
+    " | ", a delimiter that refs never contain — keeping multi-comma refs intact.
+    """
+    out = [r.strip() for r in ref if r.strip()]
+    if refs:
+        out.extend(part.strip() for part in refs.split(" | ") if part.strip())
+    return out
 
 
 @app.command()
 def annotate(
     session: str = typer.Option(..., "--session", help="Session id (printed by `ask`)."),
-    body: str = typer.Option(..., "--body", help="The expert's note."),
+    body: str = typer.Option(..., "--body", help="The expert's note / seed knowledge."),
+    author: str = typer.Option(..., "--author", help="Expert name/id (required — provenance)."),
     kind: str = typer.Option(
         "connection", "--kind", help="correction|connection|addition|objection"
     ),
-    author: str = typer.Option("expert", "--author", help="Expert name/id."),
-    refs: str = typer.Option("", "--refs", help="Comma-separated source refs to link."),
+    ref: list[str] = typer.Option(  # noqa: B008 (Typer manages the per-call list default)
+        None, "--ref", help="A source ref to link (repeatable; preserves commas)."
+    ),
+    refs: str = typer.Option(
+        "", "--refs", help="Source refs to link, separated by ' | ' (refs never contain it)."
+    ),
     move: str = typer.Option(None, "--move", help="Free move tag, e.g. 'pasuk->concept'."),
+    directive: str = typer.Option(
+        None, "--directive", help="Seed directive — what the model should develop (sep. from body)."
+    ),
+    opens_aspect: bool = typer.Option(
+        False, "--opens-aspect", help="Mark this as a seed that opens a new aspect."
+    ),
 ) -> None:
-    """Record an expert annotation and index it as retrievable expert knowledge."""
+    """Record an expert contribution and index it as retrievable expert knowledge."""
     from maayan.capture.factory import build_capture_service
 
     settings = get_settings()
     capture = build_capture_service(settings)
-    linked = [r.strip() for r in refs.split(",") if r.strip()]
+    linked = _parse_refs(ref or [], refs)
     ann = capture.add_annotation(
-        session, author=author, kind=kind, body=body, linked_refs=linked, move=move
+        session, author=author, kind=kind, body=body, linked_refs=linked, move=move,
+        directive=directive, opens_aspect=opens_aspect,
     )
-    typer.echo(f"Recorded annotation {ann.id} ({ann.kind}) by {ann.author}.")
+    label = "seed" if ann.opens_aspect else "annotation"
+    typer.echo(f"Recorded {label} {ann.id} ({ann.kind}) by {ann.author}.")
     typer.echo("Indexed as an expert chunk — it will now surface in retrieval.")
     if linked:
         typer.echo(f"Linked: {', '.join(linked)}")
+    if ann.directive:
+        typer.echo(f"Directive (for develop, kept out of embed text): {ann.directive}")
 
 
 @app.command()
@@ -257,9 +338,205 @@ def session(session_id: str = typer.Argument(..., help="Session id to display.")
     annotations = store.get_annotations(session_id)
     typer.echo(f"\nAnnotations ({len(annotations)}):")
     for a in annotations:
-        typer.echo(f"  - [{a.kind}] by {a.author}: {a.body[:120]}")
+        seed = " (seed → opens aspect)" if a.opens_aspect else ""
+        typer.echo(f"  - [{a.kind}]{seed} by {a.author}: {a.body[:120]}")
         if a.linked_refs:
             typer.echo(f"      links: {', '.join(a.linked_refs)}  move: {a.move}")
+        if a.directive:
+            typer.echo(f"      directive: {a.directive}")
+
+
+@app.command()
+def develop(
+    seed: str = typer.Option(..., "--seed", help="Contribution id of the seed to develop."),
+    thread_id: str = typer.Option(
+        None, "--thread", help="Develop within this thread (default: start a new one)."
+    ),
+) -> None:
+    """Develop a seed under its directive, grounded in the corpus (a proposal, not corpus)."""
+    from maayan.capture.store import CaptureStore
+    from maayan.develop.factory import build_development_service
+    from maayan.threads.factory import build_thread_service
+
+    settings = get_settings()
+    contribution = CaptureStore(settings.db_path).get_annotation(seed)
+    if contribution is None:
+        typer.echo(f"Seed contribution {seed!r} not found.")
+        raise typer.Exit(1)
+
+    threads = build_thread_service(settings)
+    if thread_id is None:
+        title = (contribution.directive or contribution.body)[:50]
+        thread_id = threads.start_thread(f"Develop: {title}").id
+        # Record the seed as the opening turn so the thread shows seed → development.
+        threads.add_turn(
+            thread_id, turn_type="seed", author=contribution.author,
+            text=contribution.body, record_id=contribution.id,
+        )
+
+    dev = build_development_service(settings).develop(contribution, thread_id=thread_id)
+
+    if not dev.grounded:
+        typer.echo(f"\n[refused] {dev.text}")
+        typer.echo(f"\nThread: {thread_id}")
+        return
+
+    typer.echo(f"\n{dev.text}\n")
+    typer.echo(f"Grounded in: {', '.join(dev.grounded_in)}")
+    if dev.cited_refs:
+        typer.echo(f"Cited:       {', '.join(dev.cited_refs)}")
+    typer.echo(f"\nDevelopment {dev.id} (status={dev.status}, by {dev.model}).")
+    if dev.status == "proposed":
+        typer.echo("A proposal — not indexed as corpus yet.")
+        typer.echo(f"Approve it:  maayan approve {dev.id}   (or: maayan reject {dev.id})")
+    else:
+        typer.echo("Auto-approved → indexed as a derived corpus chunk.")
+    typer.echo(f"Thread: {thread_id}")
+
+
+@app.command()
+def approve(
+    development_id: str = typer.Argument(..., help="Development id to approve."),
+) -> None:
+    """Approve a proposed development → index it as a retrievable `derived` corpus chunk."""
+    from maayan.develop.factory import build_development_service
+
+    settings = get_settings()
+    try:
+        dev = build_development_service(settings).approve(development_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Approved {dev.id} → indexed as a derived chunk.")
+    typer.echo(f"  by {dev.model}, grounded in: {', '.join(dev.grounded_in)}")
+    typer.echo("It will now surface in retrieval (search --source derived).")
+
+
+@app.command()
+def reject(
+    development_id: str = typer.Argument(..., help="Development id to reject."),
+) -> None:
+    """Reject a proposed development. Nothing is indexed; the corpus is unchanged."""
+    from maayan.develop.factory import build_development_service
+
+    settings = get_settings()
+    try:
+        dev = build_development_service(settings).reject(development_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Rejected {dev.id}. Nothing indexed.")
+
+
+@app.command()
+def threads() -> None:
+    """List persisted topic threads (most recently updated first)."""
+    from maayan.threads.factory import build_thread_service
+
+    settings = get_settings()
+    service = build_thread_service(settings)
+    rows = service.list_threads()
+    if not rows:
+        typer.echo("No threads yet. Start one as you ask/seed (Prompt 14 wires the UI).")
+        return
+    typer.echo(f"{len(rows)} thread(s):")
+    for t in rows:
+        typer.echo(f"  {t.id}  · {t.title}  (updated {t.updated_at:%Y-%m-%d %H:%M})")
+
+
+@app.command()
+def thread(thread_id: str = typer.Argument(..., help="Thread id to display.")) -> None:
+    """Show a topic thread with its ordered turns."""
+    from maayan.threads.factory import build_thread_service
+
+    settings = get_settings()
+    detail = build_thread_service(settings).get_thread_with_turns(thread_id)
+    if detail is None:
+        typer.echo("Thread not found.")
+        return
+    typer.echo(f"# {detail.thread.title}   ({detail.thread.id})")
+    typer.echo(f"  created {detail.thread.created_at:%Y-%m-%d %H:%M} · "
+               f"{len(detail.turns)} turns")
+    for turn in detail.turns:
+        snippet = turn.text[:120].replace("\n", " ")
+        typer.echo(f"\n  {turn.ordinal}. [{turn.turn_type}] by {turn.author}")
+        typer.echo(f"      {snippet}")
+        if turn.record_id:
+            typer.echo(f"      ↳ record {turn.record_id}")
+
+
+@app.command(name="add-term")
+def add_term(
+    canonical: str = typer.Option(..., "--canonical", help='Display form, e.g. \'ע"ב (Name of 72)\'.'),
+    definition: str = typer.Option(..., "--definition", help="What the term means."),
+    author: str = typer.Option(..., "--author", help="Who defined it (required — provenance)."),
+    term_type: str = typer.Option(
+        "concept", "--type", help="name|sefirah|partzuf|expansion|concept|other"
+    ),
+    surface: list[str] = typer.Option(  # noqa: B008 (Typer manages the per-call list default)
+        None, "--surface", help="A surface form to match (repeatable; gershayim/quote-insensitive)."
+    ),
+    related: list[str] = typer.Option(  # noqa: B008 (Typer manages the per-call list default)
+        None, "--related", help="A related/sibling term (repeatable)."
+    ),
+    source_ref: list[str] = typer.Option(  # noqa: B008 (Typer manages the per-call list default)
+        None, "--source-ref", help="A supporting reference (repeatable)."
+    ),
+    gematria: int = typer.Option(None, "--gematria", help="Numeric value, if any (e.g. 72)."),
+    sacred: bool = typer.Option(False, "--sacred", help="Mark as a Holy Name."),
+) -> None:
+    """Define a lexicon term / Holy Name and index it as retrievable knowledge."""
+    from typing import cast
+
+    from maayan.lexicon.factory import build_term_service
+    from maayan.lexicon.models import TermType
+
+    settings = get_settings()
+    term = build_term_service(settings).add_term(
+        canonical=canonical, definition=definition, author=author,
+        term_type=cast(TermType, term_type), surface_forms=surface or [],
+        related_terms=related or [], source_refs=source_ref or [],
+        gematria=gematria, sacred=sacred,
+    )
+    typer.echo(f"Defined term {term.id} — {term.canonical} [{term.term_type}] by {term.author}.")
+    typer.echo("Indexed as a term chunk — it will now surface in retrieval.")
+    if term.surface_forms:
+        typer.echo(f"Surface forms (protected from expansion): {', '.join(term.surface_forms)}")
+
+
+@app.command()
+def terms() -> None:
+    """List curated lexicon terms."""
+    from maayan.lexicon.factory import build_term_service
+
+    rows = build_term_service(get_settings()).list_terms()
+    if not rows:
+        typer.echo("No terms yet. Define one with `maayan add-term`.")
+        return
+    typer.echo(f"{len(rows)} term(s):")
+    for t in rows:
+        g = f" · gematria {t.gematria}" if t.gematria is not None else ""
+        typer.echo(f"  {t.id}  · {t.canonical}  [{t.term_type}]{g}  by {t.author}")
+
+
+@app.command()
+def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None:
+    """Show one lexicon term."""
+    from maayan.lexicon.factory import build_term_service
+
+    t = build_term_service(get_settings()).get_term(term_id)
+    if t is None:
+        typer.echo("Term not found.")
+        return
+    typer.echo(f"{t.canonical}   [{t.term_type}]" + (f"  ·  gematria {t.gematria}" if t.gematria is not None else ""))
+    typer.echo(f"  {t.definition}")
+    if t.surface_forms:
+        typer.echo(f"  surface forms: {', '.join(t.surface_forms)}")
+    if t.related_terms:
+        typer.echo(f"  related: {', '.join(t.related_terms)}")
+    if t.source_refs:
+        typer.echo(f"  sources: {', '.join(t.source_refs)}")
+    typer.echo(f"  by {t.author}" + ("  · sacred (Holy Name)" if t.sacred else ""))
 
 
 @app.command(name="eval")
@@ -316,20 +593,28 @@ def ui() -> None:
     import uvicorn
 
     from maayan.capture.factory import build_capture_service
+    from maayan.develop.factory import build_development_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
     from maayan.generate.rag import RAGService
+    from maayan.lexicon.factory import build_term_service
     from maayan.retrieve.factory import build_retriever
+    from maayan.threads.factory import build_thread_service
     from maayan.ui.app import create_app
 
     settings = get_settings()
-    embedder = build_embedder(settings)
+    embedder = build_embedder(settings)  # built once, shared across services
     retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
     rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
     capture = build_capture_service(settings, embedder=embedder)
+    threads = build_thread_service(settings)
+    develop = build_development_service(settings, embedder=embedder)
+    terms = build_term_service(settings, embedder=embedder)
 
-    application = create_app(rag, capture)
+    application = create_app(
+        rag, capture, threads, develop, terms, context_turns=settings.thread_context_turns
+    )
     typer.echo(f"maayan UI → http://{settings.ui_host}:{settings.ui_port}")
     uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)
 

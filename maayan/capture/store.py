@@ -25,10 +25,19 @@ CREATE TABLE IF NOT EXISTS annotations (
     kind         TEXT NOT NULL,
     body         TEXT NOT NULL,
     linked_refs  TEXT NOT NULL,     -- json array
-    move         TEXT
+    move         TEXT,
+    directive    TEXT,                          -- seed: "now develop X", kept out of embed text
+    opens_aspect INTEGER NOT NULL DEFAULT 0     -- 1 = a seed that leads a new aspect
 );
 CREATE INDEX IF NOT EXISTS idx_annotations_session ON annotations(session_id);
 """
+
+# Columns added after the original schema shipped. Applied idempotently so existing
+# DBs upgrade in place without breaking (a fresh DB already has them from _SCHEMA).
+_MIGRATIONS = (
+    "ALTER TABLE annotations ADD COLUMN directive TEXT",
+    "ALTER TABLE annotations ADD COLUMN opens_aspect INTEGER NOT NULL DEFAULT 0",
+)
 
 
 class CaptureStore:
@@ -42,7 +51,17 @@ class CaptureStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Apply additive column migrations to pre-existing DBs (idempotent)."""
+        for statement in _MIGRATIONS:
+            try:
+                self._conn.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc):
+                    raise
 
     # -- sessions ------------------------------------------------------------
     def save_session(self, session: Session) -> Session:
@@ -76,7 +95,8 @@ class CaptureStore:
     def save_annotation(self, annotation: Annotation) -> Annotation:
         self._conn.execute(
             "INSERT OR REPLACE INTO annotations (id, session_id, timestamp, author, kind, "
-            "body, linked_refs, move) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "body, linked_refs, move, directive, opens_aspect) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 annotation.id,
                 annotation.session_id,
@@ -86,6 +106,8 @@ class CaptureStore:
                 annotation.body,
                 json.dumps(annotation.linked_refs, ensure_ascii=False),
                 annotation.move,
+                annotation.directive,
+                int(annotation.opens_aspect),
             ),
         )
         self._conn.commit()
@@ -96,6 +118,13 @@ class CaptureStore:
             "SELECT * FROM annotations WHERE session_id = ? ORDER BY timestamp", (session_id,)
         )
         return [self._row_to_annotation(r) for r in rows]
+
+    def get_annotation(self, annotation_id: str) -> Annotation | None:
+        """Fetch one contribution by its id (used to develop a seed)."""
+        row = self._conn.execute(
+            "SELECT * FROM annotations WHERE id = ?", (annotation_id,)
+        ).fetchone()
+        return self._row_to_annotation(row) if row else None
 
     def close(self) -> None:
         self._conn.close()
@@ -128,4 +157,6 @@ class CaptureStore:
             body=row["body"],
             linked_refs=json.loads(row["linked_refs"]),
             move=row["move"],
+            directive=row["directive"],
+            opens_aspect=bool(row["opens_aspect"]),
         )

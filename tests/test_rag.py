@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from maayan.generate.base import Message
-from maayan.generate.rag import RAGService, build_context, extract_cited_refs
+from maayan.generate.rag import ContextTurn, RAGService, build_context, extract_cited_refs
 from maayan.retrieve.models import RetrievalResult, SearchResult
 
 
@@ -83,6 +83,43 @@ def test_answer_surfaces_cited_refs() -> None:
     rag = RAGService(FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4)
     answer = rag.ask("שאלה")
     assert answer.cited_refs == ["Tanya 2:1", "Tanya 1:3"]  # order of appearance
+
+
+def test_context_turns_appear_in_prompt_labeled_non_citable() -> None:
+    backend = RecordingBackend(reply="grounded [S1].")
+    results = [_result("Tanya, Part I; Likkutei Amarim 1:3", "נפש הבהמית")]
+    rag = RAGService(FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4)
+    ctx = [ContextTurn(speaker="ask", text="Q: מהי נפש האלוקית\nA: היא חלק אלוק ממעל [S1]")]
+
+    rag.ask("ונפש הבהמית?", context_turns=ctx)
+
+    system, messages = backend.calls[0]
+    content = messages[0].content
+    assert "CONVERSATION SO FAR" in content
+    assert "do NOT cite" in content
+    assert "מהי נפש האלוקית" in content  # prior turn present so the follow-up resolves
+    # Conversation block precedes the citable SOURCES block.
+    assert content.index("CONVERSATION SO FAR") < content.index("SOURCES:")
+    # The system prompt itself forbids citing the conversation.
+    assert "Conversation so far" in system
+
+
+def test_default_deny_holds_even_with_context_present() -> None:
+    backend = RecordingBackend()
+    rag = RAGService(FakeRetriever([], relevance=0.0), backend, score_threshold=0.4)
+    answer = rag.ask("follow up", context_turns=[ContextTurn(speaker="ask", text="prior")])
+    assert answer.grounded is False
+    assert backend.calls == []  # context never bypasses default-deny
+
+
+def test_only_retrieved_refs_are_cited_not_context_refs() -> None:
+    # The model echoes a ref that exists ONLY in the conversation, plus a real [S1].
+    backend = RecordingBackend(reply="As we saw at Tanya 99:9, and now [S1].")
+    results = [_result("Tanya 1:3", "בחירה")]
+    rag = RAGService(FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4)
+    ctx = [ContextTurn(speaker="ask", text="earlier: Tanya 99:9")]
+    answer = rag.ask("q", context_turns=ctx)
+    assert answer.cited_refs == ["Tanya 1:3"]  # the context-only ref is NOT cited
 
 
 def test_extract_cited_refs_handles_tags_and_literals() -> None:
