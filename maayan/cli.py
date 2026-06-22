@@ -142,7 +142,11 @@ async def _run_ingest_chabad(
         )
         with ChunkStore(settings.db_path) as store:
             return await ingest_chabad_books(
-                [(name, rid) for name, rid in books], client=client, store=store, max_leaves=limit
+                [(name, rid) for name, rid in books],
+                client=client,
+                store=store,
+                max_leaves=limit,
+                max_chars=settings.chabad_chunk_chars,
             )
 
 

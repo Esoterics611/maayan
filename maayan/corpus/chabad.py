@@ -19,6 +19,7 @@ httpx decodes them transparently because `brotli` is a dependency.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -32,6 +33,41 @@ from maayan.corpus.normalize import normalize_text
 from maayan.corpus.store import ChunkStore
 
 CHABAD_SOURCE = "chabad"
+
+# Split AFTER a sentence-ending period + whitespace. Hebrew abbreviations here use
+# gershayim (״) / geresh (׳), not ".", so a "." reliably marks a sentence end.
+_SENTENCE_BOUNDARY = re.compile(r"(?<=\.)\s+")
+
+
+def split_passages(text: str, *, max_chars: int) -> list[str]:
+    """Split text into coherent passages of <= ~max_chars, never mid-sentence.
+
+    Whole sentences are packed greedily up to ``max_chars``; a single over-long
+    sentence becomes its own passage. A tiny trailing remainder is merged back so we
+    never emit slivers. ``max_chars <= 0`` (or text already short) → one passage.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text]
+    passages: list[str] = []
+    current = ""
+    for sentence in _SENTENCE_BOUNDARY.split(text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if current and len(current) + 1 + len(sentence) > max_chars:
+            passages.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}" if current else sentence
+    if current:
+        if passages and len(current) < max_chars // 4:
+            passages[-1] = f"{passages[-1]} {current}"  # merge a sliver tail
+        else:
+            passages.append(current)
+    return passages
 
 
 class ChabadError(RuntimeError):
@@ -129,26 +165,39 @@ class ChabadLibraryClient:
                 yield leaf
 
 
-def chabad_leaf_to_chunk(leaf: ChabadLeaf, *, book: str) -> Chunk | None:
-    """Normalize a leaf's HTML to one Hebrew `Chunk` (source="chabad"); None if empty."""
+def chabad_leaf_to_chunks(leaf: ChabadLeaf, *, book: str, max_chars: int = 0) -> list[Chunk]:
+    """Normalize a leaf's HTML and split it into one or more `source="chabad"` chunks.
+
+    A short section yields one chunk (ref ``Book, parsha, א א``); a long one is split at
+    sentence boundaries into passages, each a chunk with a ``§N`` suffix so the citation
+    stays precise and traceable. Empty leaves yield nothing.
+    """
     text = normalize_text(leaf.text_html)
-    if not text:
-        return None
     section_path = leaf.path or [book]
-    ref = f"{book}, {', '.join(section_path)}" if section_path else book
-    return Chunk.make(
-        ref=ref,
-        book=book,
-        section_path=section_path,
-        lang="he",  # the Chabad Library chassidus text is Hebrew
-        text=text,
-        source=CHABAD_SOURCE,
-        metadata={
-            "provider": "chabadlibrary.org",
-            "section_id": leaf.id,
-            "path": section_path,
-        },
-    )
+    base_ref = f"{book}, {', '.join(section_path)}" if section_path else book
+    passages = split_passages(text, max_chars=max_chars)
+    chunks: list[Chunk] = []
+    multi = len(passages) > 1
+    for i, passage in enumerate(passages, start=1):
+        ref = f"{base_ref} §{i}" if multi else base_ref
+        path = [*section_path, f"§{i}"] if multi else section_path
+        chunks.append(
+            Chunk.make(
+                ref=ref,
+                book=book,
+                section_path=path,
+                lang="he",  # the Chabad Library chassidus text is Hebrew
+                text=passage,
+                source=CHABAD_SOURCE,
+                metadata={
+                    "provider": "chabadlibrary.org",
+                    "section_id": leaf.id,
+                    "path": section_path,
+                    "passage": i,
+                },
+            )
+        )
+    return chunks
 
 
 async def ingest_chabad_book(
@@ -158,15 +207,16 @@ async def ingest_chabad_book(
     client: ChabadLibraryClient,
     store: ChunkStore,
     max_leaves: int | None = None,
+    max_chars: int = 0,
 ) -> IngestResult:
-    """Walk a Chabad Library book, normalize each leaf, and upsert chunks into the store."""
+    """Walk a Chabad Library book, normalize+split each leaf, and upsert chunks."""
     written = 0
     leaves = 0
     async for leaf in client.iter_leaves(root_id, max_leaves=max_leaves):
-        chunk = chabad_leaf_to_chunk(leaf, book=book)
-        if chunk is None:
+        chunks = chabad_leaf_to_chunks(leaf, book=book, max_chars=max_chars)
+        if not chunks:
             continue
-        written += store.upsert_chunks([chunk])
+        written += store.upsert_chunks(chunks)
         leaves += 1
     return IngestResult(book=book, sections=leaves, chunks=written)
 
@@ -177,13 +227,15 @@ async def ingest_chabad_books(
     client: ChabadLibraryClient,
     store: ChunkStore,
     max_leaves: int | None = None,
+    max_chars: int = 0,
 ) -> list[IngestResult]:
     """Ingest several Chabad Library books (name, root_id) in sequence."""
     results: list[IngestResult] = []
     for book, root_id in books:
         results.append(
             await ingest_chabad_book(
-                root_id, book, client=client, store=store, max_leaves=max_leaves
+                root_id, book, client=client, store=store,
+                max_leaves=max_leaves, max_chars=max_chars,
             )
         )
     return results

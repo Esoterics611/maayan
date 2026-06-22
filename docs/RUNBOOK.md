@@ -175,11 +175,15 @@ uv run maayan eval --develop      # develop step: develop-rate / refusal-rate / 
   parsha (`Torah Ohr, Bo`, …) is its own depth-2 node.
 - **Likutei Torah (chabadlibrary.org).** `maayan/corpus/chabad.py` talks to the
   site's JSON API: `GET api/main?path=<section_id>` returns either a section's
-  children or a leaf page's HTML. We walk **book → parshiyot → daf-pages**, strip the
-  HTML with the same normalizer as Sefaria (markup out, **nikkud kept**), and emit one
-  `chabad` chunk per leaf. Responses are brotli-encoded, so `brotli` is a dependency.
-  Book → root-section-id mapping lives in `config.chabad_books`
-  (`{"Likutei Torah": 4000000000}`); find other ids by walking from the root call.
+  children or a leaf page's HTML. We walk **book → parshiyot → sections**, strip the
+  HTML with the same normalizer as Sefaria (markup out, **nikkud kept**). A section
+  runs ~2–3k chars with no internal paragraph breaks, so it is split at **sentence
+  boundaries** into coherent passages of ≤ `CHABAD_CHUNK_CHARS` (default 1000), each a
+  chunk cited as `… §N` and traceable (via `metadata.section_id`) to its source
+  section. Set `CHABAD_CHUNK_CHARS=0` for one chunk per whole section. Responses are
+  brotli-encoded, so `brotli` is a dependency. Book → root-section-id mapping lives in
+  `config.chabad_books` (`{"Likutei Torah": 4000000000}`); find other ids by walking
+  from the root call.
 - **Everything lands in one Qdrant collection.** Retrieval (hybrid dense+sparse RRF)
   treats all sources together; `source` only changes badges, optional boosts
   (`EXPERT_BOOST`/`DERIVED_BOOST`/`TERM_BOOST`), and the `--source` filter. Printed

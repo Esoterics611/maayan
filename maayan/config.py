@@ -157,6 +157,14 @@ class Settings(BaseSettings):
     chabad_rate_limit_seconds: float = Field(
         default=0.3, description="Min delay between Chabad Library requests (via Clock)."
     )
+    chabad_chunk_chars: int = Field(
+        default=1000,
+        description=(
+            "Target max characters per Likutei Torah chunk. A long section is split at "
+            "SENTENCE boundaries into coherent passages (ref '… §2') for retrieval "
+            "precision; short sections stay whole. 0 = one chunk per section."
+        ),
+    )
 
     # ---- Capture loop -------------------------------------------------------
     annotation_kinds: list[str] = Field(

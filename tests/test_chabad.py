@@ -11,9 +11,11 @@ import respx
 
 from maayan.clock import FakeClock
 from maayan.corpus.chabad import (
+    ChabadLeaf,
     ChabadLibraryClient,
-    chabad_leaf_to_chunk,
+    chabad_leaf_to_chunks,
     ingest_chabad_book,
+    split_passages,
 )
 from maayan.corpus.store import ChunkStore
 
@@ -61,12 +63,9 @@ async def test_max_leaves_stops_early() -> None:
     assert len(leaves) == 1
 
 
-def test_chabad_leaf_to_chunk_strips_html_keeps_provenance() -> None:
-    from maayan.corpus.chabad import ChabadLeaf
-
+def test_chabad_leaf_to_chunks_strips_html_keeps_provenance() -> None:
     leaf = ChabadLeaf(id=301, path=["פרשה ויקרא", "א א"], text_html="<h3>ויקרא</h3> <b>טקסט</b>")
-    chunk = chabad_leaf_to_chunk(leaf, book="Likutei Torah")
-    assert chunk is not None
+    [chunk] = chabad_leaf_to_chunks(leaf, book="Likutei Torah")  # short → one chunk
     assert chunk.source == "chabad"
     assert chunk.book == "Likutei Torah"
     assert chunk.ref == "Likutei Torah, פרשה ויקרא, א א"
@@ -76,10 +75,33 @@ def test_chabad_leaf_to_chunk_strips_html_keeps_provenance() -> None:
     assert chunk.metadata["section_id"] == 301
 
 
-def test_chabad_leaf_to_chunk_skips_empty() -> None:
-    from maayan.corpus.chabad import ChabadLeaf
+def test_chabad_leaf_to_chunks_skips_empty() -> None:
+    assert chabad_leaf_to_chunks(ChabadLeaf(id=9, path=["x"], text_html="  "), book="LT") == []
 
-    assert chabad_leaf_to_chunk(ChabadLeaf(id=9, path=["x"], text_html="  "), book="LT") is None
+
+def test_split_passages_packs_whole_sentences() -> None:
+    # Three ~20-char sentences; max 25 → each (or pairs) split at sentence boundaries.
+    text = "ראשון כאן עכשיו טוב. שני כאן עכשיו טוב. שלישי כאן עכשיו טוב."
+    parts = split_passages(text, max_chars=25)
+    assert len(parts) >= 2
+    assert all(len(p) <= 40 for p in parts)  # bounded, never mid-sentence
+    assert "".join(parts).count("טוב") == 3  # every sentence preserved
+    # Disabled / short stays whole.
+    assert split_passages(text, max_chars=0) == [text]
+    assert split_passages("short.", max_chars=1000) == ["short."]
+
+
+def test_long_leaf_splits_into_numbered_passages() -> None:
+    long_html = " ".join(f"משפט מספר {i} עם תוכן נוסף כאן." for i in range(40))
+    chunks = chabad_leaf_to_chunks(
+        ChabadLeaf(id=7, path=["פרשה ויקרא", "א א"], text_html=long_html),
+        book="Likutei Torah", max_chars=200,
+    )
+    assert len(chunks) > 1
+    assert chunks[0].ref == "Likutei Torah, פרשה ויקרא, א א §1"
+    assert chunks[1].ref == "Likutei Torah, פרשה ויקרא, א א §2"
+    assert chunks[1].metadata["passage"] == 2
+    assert chunks[1].metadata["section_id"] == 7  # same source section, traceable
 
 
 @respx.mock
