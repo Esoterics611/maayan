@@ -98,17 +98,64 @@ class Settings(BaseSettings):
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
-    # (the node ref above the chapter level) that the client enumerates chapter
-    # by chapter. Initial focus: Likutei Amarim (Tanya, Part I) — the core text.
-    # Add e.g. "Likutei Torah", "Torah Or" later; complex texts need their full
-    # node ref (find it via `GET /api/shape/<title>`).
-    books: list[str] = Field(default=["Tanya, Part I; Likkutei Amarim"])
+    # that resolves to a depth-2 node (chapters → segments), which the client
+    # enumerates chapter by chapter. Tanya, Part I is the core text; Torah Ohr (the
+    # Alter Rebbe's chassidus on Bereishis/Shemos) is the companion — its parshiyot
+    # are each depth-2 on Sefaria, so we list them by parsha node ref.
+    #   NOTE: Likutei Torah is NOT on Sefaria; it needs a separate ingestion adapter
+    #   (chabadlibrary.org / Hebrew Wikisource). See docs.
+    #   Find/verify any node ref via `GET /api/shape/<title>` (must be a flat
+    #   `chapters: [int, ...]`); whole-book refs with nested parshiyot won't ingest.
+    books: list[str] = Field(
+        default=[
+            "Tanya, Part I; Likkutei Amarim",
+            # --- Torah Ohr (Bereishis) ---
+            "Torah Ohr, Bereshit",
+            "Torah Ohr, Noach",
+            "Torah Ohr, Lech Lecha",
+            "Torah Ohr, Vayera",
+            "Torah Ohr, Chayei Sara",
+            "Torah Ohr, Toldot",
+            "Torah Ohr, Vayetzei",
+            "Torah Ohr, Vayishlach",
+            "Torah Ohr, Vayeshev",
+            "Torah Ohr, Miketz",
+            "Torah Ohr, Vayigash",
+            "Torah Ohr, Vayechi",
+            # --- Torah Ohr (Shemos) ---
+            "Torah Ohr, Shemot",
+            "Torah Ohr, Vaera",
+            "Torah Ohr, Bo",
+            "Torah Ohr, Beshalach",
+            "Torah Ohr, Yitro",
+            "Torah Ohr, Mishpatim",
+            "Torah Ohr, Terumah",
+            "Torah Ohr, Tetzaveh",
+            "Torah Ohr, Parashat Zakhor",
+            "Torah Ohr, Ki Tisa",
+            "Torah Ohr, Vayakhel",
+            "Torah Ohr, Megillat Esther",
+        ]
+    )
     ingest_langs: list[str] = Field(
         default=["he", "en"], description="Which languages to ingest when available."
     )
     sefaria_base_url: str = Field(default="https://www.sefaria.org/api")
     sefaria_rate_limit_seconds: float = Field(
         default=0.5, description="Min delay between Sefaria requests (via injected Clock)."
+    )
+
+    # ---- Chabad Library corpus (non-Sefaria) --------------------------------
+    # Likutei Torah is NOT on Sefaria; we pull it from chabadlibrary.org's JSON API
+    # (api/main?path=<section_id>, brotli-encoded). Map book name → root section id.
+    # Find ids by walking the tree from the root call (see docs/CORPUS.md).
+    chabad_base_url: str = Field(default="https://chabadlibrary.org/books/api")
+    chabad_books: dict[str, int] = Field(
+        default={"Likutei Torah": 4000000000},
+        description="Chabad Library book name → root section id (non-Sefaria source).",
+    )
+    chabad_rate_limit_seconds: float = Field(
+        default=0.3, description="Min delay between Chabad Library requests (via Clock)."
     )
 
     # ---- Capture loop -------------------------------------------------------

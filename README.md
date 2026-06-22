@@ -16,7 +16,13 @@ questions retrieve. Lines of inquiry live in persistent **topic threads**, and a
 curated **term lexicon** teaches the system that tokens like ע״ב (the Name of 72) are
 *terms / Holy Names*, not acronyms to expand.
 
-Initial corpus focus: **Likutei Amarim (Tanya, Part I).**
+Corpus: **Tanya (Part I)** + its companions **Torah Or** (Sefaria) and **Likutei
+Torah** (from chabadlibrary.org — it isn't on Sefaria). Asking retrieves across all
+three, so the Assistant answers — and you teach it connections — *between* the texts.
+
+> **Just want to run it?** **[docs/RUNBOOK.md](docs/RUNBOOK.md)** walks you from
+> `make up` → ingest all three texts → index → ask across them → **teach a connection
+> and confirm it learned**.
 
 ```
         question
@@ -205,9 +211,10 @@ sidebar, then within that thread you can:
 
 | Command | What it does |
 |---|---|
-| `maayan ingest --all` / `--book "<ref>"` `[--limit N]` `[--sample K]` | Pull + normalize + chunk from Sefaria into SQLite |
+| `maayan ingest --all` / `--book "<ref>"` `[--limit N]` `[--sample K]` | Pull + normalize + chunk from Sefaria (Tanya + Torah Or) into SQLite |
+| `maayan ingest-chabad --all` / `--book "<name>"` `[--limit N]` | Pull a non-Sefaria text (Likutei Torah) from chabadlibrary.org into SQLite |
 | `maayan index` `[--rebuild]` | Embed (bge-m3) + upsert into Qdrant (hybrid schema) |
-| `maayan search "<q>"` `[--k N] [--book ..] [--source sefaria\|expert\|derived\|term]` | Hybrid retrieval (RRF), prints refs + scores + provenance |
+| `maayan search "<q>"` `[--k N] [--book ..] [--source sefaria\|chabad\|expert\|derived\|term]` | Hybrid retrieval (RRF), prints refs + scores + provenance |
 | `maayan ask "<q>"` `[--k N] [--book ..] [--thread <id> \| --topic "<title>"]` | Grounded, cited answer (or a refusal); records a session. `--topic` starts a thread, `--thread` continues one — using prior turns as **non-citable** context |
 | `maayan annotate --session <id> --author "<name>" --body "..."` `[--kind --ref (repeatable) --refs "a \| b" --move --opens-aspect --directive "..."]` | Add an expert contribution or **seed**; indexes it. `--author` required; refs keep their commas (repeatable `--ref`, or `--refs` split on ` \| `) |
 | `maayan session <id>` | Show a session and its contributions (seeds flagged, directives shown) |
@@ -232,8 +239,11 @@ sidebar, then within that thread you can:
 ## 5. How it works (design)
 
 - **Corpus** (`maayan/corpus/`): async Sefaria v3 client (rate-limited via an
-  injected clock), Hebrew normalizer (strips markup/footnotes, **keeps nikkud**),
-  one-segment-per-chunk (pasuk/os/se'if), idempotent SQLite store.
+  injected clock) for Tanya + Torah Or, plus a `chabad.py` adapter that walks
+  chabadlibrary.org's JSON API for **Likutei Torah** (not on Sefaria) — both feed the
+  same Hebrew normalizer (strips markup/footnotes, **keeps nikkud**),
+  one-segment-per-chunk (pasuk/os/se'if), idempotent SQLite store. See
+  [docs/RUNBOOK.md](docs/RUNBOOK.md) for sources, licensing, and how it works.
 - **Embedding** (`maayan/embed/`): `bge-m3` gives **dense + sparse** in one pass;
   a dependency-free `HashingEmbedder` backs tests/no-GPU demos.
 - **Index** (`maayan/index/`): Qdrant collection with a named dense (cosine) +
@@ -330,7 +340,7 @@ CI (GitHub Actions) runs lint + typecheck + tests on every push/PR.
 - [x] **Prompt 5** — Expert capture loop (annotations → indexed expert chunks)
 - [x] **Prompt 6** — Local chat + capture UI (FastAPI)
 - [x] **Prompt 7** — Eval harness (retrieval metrics + variant comparison)
-- [ ] Prompt 8 — Local generation via Ollama
+- [x] **Prompt 8** — Local generation via Ollama (offline *backup*; OpenRouter stays default)
 
 ### Phase 2 — Seeds → development → topic threads ([plan](docs/BUILD_PLAN_PHASE2.md))
 
@@ -346,6 +356,14 @@ CI (GitHub Actions) runs lint + typecheck + tests on every push/PR.
 **Phase 2 is complete.** The seed → develop → approve loop runs end-to-end (CLI + UI),
 is measured by the develop eval, and the term lexicon protects Holy Names from
 expansion while surfacing their definitions in retrieval.
+
+### Phase 3 — companion texts + cross-text connections (in progress)
+
+- [x] Ollama backup backend (Prompt 8)
+- [x] **Torah Or** ingested from Sefaria (24 parsha nodes)
+- [x] **Likutei Torah** ingested from chabadlibrary.org (new `source="chabad"` adapter; not on Sefaria)
+- [x] Cross-text connections: co-retrieval across all three texts + taught `expert` connections whose `linked_refs` span books (visible in `search`)
+- [ ] Dedicated "Connect these sources" affordance in the web UI (CLI flow works today; see [RUNBOOK](docs/RUNBOOK.md) §6)
 
 ---
 

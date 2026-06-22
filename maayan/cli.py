@@ -97,6 +97,55 @@ async def _run_ingest(
             )
 
 
+@app.command(name="ingest-chabad")
+def ingest_chabad(
+    book: str = typer.Option(None, "--book", help="A Chabad Library book name (see config)."),
+    all_books: bool = typer.Option(False, "--all", help="Ingest every config.chabad_books book."),
+    limit: int = typer.Option(
+        None, "--limit", help="Max leaf pages per book (handy for a quick sample)."
+    ),
+) -> None:
+    """Pull a non-Sefaria text (e.g. Likutei Torah) from chabadlibrary.org into the store."""
+    settings = get_settings()
+    if all_books:
+        chosen = list(settings.chabad_books.items())
+    elif book:
+        if book not in settings.chabad_books:
+            raise typer.BadParameter(
+                f"{book!r} is not in config.chabad_books ({', '.join(settings.chabad_books)})."
+            )
+        chosen = [(book, settings.chabad_books[book])]
+    else:
+        raise typer.BadParameter("Pass --book '<name>' or --all.")
+
+    results = asyncio.run(_run_ingest_chabad(settings, chosen, limit))
+    for r in results:
+        typer.echo(f"  {r.book}: {r.sections} leaf pages → {r.chunks} chunks upserted")
+    typer.echo("\nIngested as source='chabad' — index with `maayan index`, then it is retrievable.")
+
+
+async def _run_ingest_chabad(
+    settings: Settings, books: list[tuple[str, int]], limit: int | None
+) -> list[IngestResult]:
+    import httpx
+
+    from maayan.clock import SystemClock
+    from maayan.corpus.chabad import ChabadLibraryClient, ingest_chabad_books
+    from maayan.corpus.store import ChunkStore
+
+    async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "maayan/0.1"}) as http:
+        client = ChabadLibraryClient(
+            http,
+            SystemClock(),
+            base_url=settings.chabad_base_url,
+            rate_limit_seconds=settings.chabad_rate_limit_seconds,
+        )
+        with ChunkStore(settings.db_path) as store:
+            return await ingest_chabad_books(
+                [(name, rid) for name, rid in books], client=client, store=store, max_leaves=limit
+            )
+
+
 @app.command()
 def index(
     rebuild: bool = typer.Option(
@@ -259,7 +308,12 @@ def _provenance_line(result: object) -> str:
         return (f"      ↳ derived from an expert seed by {meta.get('author', '?')}, "
                 f"developed by {meta.get('developed_by', '?')}, grounded in {grounded}")
     if source == "expert":
-        return f"      ↳ expert: {meta.get('author', '?')}"
+        linked = ", ".join(meta.get("linked_refs", []) or [])
+        line = f"      ↳ expert {meta.get('kind', 'note')} by {meta.get('author', '?')}"
+        return line + (f"; connects {linked}" if linked else "")
+    if source == "chabad":
+        path = ", ".join(meta.get("path", []) or [])
+        return f"      ↳ chabadlibrary.org{f'; {path}' if path else ''}"
     if source == "term":
         surfaces = ", ".join(meta.get("surface_forms", []))
         return (f"      ↳ term [{meta.get('term_type', '?')}] by {meta.get('author', '?')}"
