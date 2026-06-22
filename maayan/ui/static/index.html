@@ -51,6 +51,8 @@
     .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
     .src.term { border-color:var(--term); }
     .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
+    .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
+    .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
     .actions { margin-top:8px; display:flex; gap:8px; }
     .refused { color:#9a3b2f; }
     label.field { display:block; margin:8px 0 3px; font-size:13px; color:var(--muted); }
@@ -133,7 +135,8 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const AUTHOR_KEY = 'maayan.author';
-    let active = null;  // active thread id
+    let active = null;      // active thread id
+    let lastAnswer = null;  // last answer (sources + session_id) for "Connect these sources"
 
     const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
     const j = (r) => r.json();
@@ -200,18 +203,54 @@
     }
 
     function renderAnswerSources(data) {
+      lastAnswer = data;
       const cls = data.grounded ? '' : ' refused';
-      const srcs = (data.sources || []).map(s => {
+      const sources = data.sources || [];
+      const srcs = sources.map((s, i) => {
         const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
                     : s.source === 'derived' ? '<span class="badge derived">derived</span>'
                     : s.source === 'term' ? '<span class="badge term">term</span>' : '';
         return `<div class="src ${s.source}">
-          <div class="ref"><span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}</div>
+          <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
+            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
+      // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
+      const connect = sources.length >= 2 ? `
+        <div class="connect">
+          <div class="hint">Teach a connection — tick two or more sources above (e.g. Tanya ↔ Likutei Torah), write the insight, Connect.</div>
+          <input id="connectBody" dir="auto" placeholder="Your insight linking the ticked sources…" />
+          <div class="row" style="margin-top:6px">
+            <input id="connectAuthor" placeholder="Your name (required)" />
+            <button onclick="connectSelected()">Connect selected →</button>
+          </div>
+          <span id="connectStatus" class="hint"></span>
+        </div>` : '';
       $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer</div>
-        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}</div>`;
+        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}${connect}</div>`;
+      const ca = $('connectAuthor');
+      if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
     }
+
+    async function connectSelected() {
+      const status = $('connectStatus');
+      const picks = [...document.querySelectorAll('.srcpick:checked')];
+      const refs = picks.map(el => lastAnswer.sources[+el.dataset.idx].ref);
+      if (refs.length < 2) { status.textContent = 'Tick at least two sources to connect.'; return; }
+      const author = $('connectAuthor').value.trim();
+      if (!author) { status.textContent = 'Author is required.'; $('connectAuthor').focus(); return; }
+      const body = $('connectBody').value.trim();
+      if (!body) { status.textContent = 'Write the insight that links them.'; return; }
+      localStorage.setItem(AUTHOR_KEY, author);
+      const r = await fetch('/annotate', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ session_id: lastAnswer.session_id, author, kind: 'connection', body, linked_refs: refs }) });
+      if (r.ok) {
+        status.textContent = `Connected ✓ — saved to the Knowledge base (${refs.length} sources linked); it will surface on future questions.`;
+        $('connectBody').value = '';
+        picks.forEach(el => { el.checked = false; });
+      } else { const e = await j(r); status.textContent = 'Error: ' + (e.detail || r.status); }
+    }
+    window.connectSelected = connectSelected;
 
     async function ask() {
       const q = $('q').value.trim(); if (!q) return;

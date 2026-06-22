@@ -200,6 +200,10 @@ sidebar, then within that thread you can:
 - **Develop this** on a seed — the model proposes a grounded, cited elaboration.
 - **Approve / Reject** the proposal — approving indexes it as a `derived` chunk that
   future questions retrieve; rejecting indexes nothing. Printed text is never edited.
+- **Connect these sources** — after an answer, tick two or more of its sources (e.g. a
+  Tanya passage + a Likutei Torah passage), write the insight, and **Connect**. It's
+  saved as an `expert` connection whose `linked_refs` span both books and surfaces on
+  future questions — teaching the Assistant a cross-text link.
 - **Define a term** (the *Term ▾* composer) — register a Holy Name / technical term as
   an entity (canonical, type, definition, surface forms, gematria). Select text in a
   source first to pre-fill its surface form. Defined terms show in the sidebar lexicon
@@ -363,7 +367,7 @@ expansion while surfacing their definitions in retrieval.
 - [x] **Torah Or** ingested from Sefaria (24 parsha nodes)
 - [x] **Likutei Torah** ingested from chabadlibrary.org (new `source="chabad"` adapter; not on Sefaria)
 - [x] Cross-text connections: co-retrieval across all three texts + taught `expert` connections whose `linked_refs` span books (visible in `search`)
-- [ ] Dedicated "Connect these sources" affordance in the web UI (CLI flow works today; see [RUNBOOK](docs/RUNBOOK.md) §6)
+- [x] "Connect these sources" affordance in the web UI — tick ≥2 sources of an answer and link them with your insight (CLI flow also works; see [RUNBOOK](docs/RUNBOOK.md) §6)
 
 ---
 

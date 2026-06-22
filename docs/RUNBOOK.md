@@ -134,8 +134,11 @@ uv run maayan search "אהבת עולם אהבה בתענוגים" --source expe
 #     then re-ask — the connection ranks above raw text.
 ```
 
-The same flow is clickable in the UI (the *Seed ▾* composer; author is sticky), and a
-seed can be **developed** into cited corpus — see §7.
+**In the web UI** (`make ui`) this is one click: ask, then **tick two or more sources**
+under the answer (e.g. one Tanya + one Likutei Torah), write the insight in the
+*Connect* box, and press **Connect selected →**. It posts the same `expert` connection
+(author sticky) and surfaces on future questions. The *Seed ▾* composer and
+**develop** flow are there too — see §7.
 
 ## 7. Grow knowledge: seed → develop → approve; define terms
 

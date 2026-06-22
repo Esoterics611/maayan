@@ -260,6 +260,27 @@ def test_approve_refusal_returns_400() -> None:
     assert client.post(f"/developments/{did}/approve").status_code == 400
 
 
+def test_connect_sources_links_refs_across_books() -> None:
+    # The "Connect these sources" UX: ask in a thread → use the returned session →
+    # annotate a connection whose linked_refs span Tanya + Likutei Torah.
+    client = _client()
+    tid = _new_thread(client)
+    sid = client.post(f"/threads/{tid}/ask", json={"question": "אהבת עולם"}).json()["session_id"]
+    refs = ["Tanya, Part I; Likkutei Amarim 18", "Likutei Torah, פרשה ויקרא, א א"]
+    r = client.post("/annotate", json={
+        "session_id": sid, "author": "R. Ginsburgh", "kind": "connection",
+        "body": "אהבת עולם בתניא היא היסוד לאהבה בתענוגים בלקוטי תורה", "linked_refs": refs,
+    })
+    assert r.status_code == 200
+    assert r.json()["linked_refs"] == refs  # the cross-text bridge is preserved intact
+
+
+def test_index_html_has_connect_affordance() -> None:
+    html = _client().get("/").text
+    for marker in ("connectSelected", "srcpick", "Connect selected"):
+        assert marker in html, f"missing connect-sources markup: {marker}"
+
+
 def test_add_and_list_term() -> None:
     client = _client()
     r = client.post("/terms", json={
