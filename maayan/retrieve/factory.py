@@ -40,5 +40,7 @@ def build_retriever(
         reranker=reranker,
         rerank_candidates=settings.rerank_candidates,
         expert_boost=settings.expert_boost,
+        derived_boost=settings.derived_boost,
+        term_boost=settings.term_boost,
         hybrid=True if hybrid is None else hybrid,
     )

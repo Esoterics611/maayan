@@ -9,6 +9,7 @@ to answer only from them and cite every claim; the model never answers from memo
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from pydantic import BaseModel
 
@@ -26,7 +27,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "3. If the sources do not contain enough to answer, say so plainly and do not "
     "speculate.\n"
     "4. Answer in the language of the question (Hebrew or English), staying faithful to "
-    "the sources' meaning."
+    "the sources' meaning.\n"
+    "5. A 'Conversation so far' block may precede the sources. Use it ONLY to interpret "
+    "the current question (e.g. resolve a pronoun or an elliptical follow-up). Never cite "
+    "it and never treat it as a source — cite only the numbered SOURCES."
 )
 
 DEFAULT_REFUSAL = (
@@ -35,6 +39,19 @@ DEFAULT_REFUSAL = (
 )
 
 _TAG = re.compile(r"\[S(\d+)\]")
+
+
+class ContextTurn(BaseModel):
+    """A prior conversation turn passed to `ask` for interpretation only.
+
+    Decoupled from `threads.ThreadTurn` on purpose: the generator must not depend on
+    the thread layer. The thread flow maps `ThreadTurn` → `ContextTurn`. `speaker` is
+    a display label (e.g. the turn type or author); `text` is the snapshot. This block
+    is NEVER citable — only retrieved sources are.
+    """
+
+    speaker: str
+    text: str
 
 
 class Answer(BaseModel):
@@ -52,6 +69,14 @@ def build_context(sources: list[SearchResult]) -> str:
     lines = ["SOURCES:"]
     for i, s in enumerate(sources, 1):
         lines.append(f"[S{i}] ({s.ref}) {s.text}")
+    return "\n".join(lines)
+
+
+def build_conversation(turns: Sequence[ContextTurn]) -> str:
+    """Render prior turns as an explicitly NON-citable context block."""
+    lines = ["CONVERSATION SO FAR (for context only — do NOT cite any of this):"]
+    for t in turns:
+        lines.append(f"({t.speaker}) {t.text}")
     return "\n".join(lines)
 
 
@@ -98,13 +123,17 @@ class RAGService:
         k: int | None = None,
         book: str | None = None,
         source: str | None = None,
+        context_turns: Sequence[ContextTurn] = (),
     ) -> Answer:
+        # Retrieval ALWAYS runs fresh on the current question only — the conversation
+        # context never feeds retrieval, so grounding can't drift onto prior turns.
         retrieval = self._retriever.retrieve(
             question, k=k or self._top_k, book=book, source=source
         )
         sources = retrieval.results
 
         # DEFAULT-DENY: refuse without calling the model when nothing supports an answer.
+        # Enforced before any prompt is built, so context can never trigger a model call.
         if not sources or retrieval.relevance < self._score_threshold:
             return Answer(
                 question=question,
@@ -115,15 +144,18 @@ class RAGService:
             )
 
         context = build_context(sources)
-        messages = [
-            Message(
-                role="user",
-                content=(
-                    f"{context}\n\nQuestion: {question}\n\n"
-                    "Answer, citing each claim by its source tag."
-                ),
-            )
-        ]
+        # Conversation context (if any) goes BEFORE the sources and is labelled
+        # non-citable; the sources are the only citable block.
+        blocks = []
+        if context_turns:
+            blocks.append(build_conversation(context_turns))
+        blocks.append(context)
+        blocks.append(
+            f"Question: {question}\n\n"
+            "Answer, citing each claim ONLY by its [S#] source tag. "
+            "Do not cite the conversation above."
+        )
+        messages = [Message(role="user", content="\n\n".join(blocks))]
         text = self._backend.generate(self._system_prompt, messages)
         return Answer(
             question=question,

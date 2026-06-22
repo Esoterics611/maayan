@@ -25,5 +25,11 @@ def build_generation_backend(settings: Settings) -> GenerationBackend:
             base_url=settings.openrouter_base_url,
             model=settings.openrouter_model,
         )
-    # The local Ollama backend is added in Prompt 8 (same protocol, config switch).
+    if backend == "ollama":
+        from maayan.generate.ollama import OllamaBackend
+
+        return OllamaBackend(
+            base_url=settings.ollama_base_url,
+            model=settings.ollama_model,
+        )
     raise ValueError(f"Unknown or unsupported generation_backend: {backend!r}")

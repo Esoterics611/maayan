@@ -6,10 +6,11 @@ Ephemeral Qdrant + HashingEmbedder + FakeClock; no network, no real models.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 from qdrant_client import QdrantClient
 
 from maayan.capture.convert import annotation_to_chunks, detect_lang
-from maayan.capture.models import Annotation
+from maayan.capture.models import Annotation, Contribution
 from maayan.capture.service import CaptureService
 from maayan.capture.store import CaptureStore
 from maayan.clock import FakeClock
@@ -66,12 +67,61 @@ def test_annotation_converts_to_expert_chunk_with_metadata() -> None:
     assert "Tanya 1:3" in chunk.text  # linked refs embedded for retrievability
 
 
+def test_blank_author_is_rejected() -> None:
+    """Provenance is the point: a missing/blank author fails validation."""
+    for bad in ("", "   "):
+        with pytest.raises(ValidationError):
+            Annotation(
+                id="x", session_id="s1", timestamp=FakeClock().now(),
+                author=bad, kind="connection", body="b",
+            )
+    # Contribution is the same model under a forward-looking name.
+    assert Contribution is Annotation
+
+
+def test_seed_stores_directive_in_metadata_not_in_text() -> None:
+    """A seed embeds the knowledge (body) only; the directive lives in metadata."""
+    seed = Annotation(
+        id="seedid12", session_id="s1", timestamp=FakeClock().now(),
+        author="R. Ginsburgh", kind="connection",
+        body="אהבה בתענוגים היא גילוי שם ע\"ב",
+        directive="מצא היכן זה נרמז בתניא",
+        opens_aspect=True, linked_refs=["Torah Or, Vayechi 1:1"],
+    )
+    [chunk] = annotation_to_chunks(seed)
+    # The directive must NOT pollute the embedded/retrievable text.
+    assert chunk.text == seed.body
+    assert "נרמז בתניא" not in chunk.text
+    # …but all provenance travels in metadata.
+    assert chunk.metadata["directive"] == "מצא היכן זה נרמז בתניא"
+    assert chunk.metadata["opens_aspect"] is True
+    assert chunk.metadata["author"] == "R. Ginsburgh"
+    assert chunk.metadata["contribution_id"] == "seedid12"
+    assert chunk.metadata["linked_refs"] == ["Torah Or, Vayechi 1:1"]
+
+
 def test_start_session_persists() -> None:
     idx = QdrantIndex(QdrantClient(location=":memory:"), "t", DIM)
     svc = _service(idx, HashingEmbedder(dim=DIM))
     session = svc.start_session(_answer("מהי בחירה", ["Tanya 1:1", "Tanya 1:2"]))
     assert session.retrieved_refs == ["Tanya 1:1", "Tanya 1:2"]
     assert svc._capture.get_session(session.id) is not None  # noqa: SLF001
+
+
+def test_seed_round_trips_through_store() -> None:
+    """directive + opens_aspect persist and reload intact (additive migration)."""
+    store = CaptureStore(":memory:")
+    seed = Annotation(
+        id="seedid12", session_id="s1", timestamp=FakeClock().now(),
+        author="R. Ginsburgh", kind="connection", body="seed body",
+        directive="develop X", opens_aspect=True, linked_refs=["Tanya 1:1"],
+    )
+    store.save_annotation(seed)
+    [reloaded] = store.get_annotations("s1")
+    assert reloaded.directive == "develop X"
+    assert reloaded.opens_aspect is True
+    assert reloaded.linked_refs == ["Tanya 1:1"]
+    store.close()
 
 
 def test_unknown_kind_rejected() -> None:

@@ -51,6 +51,9 @@ class CaptureService:
     def get_annotations(self, session_id: str) -> list[Annotation]:
         return self._capture.get_annotations(session_id)
 
+    def get_annotation(self, annotation_id: str) -> Annotation | None:
+        return self._capture.get_annotation(annotation_id)
+
     def start_session(self, answer: Answer) -> Session:
         """Record a session from a RAG Answer and return it (with its new id)."""
         session = Session(
@@ -71,8 +74,14 @@ class CaptureService:
         body: str,
         linked_refs: Sequence[str] = (),
         move: str | None = None,
+        directive: str | None = None,
+        opens_aspect: bool = False,
     ) -> Annotation:
-        """Validate, persist, convert→embed→index an expert annotation. Closes the loop."""
+        """Validate, persist, convert→embed→index a contribution. Closes the loop.
+
+        A blank ``author`` and an unknown ``kind`` are both rejected (the former by
+        the model validator, raising a ``ValueError``).
+        """
         if kind not in self._allowed_kinds:
             raise ValueError(
                 f"Unknown kind {kind!r}. Allowed (config): {', '.join(self._allowed_kinds)}"
@@ -87,6 +96,8 @@ class CaptureService:
             body=body,
             linked_refs=list(linked_refs),
             move=move,
+            directive=directive,
+            opens_aspect=opens_aspect,
         )
         self._capture.save_annotation(annotation)
 

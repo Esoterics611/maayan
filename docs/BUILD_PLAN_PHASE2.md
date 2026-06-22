@@ -1,7 +1,7 @@
 # maayan — Build Plan, Phase 2: Seeds → Development → Topic Threads
 
 > Companion to [docs/BUILD_PLAN.md](BUILD_PLAN.md) (Prompts 0–8). These continue the
-> sequence as **Prompts 9–15**. They are independent of Prompt 8 (Ollama).
+> sequence as **Prompts 9–16**. They are independent of Prompt 8 (Ollama).
 > **Every prompt must follow [CLAUDE.md](../CLAUDE.md)** — typed + `mypy --strict`,
 > dependency injection, config-driven, no secrets, default-deny, tests mock network
 > + models. Run them one at a time; let `make test`/`typecheck`/`lint` pass before
@@ -33,6 +33,17 @@ directive *executable*: the model retrieves grounded Tanya sources, develops the
 seed into a cited elaboration, and — once the expert approves — that becomes new,
 attributed corpus that future questions retrieve.
 
+That same seed exposed a second gap. It hinges on **ע״ב** (the Name of 72), **מ״ה**,
+and **ב״ן** — tokens that carry gershayim and *look* like rashei-teivot but are not
+abbreviations to expand; they are **technical terms / Holy Names** (ע״ב is the *Ab*
+expansion of the Tetragrammaton, gematria 72, sibling to ס״ג/מ״ה/ב״ן). Expanding
+them mangles meaning; leaving them as bare tokens leaves the embedder clueless. The
+durable fix is an **expert-curated term lexicon** — define the term once as an
+entity, and every future question retrieves that definition. This is the
+non-speculative trigger for the documented rashei-teivot hook in CLAUDE.md: not a
+guesser, but a **protected-terms deny-list** so registered Names are never expanded.
+Built in **Prompt 16**.
+
 ## 1. Decisions already made (build to these)
 
 - **Follow-ups are context-aware but still grounded.** The model sees prior turns to
@@ -54,10 +65,12 @@ attributed corpus that future questions retrieve.
 | `sefaria` | Printed text | Sefaria (immutable) |
 | `expert` | A human seed/correction/connection | the reviewer (named) |
 | `derived` | A model development of a seed, **approved** | model, grounded in refs, from an expert seed |
+| `term` | A lexicon entry — a Holy Name / technical term defined as an entity | the reviewer (named), see Prompt 16 |
 
-Every `expert`/`derived` chunk carries provenance in metadata: `author` (real name,
-never the default), `seed_id`, `developed_by` (model id) for derived, `grounded_in`
-(the refs the development cited), `thread_id`.
+Every `expert`/`derived`/`term` chunk carries provenance in metadata: `author` (real
+name, never the default), `seed_id`, `developed_by` (model id) for derived,
+`grounded_in` (the refs the development cited), `thread_id`. A `term` chunk adds
+`surface_forms`, `term_type`, `related_terms`, `gematria`, `sacred`.
 
 ## 3. New/changed data model (the spine for this phase)
 
@@ -75,6 +88,13 @@ working; add fields with defaults for backward compatibility.
   `development_id`) plus a text snapshot for display.
 - **`Development`**: `id, thread_id, seed_id, timestamp, model, status`
   (`"proposed" | "approved" | "rejected"`), `text, cited_refs, grounded_in`.
+- **`Term`** (Prompt 16): `id, canonical` (display form), `surface_forms: list[str]`
+  (variants to match, incl. gershayim/quote variants), `term_type`
+  (`"name" | "sefirah" | "partzuf" | "expansion" | "concept" | "other"`),
+  `definition, related_terms, source_refs, gematria: int | None, sacred: bool,
+  author` (required). A term is expert knowledge that layers on top of the
+  immutable text and becomes a retrievable `source="term"` chunk — same loop as
+  expert chunks.
 
 ## 4. Already done
 
@@ -297,9 +317,64 @@ Show the develop-eval table on the seed set when done.
 
 ---
 
+### Prompt 16 — Term lexicon: Holy Names & technical terms (don't expand them)
+
+```
+Add a curated TERM lexicon so Kabbalistic terms and Holy Names (ע"ב / the Name of 72,
+ס"ג, מ"ה, ב"ן, sefirot, partzufim, …) are treated as first-class ENTITIES, not acronyms
+to be expanded. Follow CLAUDE.md. A term is expert-defined knowledge that LAYERS ON TOP
+of the immutable text and becomes retrievable — the same loop as expert chunks.
+
+Context: tokens like ע"ב carry gershayim and LOOK like rashei-teivot, but they are terms
+(ע"ב is the Ab expansion of Havayah, gematria 72; sibling to ס"ג/מ"ה/ב"ן), not abbreviations.
+Expanding them mangles meaning; the embedder alone doesn't know them. An expert must be able
+to DEFINE a term once and have every future question retrieve that definition. This is also the
+ONLY non-speculative reason to touch the documented rashei-teivot hook in CLAUDE.md: build a
+protected-terms deny-list, not a guesser.
+
+Requirements:
+- New pydantic Term model (maayan/lexicon/models.py): id, canonical (display form),
+  surface_forms: list[str] (variants to match, incl. gershayim ״ vs " and nikkud variants),
+  term_type (Literal: "name"|"sefirah"|"partzuf"|"expansion"|"concept"|"other"),
+  definition: str, related_terms: list[str] = [], source_refs: list[str] = [],
+  gematria: int | None = None, sacred: bool = False, author (REQUIRED — blank rejected, as in
+  Prompt 9). Reuse the corpus Lang/detect_lang convention.
+- Source taxonomy gains source="term". A converter (maayan/lexicon/convert.py) turns a Term into
+  a Chunk: source="term", book="Lexicon" (or term_type), a stable ref (e.g. 'Term · ע"ב'),
+  text = canonical + definition (the knowledge only), metadata = {surface_forms, term_type,
+  related_terms, gematria, sacred, author, source_refs, term_id}. Embedded + upserted into the
+  SAME Qdrant collection. A TermService with all collaborators injected (embedder, index, store,
+  clock); persist terms in SQLite (TermStore: create/get/list/by_surface_form; idempotent
+  migration that doesn't break existing DBs).
+- Normalization tie-in: a config-injected protected-terms set, built from the lexicon's
+  surface_forms, that the rashei-teivot expansion hook must NEVER expand. Do not auto-expand
+  anything else. Surface-form matching is robust to gershayim (״ U+05F4) vs ASCII quote and to
+  nikkud. Add a focused test that a registered term survives normalization unexpanded.
+- Config: term_boost (default 1.0), analogous to expert_boost/derived_boost, applied in the
+  retriever so curated terms can be preferred.
+- UI: a "Define a term" affordance — select text in a source/answer to pre-fill surface_forms,
+  then canonical + type + definition + related; author REQUIRED + sticky (Prompt 9). Badge term
+  results distinctly (sefaria vs expert vs derived vs term). Thin routes wiring TermService.
+- CLI: `maayan term add ...`, `maayan terms` (list), `maayan term <id>` (show); and
+  `maayan search --source term` filters to terms.
+- Tests (mock embedder/qdrant/network): term round-trips through store + Qdrant with full
+  provenance; a query containing a surface form retrieves the term; the protected-term
+  normalization test; term_boost changes ranking; blank author rejected; surface-form match is
+  gershayim/quote/nikkud-insensitive.
+
+Demo: define ע"ב (Name of 72, the Ab expansion of Havayah, gematria 72; related ס"ג/מ"ה/ב"ן),
+then ask a question that mentions ע"ב and show the term definition surfacing as a cited source —
+and confirm ע"ב was NOT expanded by normalization.
+```
+
+---
+
 ## 5. Suggested order & checkpoints
 
-9 → 10 → 11 → 12 → 13 → 14 → 15. Natural checkpoints:
+9 → 10 → 11 → 12 → 13 → 14 → 15. Then **16** (the term lexicon) — independent of the
+seed→develop loop and pullable earlier if term-blind retrieval is hurting you, but
+sequenced last so it can reuse the Prompt 9 provenance/author rules and the Prompt 14
+UI affordances. Natural checkpoints:
 
 - **After 9–11:** threads persist and follow-ups are conversational yet grounded. Worth a
   manual pass in the UI.
@@ -309,6 +384,9 @@ Show the develop-eval table on the seed set when done.
 - **After 14–15:** the loop is usable in the browser and measurable. Update
   [docs/TEACHING.md](TEACHING.md) (a new "developing the corpus" section + exercises) and tick
   this phase in the README status.
+- **After 16:** the term lexicon protects Holy Names/terms from expansion and surfaces their
+  definitions in retrieval. Re-run the *ahava b'ta'anugim* seed: ע"ב/מ"ה/ב"ן should now retrieve
+  their term definitions instead of being mangled.
 
 ## 6. Invariants to re-check at every step (don't regress)
 
@@ -316,6 +394,8 @@ Show the develop-eval table on the seed set when done.
   AND develop.
 - Citations only ever reference retrieved sources; the expert seed/framework and conversation
   context are attributed but never cited as retrieved.
-- Printed Sefaria text is immutable; expert/derived knowledge layers on as separate chunks.
+- Printed Sefaria text is immutable; expert/derived/term knowledge layers on as separate chunks.
 - Provenance travels with every artifact (real author, seed id, model id, grounded refs).
+- Holy Names / registered terms are never expanded by normalization (deny-list, not a guesser);
+  surface-form matching tolerates gershayim/quote/nikkud variants.
 - Typed + `mypy --strict`, DI, config-driven, secrets only via env, tests mock network/models.

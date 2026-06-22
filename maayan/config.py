@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
 
+    @property
+    def generation_model(self) -> str:
+        """The model id of the selected generation backend (for provenance/logging)."""
+        return self.ollama_model if self.generation_backend == "ollama" else self.openrouter_model
+
     # ---- Vector DB (local) --------------------------------------------------
     qdrant_url: str = Field(default="http://localhost:6333")
     qdrant_api_key: SecretStr = Field(default=SecretStr(""))
@@ -82,14 +87,56 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier applied to source='expert' chunk scores (>1 prefers humans).",
     )
+    derived_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='derived' chunks (reviewed+approved developments).",
+    )
+    term_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='term' chunks (curated lexicon entries / Holy Names).",
+    )
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
-    # (the node ref above the chapter level) that the client enumerates chapter
-    # by chapter. Initial focus: Likutei Amarim (Tanya, Part I) — the core text.
-    # Add e.g. "Likutei Torah", "Torah Or" later; complex texts need their full
-    # node ref (find it via `GET /api/shape/<title>`).
-    books: list[str] = Field(default=["Tanya, Part I; Likkutei Amarim"])
+    # that resolves to a depth-2 node (chapters → segments), which the client
+    # enumerates chapter by chapter. Tanya, Part I is the core text; Torah Ohr (the
+    # Alter Rebbe's chassidus on Bereishis/Shemos) is the companion — its parshiyot
+    # are each depth-2 on Sefaria, so we list them by parsha node ref.
+    #   NOTE: Likutei Torah is NOT on Sefaria; it needs a separate ingestion adapter
+    #   (chabadlibrary.org / Hebrew Wikisource). See docs.
+    #   Find/verify any node ref via `GET /api/shape/<title>` (must be a flat
+    #   `chapters: [int, ...]`); whole-book refs with nested parshiyot won't ingest.
+    books: list[str] = Field(
+        default=[
+            "Tanya, Part I; Likkutei Amarim",
+            # --- Torah Ohr (Bereishis) ---
+            "Torah Ohr, Bereshit",
+            "Torah Ohr, Noach",
+            "Torah Ohr, Lech Lecha",
+            "Torah Ohr, Vayera",
+            "Torah Ohr, Chayei Sara",
+            "Torah Ohr, Toldot",
+            "Torah Ohr, Vayetzei",
+            "Torah Ohr, Vayishlach",
+            "Torah Ohr, Vayeshev",
+            "Torah Ohr, Miketz",
+            "Torah Ohr, Vayigash",
+            "Torah Ohr, Vayechi",
+            # --- Torah Ohr (Shemos) ---
+            "Torah Ohr, Shemot",
+            "Torah Ohr, Vaera",
+            "Torah Ohr, Bo",
+            "Torah Ohr, Beshalach",
+            "Torah Ohr, Yitro",
+            "Torah Ohr, Mishpatim",
+            "Torah Ohr, Terumah",
+            "Torah Ohr, Tetzaveh",
+            "Torah Ohr, Parashat Zakhor",
+            "Torah Ohr, Ki Tisa",
+            "Torah Ohr, Vayakhel",
+            "Torah Ohr, Megillat Esther",
+        ]
+    )
     ingest_langs: list[str] = Field(
         default=["he", "en"], description="Which languages to ingest when available."
     )
@@ -98,9 +145,46 @@ class Settings(BaseSettings):
         default=0.5, description="Min delay between Sefaria requests (via injected Clock)."
     )
 
+    # ---- Chabad Library corpus (non-Sefaria) --------------------------------
+    # Likutei Torah is NOT on Sefaria; we pull it from chabadlibrary.org's JSON API
+    # (api/main?path=<section_id>, brotli-encoded). Map book name → root section id.
+    # Find ids by walking the tree from the root call (see docs/CORPUS.md).
+    chabad_base_url: str = Field(default="https://chabadlibrary.org/books/api")
+    chabad_books: dict[str, int] = Field(
+        default={"Likutei Torah": 4000000000},
+        description="Chabad Library book name → root section id (non-Sefaria source).",
+    )
+    chabad_rate_limit_seconds: float = Field(
+        default=0.3, description="Min delay between Chabad Library requests (via Clock)."
+    )
+    chabad_chunk_chars: int = Field(
+        default=1000,
+        description=(
+            "Target max characters per Likutei Torah chunk. A long section is split at "
+            "SENTENCE boundaries into coherent passages (ref '… §2') for retrieval "
+            "precision; short sections stay whole. 0 = one chunk per section."
+        ),
+    )
+
     # ---- Capture loop -------------------------------------------------------
     annotation_kinds: list[str] = Field(
         default=["correction", "connection", "addition", "objection"]
+    )
+
+    # ---- Topic threads ------------------------------------------------------
+    thread_context_turns: int = Field(
+        default=6,
+        description="How many prior thread turns to pass as conversation context (Prompt 11).",
+    )
+
+    # ---- Develop step -------------------------------------------------------
+    develop_top_k: int = Field(
+        default=8,
+        description="How many corpus sources to retrieve + ground a seed development on.",
+    )
+    develop_auto_approve: bool = Field(
+        default=False,
+        description="If true, develop() approves immediately; else it waits for approve().",
     )
 
     # ---- Storage / paths ----------------------------------------------------
@@ -108,6 +192,10 @@ class Settings(BaseSettings):
 
     # ---- Evaluation ---------------------------------------------------------
     eval_goldset_path: str = Field(default="eval/goldset.yaml")
+    eval_develop_goldset_path: str = Field(
+        default="eval/develop_goldset.yaml",
+        description="Seeds (supported/unsupported) for scoring the develop step (Prompt 15).",
+    )
     eval_ks: list[int] = Field(default=[1, 3, 5, 10])
 
     # ---- UI -----------------------------------------------------------------
