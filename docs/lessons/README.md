@@ -15,4 +15,11 @@ do the hands-on at the bottom. Work through a module in order.
 - [1.2 — Chunking: the unit of retrieval](01-2-chunking.md)
 - [1.3 — Hebrew normalization (and what you deliberately don't do)](01-3-normalization.md)
 
+## Module 2 — Finding the right passages (vector DB & hybrid search)
+
+- [2.1 — Vector databases & the collection](02-1-vector-db.md)
+- [2.2 — The indexing pipeline](02-2-indexing-pipeline.md)
+- [2.3 — Hybrid retrieval & fusion (RRF)](02-3-hybrid-rrf.md)
+- [2.4 — Reranking & filters](02-4-rerank-and-filters.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
