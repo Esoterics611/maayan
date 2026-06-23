@@ -1,0 +1,43 @@
+# Production stack for maayan (Oracle Always Free VM). One backend serves the UI and the
+# CLI-over-SSH. See docs/cloud_deploy/03_DEPLOY_ORACLE.md.
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: maayan-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: maayan-app
+    restart: unless-stopped
+    env_file: .env                 # secrets + AUTH_ENABLED + SEED_ADMIN_* (never committed)
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      # Container-networking values, fixed here so .env can't get them wrong:
+      QDRANT_URL: http://qdrant:6333
+      UI_HOST: 0.0.0.0
+      UI_PORT: "8000"
+    ports:
+      # Bound to loopback only — Tailscale Funnel/serve publishes it over HTTPS.
+      # No public port is opened on the VM.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - maayan_data:/app/data          # the SQLite knowledge layer (irreplaceable)
+      - maayan_hf_cache:/app/.hf-cache  # bge-m3 download, persisted across rebuilds
+
+volumes:
+  qdrant_storage:
+    name: maayan_qdrant_storage
+  maayan_data:
+    name: maayan_data
+  maayan_hf_cache:
+    name: maayan_hf_cache

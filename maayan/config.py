@@ -228,6 +228,32 @@ class Settings(BaseSettings):
     ui_host: str = Field(default="127.0.0.1")
     ui_port: int = Field(default=8000)
 
+    # ---- Auth / multi-user (off by default) ---------------------------------
+    # When false, the UI is wide open exactly as before (local dev + tests unchanged).
+    # The cloud deploy sets AUTH_ENABLED=true to put a login wall in front of everything.
+    auth_enabled: bool = Field(
+        default=False,
+        description="Require login for the UI. Defaults false so local dev/tests are unchanged.",
+    )
+    session_ttl_hours: int = Field(default=168, description="Session lifetime in hours (7 days).")
+    session_cookie_name: str = Field(default="maayan_session")
+    auth_cookie_secure: bool = Field(
+        default=False,
+        description="Send the session cookie over HTTPS only. Set true in production.",
+    )
+    pbkdf2_iterations: int = Field(
+        default=240_000,
+        description="PBKDF2-HMAC-SHA256 rounds for password hashing; raise over time.",
+    )
+    seed_admin_username: str = Field(
+        default="",
+        description="Optional first-admin username, seeded once on UI startup if absent.",
+    )
+    seed_admin_password: SecretStr = Field(
+        default=SecretStr(""),
+        description="Optional first-admin password (env only). Ignored if blank or user exists.",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

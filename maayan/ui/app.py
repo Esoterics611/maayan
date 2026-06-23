@@ -11,11 +11,12 @@ seed → develop → approve/reject — each a thin route over a service.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from maayan.capture.convert import detect_lang
 from maayan.capture.models import Annotation
@@ -43,9 +44,12 @@ from maayan.ui.models import (
     ComposeRequest,
     CompositionResponse,
     CreateThreadRequest,
+    CreateUserRequest,
     DevelopmentResponse,
     DevelopRequest,
     ExportResponse,
+    LoginRequest,
+    MeResponse,
     PromoteRequest,
     RetractRequest,
     RetractResponse,
@@ -53,6 +57,8 @@ from maayan.ui.models import (
     SeedRequest,
     SeedResponse,
     SessionResponse,
+    SetActiveRequest,
+    SetPasswordRequest,
     SourceOut,
     TermRequest,
     TermResponse,
@@ -60,6 +66,8 @@ from maayan.ui.models import (
     ThreadOut,
     TurnOut,
 )
+from maayan.users.models import User, UserOut
+from maayan.users.service import UserService
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -146,13 +154,120 @@ def create_app(
     stats: Statsing,
     compose: Composing,
     *,
+    users: UserService | None = None,
     context_turns: int = 6,
+    auth_enabled: bool = False,
+    session_cookie_name: str = "maayan_session",
+    cookie_secure: bool = False,
+    cookie_max_age: int = 604_800,
 ) -> FastAPI:
     app = FastAPI(title="maayan", docs_url="/docs")
+
+    if auth_enabled and users is None:
+        raise ValueError("auth_enabled requires a UserService to be injected")
+
+    def _user_service() -> UserService:
+        if users is None:  # auth wiring absent (auth disabled) — these routes are inert
+            raise HTTPException(status_code=503, detail="auth not configured")
+        return users
+
+    def _require_admin(request: Request) -> User:
+        user: User | None = getattr(request.state, "user", None)
+        if user is None or user.role != "admin":
+            raise HTTPException(status_code=403, detail="admin only")
+        return user
+
+    # Auth wall: when enabled, every request outside the allowlist needs a valid session.
+    # When disabled, this is a no-op (attaches user=None) so local dev/tests are unchanged.
+    @app.middleware("http")
+    async def _auth_guard(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request.state.user = None
+        if not auth_enabled or users is None:
+            return await call_next(request)
+        path = request.url.path
+        if path in {"/login", "/api/login", "/healthz"}:
+            return await call_next(request)
+        user = users.current_user(request.cookies.get(session_cookie_name))
+        if user is None:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "authentication required"}, status_code=401)
+            return RedirectResponse(url="/login", status_code=303)
+        request.state.user = user
+        return await call_next(request)
 
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(_STATIC / "index.html")
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    # -- auth / users -------------------------------------------------------
+    @app.get("/login")
+    def login_page() -> FileResponse:
+        return FileResponse(_STATIC / "login.html")
+
+    @app.post("/api/login")
+    def api_login(req: LoginRequest, response: Response) -> MeResponse:
+        svc = _user_service()
+        session = svc.login(req.username, req.password)
+        if session is None:
+            raise HTTPException(status_code=401, detail="invalid username or password")
+        response.set_cookie(
+            key=session_cookie_name, value=session.token, httponly=True,
+            secure=cookie_secure, samesite="lax", max_age=cookie_max_age, path="/",
+        )
+        user = svc.current_user(session.token)
+        return MeResponse(auth_enabled=auth_enabled, user=user.to_out() if user else None)
+
+    @app.post("/api/logout")
+    def api_logout(request: Request, response: Response) -> dict[str, str]:
+        _user_service().logout(request.cookies.get(session_cookie_name))
+        response.delete_cookie(session_cookie_name, path="/")
+        return {"status": "ok"}
+
+    @app.get("/api/me")
+    def api_me(request: Request) -> MeResponse:
+        user: User | None = getattr(request.state, "user", None)
+        return MeResponse(auth_enabled=auth_enabled, user=user.to_out() if user else None)
+
+    @app.get("/api/users")
+    def api_list_users(request: Request) -> list[UserOut]:
+        _require_admin(request)
+        return _user_service().list_users()
+
+    @app.post("/api/users")
+    def api_create_user(req: CreateUserRequest, request: Request) -> UserOut:
+        admin = _require_admin(request)
+        try:
+            return _user_service().create_user(
+                username=req.username, password=req.password,
+                display_name=req.display_name, role=req.role, created_by=admin.username,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/users/{user_id}/active")
+    def api_set_active(user_id: str, req: SetActiveRequest, request: Request) -> UserOut:
+        _require_admin(request)
+        try:
+            return _user_service().set_active(user_id, req.active)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/users/{user_id}/password")
+    def api_set_password(
+        user_id: str, req: SetPasswordRequest, request: Request
+    ) -> dict[str, str]:
+        _require_admin(request)
+        try:
+            _user_service().change_password(user_id, req.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"status": "ok"}
 
     @app.get("/kinds")
     def kinds() -> list[str]:

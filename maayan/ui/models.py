@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from maayan.users.models import Role, UserOut
+
 
 class AskRequest(BaseModel):
     question: str
@@ -218,3 +220,33 @@ class PromoteRequest(BaseModel):
 
 class ExportResponse(BaseModel):
     markdown: str
+
+
+# ---- Auth / users ----------------------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    display_name: str = ""
+    role: Role = "member"
+
+
+class SetActiveRequest(BaseModel):
+    active: bool
+
+
+class SetPasswordRequest(BaseModel):
+    password: str
+
+
+class MeResponse(BaseModel):
+    """Who am I + whether auth is on. Drives the UI's auth chrome and author auto-fill."""
+
+    auth_enabled: bool
+    user: UserOut | None = None

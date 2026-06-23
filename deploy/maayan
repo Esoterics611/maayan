@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run maayan CLI commands inside the running app container — the SAME backend as the UI
+# (same Qdrant, same SQLite, same bge-m3 model cache). Installed to /usr/local/bin/maayan
+# by deploy/bootstrap.sh, which substitutes the compose-file path below.
+#
+# Usage (over SSH on the VM):  maayan ask "..."   |   maayan ingest --all   |   maayan index
+set -euo pipefail
+COMPOSE_FILE="${MAAYAN_COMPOSE_FILE:-__COMPOSE_FILE__}"
+exec docker compose -f "$COMPOSE_FILE" exec app uv run maayan "$@"

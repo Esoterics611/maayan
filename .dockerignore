@@ -1,0 +1,19 @@
+# Keep the build context small + deterministic. The Dockerfile COPYs only what it needs
+# (pyproject.toml, uv.lock, README.md, maayan/), so excluding everything else is safe.
+.git
+.github
+.venv
+**/__pycache__/
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+data/
+eval/
+tests/
+docs/
+*.pdf
+*.sqlite3
+.env
+.env.*
+.claude/

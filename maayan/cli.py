@@ -9,7 +9,7 @@ library code. No business logic lives here.
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import typer
 
@@ -17,6 +17,10 @@ from maayan import __version__
 from maayan.config import Settings, get_settings
 from maayan.corpus.ingest import IngestResult
 from maayan.corpus.models import Lang
+
+if TYPE_CHECKING:
+    from maayan.users.models import Role, UserOut
+    from maayan.users.service import UserService
 
 app = typer.Typer(
     name="maayan",
@@ -1000,6 +1004,7 @@ def ui() -> None:
     from maayan.stats.factory import build_stats_service
     from maayan.threads.factory import build_thread_service
     from maayan.ui.app import create_app
+    from maayan.users.factory import build_user_service
 
     settings = _cfg()
     require_qdrant(settings)
@@ -1014,13 +1019,135 @@ def ui() -> None:
     retraction = build_retraction_service(settings, embedder=embedder)
     stats = build_stats_service(settings)
     compose_service = build_composition_service(settings, embedder=embedder)
+    users = build_user_service(settings)
+    if settings.auth_enabled:
+        seeded = users.ensure_seed_admin()
+        if seeded is not None:
+            typer.echo(f"auth: seeded first admin '{seeded.username}' (rotate the password!)")
 
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
+        users=users,
         context_turns=settings.thread_context_turns,
+        auth_enabled=settings.auth_enabled,
+        session_cookie_name=settings.session_cookie_name,
+        cookie_secure=settings.auth_cookie_secure,
+        cookie_max_age=settings.session_ttl_hours * 3600,
     )
-    typer.echo(f"maayan UI → http://{settings.ui_host}:{settings.ui_port}")
+    typer.echo(
+        f"maayan UI → http://{settings.ui_host}:{settings.ui_port}"
+        f"{'  [auth: login required]' if settings.auth_enabled else ''}"
+    )
     uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)
+
+
+# --- user management (auth / multi-user) ------------------------------------
+# These manage the accounts the web UI logs in with. Auth is off unless
+# AUTH_ENABLED=true (see docs/cloud_deploy/02_USER_MANAGEMENT.md), but you can seed
+# accounts any time. Passwords are prompted, never passed as flags.
+user_app = typer.Typer(
+    help="Manage web-UI user accounts (auth).", no_args_is_help=True, add_completion=False
+)
+app.add_typer(user_app, name="user")
+
+
+def _user_service_cli() -> UserService:
+    from maayan.users.factory import build_user_service
+
+    return build_user_service(_cfg())
+
+
+def _find_user_id(svc: UserService, username: str) -> str | None:
+    for u in svc.list_users():
+        if u.username == username:
+            return u.id
+    return None
+
+
+def _create_user_cli(username: str, display_name: str, role: str) -> None:
+    password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+    try:
+        out: UserOut = _user_service_cli().create_user(
+            username=username,
+            password=password,
+            display_name=display_name,
+            role=cast("Role", role),
+            created_by="cli",
+        )
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"created {out.role}: {out.username} ({out.id})")
+
+
+@user_app.command("create-admin")
+def user_create_admin(
+    username: str = typer.Option(..., "--username", "-u", help="Admin username."),
+    display_name: str = typer.Option("", "--display-name", help="Defaults to username."),
+) -> None:
+    """Create an admin account (prompts for the password)."""
+    _create_user_cli(username, display_name, "admin")
+
+
+@user_app.command("create")
+def user_create(
+    username: str = typer.Option(..., "--username", "-u"),
+    display_name: str = typer.Option("", "--display-name"),
+    admin: bool = typer.Option(False, "--admin", help="Make this user an admin."),
+) -> None:
+    """Create a member (or, with --admin, an admin) account."""
+    _create_user_cli(username, display_name, "admin" if admin else "member")
+
+
+@user_app.command("list")
+def user_list() -> None:
+    """List all user accounts."""
+    rows = _user_service_cli().list_users()
+    if not rows:
+        typer.echo("(no users yet — create one with `maayan user create-admin`)")
+        return
+    for u in rows:
+        flag = "" if u.active else "  [disabled]"
+        typer.echo(f"{u.role:6}  {u.username:20}  {u.display_name}{flag}")
+
+
+def _user_set_active(username: str, active: bool) -> None:
+    svc = _user_service_cli()
+    uid = _find_user_id(svc, username)
+    if uid is None:
+        typer.echo(f"error: no such user: {username}")
+        raise typer.Exit(1)
+    svc.set_active(uid, active)
+    typer.echo(f"{'enabled' if active else 'disabled'}: {username}")
+
+
+@user_app.command("disable")
+def user_disable(username: str = typer.Argument(..., help="Username to disable.")) -> None:
+    """Disable an account (revokes its sessions immediately)."""
+    _user_set_active(username, False)
+
+
+@user_app.command("enable")
+def user_enable(username: str = typer.Argument(..., help="Username to enable.")) -> None:
+    """Re-enable a disabled account."""
+    _user_set_active(username, True)
+
+
+@user_app.command("passwd")
+def user_passwd(username: str = typer.Argument(..., help="Username to reset.")) -> None:
+    """Reset an account's password (prompts; revokes existing sessions)."""
+    svc = _user_service_cli()
+    uid = _find_user_id(svc, username)
+    if uid is None:
+        typer.echo(f"error: no such user: {username}")
+        raise typer.Exit(1)
+    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    try:
+        svc.change_password(uid, password)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"password updated for {username}")
 
 
 # All CLI subcommands registered.

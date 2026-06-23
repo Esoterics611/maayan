@@ -422,6 +422,23 @@ connections — not its prose — flow back into the Knowledge base.
 
 ---
 
+## 9. Deploy to the cloud (free)
+
+Take maayan off the laptop onto a free, always-on host with a **public URL + login**,
+where the same backend serves the web UI and the CLI (over SSH). The plan, the exact
+manual/account steps, and the runbook live in **[docs/cloud_deploy/](docs/cloud_deploy/README.md)**:
+
+- **Host:** Oracle Cloud Always Free (ARM Ampere VM) — runs `bge-m3` + Qdrant unchanged.
+- **Access:** Tailscale Funnel — free public HTTPS, no open ports, no domain to buy.
+- **Auth (built):** per-user accounts with admin-managed user creation in the UI. Off by
+  default locally (`AUTH_ENABLED=false`); the deploy turns it on. Seed the first admin with
+  `maayan user create-admin`. Production stack: `make prod-up` (`docker-compose.prod.yml`).
+
+Start at [docs/cloud_deploy/README.md](docs/cloud_deploy/README.md); do the human-only
+account steps from [docs/cloud_deploy/01_MANUAL_SETUP.md](docs/cloud_deploy/01_MANUAL_SETUP.md).
+
+---
+
 ## License / attribution
 
 Sefaria texts are **CC-BY-NC**. This project is for personal, non-commercial Torah
