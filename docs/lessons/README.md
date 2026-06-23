@@ -35,4 +35,11 @@ do the hands-on at the bottom. Work through a module in order.
 - [4.2 — Running and reading the harness](04-2-running-the-harness.md)
 - [4.3 — Gold sets & honest measurement](04-3-gold-sets.md)
 
+## Module 5 — How it's built to last (the engineering spine)
+
+- [5.1 — Dependency injection: why nothing constructs its own collaborators](05-1-dependency-injection.md)
+- [5.2 — Typed throughout, pydantic at every boundary](05-2-typed-pydantic.md)
+- [5.3 — Config-driven everything](05-3-config-driven.md)
+- [5.4 — The Clock, and testing without the network](05-4-clock-and-testing.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
