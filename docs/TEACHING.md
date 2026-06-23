@@ -554,6 +554,64 @@ thread stores so running an eval never writes proposals into your DB. As with re
 a CI guard (`test_shipped_develop_goldset_is_well_formed`) keeps the shipped gold set
 from going stale silently.
 
+### 5.11 When you get it wrong — retraction is how the corpus self-corrects (Prompt 17 — DONE)
+
+Every capability so far only *adds* knowledge (annotate, develop→approve, add-term). But
+a scholar working for real will eventually index a wrong connection, a typo'd term, or
+approve a development they later reconsider — and an append-only corpus keeps surfacing
+that mistake forever. So Phase 4 adds the **eraser**.
+
+The design choice is the lesson: a retraction is **not a silent delete**, it is a
+*provenanced* event — who retracted, when, and why — persisted as its own audit record
+(`Retraction`). The chunk leaves retrieval (the Qdrant point is deleted) *and* is
+tombstoned in the corpus store (`retracted = 1`), so `index --rebuild` re-embeds from the
+source of truth and **does not bring the mistake back**. Provenance travels with the
+*removal* of knowledge exactly as it travels with its addition.
+
+And the immutability invariant holds at the eraser too: **printed text
+(`sefaria`/`chabad`) is never retractable — rejected in code**, not merely discouraged.
+Only the layered `expert`/`derived`/`term` knowledge a human added can be taken back.
+There is no in-place edit (ids are content-derived and idempotent); **to correct, you
+retract the wrong chunk and re-add the right one** through the same capture loop. The
+corpus self-corrects without ever editing the printed word.
+
+**Skill — model removal as a first-class, attributed event.** A delete that leaves no
+trace is unauditable; an edit that mutates content in place loses the before-state. A
+retract-and-re-add flow over content-addressed chunks keeps the full history *and* the
+immutability of the printed text — the same disciplines (provenance, default-deny,
+typed boundaries) applied to taking something *out*.
+
+### 5.12 Composition — a long document is the grounded unit, run once per section (Phase 5 — DONE)
+
+`ask` and `develop` each produce ONE grounded, cited passage from ONE retrieval. The
+obvious next ask — "write me a whole shiur / essay" — looks like it needs a new, bigger
+generation engine. It doesn't. The realization that makes Phase 5 small: a long document
+is the **same unit run once per section**. A brief is **decomposed** into an outline where
+each section carries its own retrieval sub-question; then each section is **filled** by the
+exact grounded unit we already have — retrieved fresh, gated, cited — and **assembled**.
+
+The differentiator is the gate, now **per section**. When the corpus doesn't support a
+section, the default-deny rule at `rag.py` fires and the section becomes an **honest gap**
+("the sources here don't reach this") with **no model call** — never fabricated prose. A
+piece with honest holes beats a confident invention; for Torah that *is* the point. This
+is why a *maayan* document generator differs from a generic LLM writer: it refuses, in
+code, section by section.
+
+Two restraint decisions carry the lesson. First, **approval does not bulk-index the
+prose** — re-ingesting an essay as one chunk would pollute retrieval. The loop-worthy
+knowledge a composition surfaces is the *connections between passages*; those flow back
+**one at a time** through the existing `expert`/`derived` capture loop (`promote_connection`
+reuses `CaptureService` verbatim), never as a wall of text. Second, essay and digest are
+not new pipelines — they're the same engine in a different register, so `content_type` is a
+config `Literal`, not three modules.
+
+**Skill — orchestrate the unit you already have; don't build a bigger one.** When a "bigger"
+feature appears, ask what indivisible unit it's made of. If you have that unit (grounded,
+gated, cited), the feature is an *orchestration layer* — decompose → fill → assemble —
+reusing `build_context`/`extract_cited_refs` and the propose→review shape verbatim. Less
+new code, and every invariant (default-deny, citation hygiene, provenance) comes along for
+free.
+
 ---
 
 ## 6. Exercises — test your understanding

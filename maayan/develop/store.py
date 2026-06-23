@@ -70,6 +70,13 @@ class DevelopmentStore:
         ).fetchone()
         return self._row_to_development(row) if row else None
 
+    def counts_by_status(self) -> dict[str, int]:
+        """Development counts grouped by status (proposed/approved/rejected/retracted)."""
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) AS n FROM developments GROUP BY status"
+        )
+        return {r["status"]: int(r["n"]) for r in rows}
+
     def list_developments(self, thread_id: str | None = None) -> list[Development]:
         if thread_id is None:
             rows = self._conn.execute("SELECT * FROM developments ORDER BY timestamp")

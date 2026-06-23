@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS terms (
     source_refs   TEXT NOT NULL,   -- json array
     gematria      INTEGER,
     sacred        INTEGER NOT NULL DEFAULT 0,
-    author        TEXT NOT NULL
+    author        TEXT NOT NULL,
+    retracted     INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -38,13 +39,22 @@ class TermStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Idempotent column migration: add `retracted` to older DBs (Prompt 17)."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(terms)")}
+        if "retracted" not in existing:
+            self._conn.execute(
+                "ALTER TABLE terms ADD COLUMN retracted INTEGER NOT NULL DEFAULT 0"
+            )
 
     def create_term(self, term: Term) -> Term:
         self._conn.execute(
             "INSERT OR REPLACE INTO terms (id, canonical, surface_forms, term_type, "
-            "definition, related_terms, source_refs, gematria, sacred, author) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "definition, related_terms, source_refs, gematria, sacred, author, retracted) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 term.id,
                 term.canonical,
@@ -56,10 +66,16 @@ class TermStore:
                 term.gematria,
                 int(term.sacred),
                 term.author,
+                int(term.retracted),
             ),
         )
         self._conn.commit()
         return term
+
+    def mark_retracted(self, term_id: str) -> None:
+        """Tombstone a term (its term chunk has been retracted from retrieval)."""
+        self._conn.execute("UPDATE terms SET retracted = 1 WHERE id = ?", (term_id,))
+        self._conn.commit()
 
     def get_term(self, term_id: str) -> Term | None:
         row = self._conn.execute("SELECT * FROM terms WHERE id = ?", (term_id,)).fetchone()
@@ -69,6 +85,11 @@ class TermStore:
         return [self._row_to_term(r) for r in self._conn.execute(
             "SELECT * FROM terms ORDER BY canonical"
         )]
+
+    def count(self, *, include_retracted: bool = False) -> int:
+        """Number of curated terms (live by default; the lexicon size)."""
+        where = "" if include_retracted else "WHERE retracted = 0"
+        return int(self._conn.execute(f"SELECT COUNT(*) AS n FROM terms {where}").fetchone()["n"])
 
     def find_by_surface_form(self, query: str) -> list[Term]:
         """All terms with a surface form (or canonical) that folds equal to `query`."""
@@ -103,4 +124,5 @@ class TermStore:
             gematria=row["gematria"],
             sacred=bool(row["sacred"]),
             author=row["author"],
+            retracted=bool(row["retracted"]),
         )
