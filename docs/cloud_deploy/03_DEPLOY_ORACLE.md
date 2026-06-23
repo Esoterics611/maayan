@@ -8,6 +8,12 @@
 Steps marked **(you)** are human-only (see [01_MANUAL_SETUP.md](01_MANUAL_SETUP.md)); the
 rest are one script + a few commands we run together.
 
+> **QA locally first.** Before provisioning anything, run the *same* stack on your laptop and
+> exercise it with the **[Operator manual](06_OPERATOR_MANUAL.md)** (`make prod-up` → log in →
+> watch logs). The only differences on the VM are `AUTH_COOKIE_SECURE=true` and that Tailscale
+> provides the public HTTPS URL. Day-2 ops (logs, restart, backups) also live in the operator
+> manual.
+
 ---
 
 ## 0. Prereqs

@@ -61,6 +61,10 @@ call it over SSH.
   first, then run on the VM. (Tracked as a build task; spec lives in
   [03_DEPLOY_ORACLE.md](03_DEPLOY_ORACLE.md).)
 
+### Operating it — day to day *(local QA now, and on the VM)*
+- **[06_OPERATOR_MANUAL.md](06_OPERATOR_MANUAL.md)**: bring the backend up, verify health,
+  log in, watch logs, back up, stop. Use this to **QA locally before deploying**.
+
 ### Phase 4 — Scale up with fundraising *(future sessions)*
 - **[04_HOSTING_MIGRATION.md](04_HOSTING_MIGRATION.md)**: paid VM / GPU for local
   generation + reranker, managed Qdrant, object-storage backups, a custom domain, CI/CD,

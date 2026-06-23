@@ -23,10 +23,13 @@ RUN uv sync --frozen --no-dev --extra ml --extra ui --no-install-project
 COPY maayan ./maayan
 RUN uv sync --frozen --no-dev --extra ml --extra ui
 
-# Non-root user; writable dirs for the SQLite data + the bge-m3 model cache (both volumes).
+# Non-root user. Only the WRITABLE dirs are chowned (the SQLite data + bge-m3 model cache,
+# both volume mount points) — NOT the whole venv. A recursive chown over torch is needlessly
+# slow (minutes on some overlay filesystems); the venv stays root-owned + world-readable,
+# which is all the app user needs to import it.
 RUN useradd --create-home --uid 10001 app \
     && mkdir -p /app/.hf-cache /app/data \
-    && chown -R app:app /app
+    && chown app:app /app/.hf-cache /app/data
 USER app
 
 EXPOSE 8000
@@ -37,4 +40,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=10 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" \
         || exit 1
 
-CMD ["uv", "run", "maayan", "ui"]
+# Run the installed console script directly (no `uv run` → no venv write needed at runtime).
+CMD ["/app/.venv/bin/maayan", "ui"]
