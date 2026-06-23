@@ -29,4 +29,10 @@ do the hands-on at the bottom. Work through a module in order.
 - [3.3 — Default-deny: the rule that lives in code, not the prompt](03-3-default-deny.md)
 - [3.4 — Context-aware follow-ups without losing grounding](03-4-context-followups.md)
 
+## Module 4 — Knowing if it's actually good (evaluation)
+
+- [4.1 — Why eval exists, and the metrics](04-1-why-eval-metrics.md)
+- [4.2 — Running and reading the harness](04-2-running-the-harness.md)
+- [4.3 — Gold sets & honest measurement](04-3-gold-sets.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
