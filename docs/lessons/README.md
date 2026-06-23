@@ -50,4 +50,12 @@ do the hands-on at the bottom. Work through a module in order.
 - [6.4 — The approval gate → derived corpus](06-4-approval-gate.md)
 - [6.5 — Threads & the term lexicon](06-5-threads-and-lexicon.md)
 
+## Module 7 — Running it for real (operating & tuning)
+
+- [7.1 — Setup & dependencies](07-1-setup-and-deps.md)
+- [7.2 — The knobs that matter](07-2-the-knobs.md)
+- [7.3 — Choosing & swapping the generation backend](07-3-backend-swap.md)
+- [7.4 — Growing the corpus](07-4-growing-the-corpus.md)
+- [7.5 — The web UI as a thin layer](07-5-web-ui.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
