@@ -1,0 +1,76 @@
+# Cross-text gold set for maayan — Phase 3's headline, measured.
+#
+# Phase 3 ingested THREE texts (Tanya, Torah Ohr, Likutei Torah) and claims they
+# co-retrieve: a single question can pull sources from more than one book together.
+# Each question below is chosen so its answer SHOULD draw on >= 2 of the three books,
+# and `expected_refs` deliberately span those books. `maayan eval --crosstext` then
+# measures cross-text coverage@k and the >=2-distinct-books rate.
+#
+# BOOK GRANULARITY: the cross-text metric only cares which BOOK a ref belongs to
+# (derived from the ref prefix: "Tanya, ...", "Torah Ohr, ...", "Likutei Torah, ...").
+# So the exact chapter/segment numbers below are BEST-EFFORT pointers — edit them as
+# the corpus and your own learning sharpen them. What must stay true: every entry
+# spans >= 2 distinct books (a CI guard enforces it).
+#
+# Same {question, expected_refs} format as eval/goldset.yaml — it reuses the loader.
+examples:
+  - question: "מהו ענין הביטול לאלוקות, וכיצד הוא נדרש בעבודת ה?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 19"
+      - "Torah Ohr, Bereshit 2"
+    note: bittul — Tanya (the soul's hidden love) ↔ Torah Ohr
+
+  - question: "מהי אהבה בתענוגים ומה מקורה בנפש?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 9"
+      - "Likutei Torah, Bamidbar"
+    note: ahava b'ta'anugim — Tanya ↔ Likutei Torah
+
+  - question: "מהי הנפש הבהמית וכיצד מבררים אותה?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 1"
+      - "Torah Ohr, Noach 1"
+    note: the animal soul + its refinement — Tanya ↔ Torah Ohr
+
+  - question: "מהו ענין הצמצום והעלם האור?"
+    expected_refs:
+      - "Torah Ohr, Bereshit 1"
+      - "Likutei Torah, Devarim"
+    note: tzimtzum — Torah Ohr ↔ Likutei Torah
+
+  - question: "מהי מסירות נפש ומה שורשה בעצם הנשמה?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 18"
+      - "Torah Ohr, Lech Lecha 1"
+    note: mesirus nefesh — Tanya ↔ Torah Ohr
+
+  - question: "מהו רצוא ושוב בעבודת התפילה?"
+    expected_refs:
+      - "Torah Ohr, Yitro 1"
+      - "Likutei Torah, Vayikra"
+    note: ratzo v'shov — Torah Ohr ↔ Likutei Torah
+
+  - question: "מהו אתכפיא ואתהפכא חשוכא לנהורא?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 27"
+      - "Torah Ohr, Toldot 1"
+    note: is'kafia/is'hapcha — Tanya ↔ Torah Ohr
+
+  - question: "מהי התשובה העליונה ושורשה למעלה?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 29"
+      - "Likutei Torah, Devarim"
+    note: teshuva ila'ah — Tanya ↔ Likutei Torah
+
+  - question: "מהו ענין יחידה שבנפש ועצם הנשמה?"
+    expected_refs:
+      - "Tanya, Part I; Likkutei Amarim 2"
+      - "Torah Ohr, Vayera 1"
+      - "Likutei Torah, Bamidbar"
+    note: yechida / etzem ha'neshama — spans all three books
+
+  - question: "מהו אור אין סוף הממלא כל עלמין וסובב כל עלמין?"
+    expected_refs:
+      - "Torah Ohr, Shemot 1"
+      - "Likutei Torah, Vayikra"
+    note: memale/sovev — Torah Ohr ↔ Likutei Torah

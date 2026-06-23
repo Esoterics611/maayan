@@ -7,6 +7,7 @@ idempotent. The `QdrantClient` is injected (built by `build_qdrant_client`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from qdrant_client import QdrantClient, models
@@ -94,6 +95,16 @@ class QdrantIndex:
         ]
         self._client.upsert(collection_name=self._collection, points=points)
         return len(points)
+
+    def delete_points(self, ids: Sequence[str]) -> int:
+        """Delete points by id (used to retract a chunk from retrieval). Idempotent."""
+        if not ids:
+            return 0
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=models.PointIdsList(points=list(ids)),
+        )
+        return len(ids)
 
     def query_hybrid(
         self,

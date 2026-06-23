@@ -14,7 +14,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-DevelopmentStatus = Literal["proposed", "approved", "rejected"]
+# "retracted" is set when an approved (indexed) development is later retracted
+# (Prompt 17): the derived chunk leaves retrieval and the development is tombstoned.
+DevelopmentStatus = Literal["proposed", "approved", "rejected", "retracted"]
 
 
 class Development(BaseModel):

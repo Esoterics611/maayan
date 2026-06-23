@@ -29,6 +29,7 @@ class Term(BaseModel):
     gematria: int | None = None
     sacred: bool = False  # a Holy Name — display/handle with care
     author: str
+    retracted: bool = False  # tombstoned (Prompt 17): the term chunk left retrieval
 
     @field_validator("author")
     @classmethod
