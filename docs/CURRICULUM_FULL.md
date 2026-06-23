@@ -21,6 +21,9 @@ body {
 }
 
 h1, h2, h3, h4 { line-height: 1.25; break-after: avoid; }
+/* Page breaks ride on the (non-empty) module/lesson headings themselves. An EMPTY
+   break <div> renders as its own blank page in Chromium, so we never use one. */
+h1, h2 { break-before: page; page-break-before: always; }
 h1 { color: var(--deep); font-size: 25pt; margin: 0 0 .2em; }
 h2 { color: var(--teal); font-size: 18pt; border-bottom: 2px solid var(--teal); padding-bottom: .15em; }
 h3 { color: var(--deep); font-size: 13.5pt; }
@@ -109,9 +112,6 @@ hr { border: none; border-top: 1px solid #d8e3e1; margin: 1.4em 0; }
 </div>
 
 
-<div class="page-break"></div>
-
-
 <div class="toc">
 <h1>Contents</h1>
 <ul>
@@ -162,19 +162,9 @@ hr { border: none; border-top: 1px solid #d8e3e1; margin: 1.4em 0; }
 </ul>
 </div>
 
-<div class="page-break"></div>
-
-
-<a id="module-0"></a>
-
-
-# Module 0 — Orientation: the whole loop in your hands
-
+<h1 id="module-0">Module 0 — Orientation: the whole loop in your hands</h1>
 
 <p class="module-goal">See the entire system work once, end to end, and hold a mental map before zooming in.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-0-1"></a>
 
@@ -301,9 +291,6 @@ You don't need anything running for this one — it's about seeing the idea in y
 
 Next: **0.2 — The maayan thesis in one picture** — the full
 pipeline, stage by stage, and the loop that makes this system yours.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-0-2"></a>
 
@@ -446,9 +433,6 @@ swap the cloud model for a local one without changing a single line of logic.
 
 Next: **0.3 — Run it once, all the way** — you'll push a real
 question through every box above and watch it both *answer* and *refuse*.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-0-3"></a>
 
@@ -663,19 +647,9 @@ Module 1 opens the first box — how text becomes searchable *meaning* in the fi
 
 When you're ready, ask me to **build out Module 1**.
 
-<div class="page-break"></div>
-
-
-<a id="module-1"></a>
-
-
-# Module 1 — Turning text into searchable meaning (embeddings & chunking)
-
+<h1 id="module-1">Module 1 — Turning text into searchable meaning (embeddings & chunking)</h1>
 
 <p class="module-goal">Understand the “R” inputs — how text becomes numbers a computer can compare, and why you chunk it the way you do.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-1-1"></a>
 
@@ -859,9 +833,6 @@ Next: **1.2 — Chunking: the unit of retrieval** — *what* gets embedded.
 You don't embed a whole book; you embed one natural unit at a time. We'll see why, and why
 maayan refuses to chop text into arbitrary windows.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-1-2"></a>
 
 
@@ -1038,9 +1009,6 @@ Next: **1.3 — Hebrew normalization (and what you deliberately don't do)** —
 before a segment becomes a chunk, its text is cleaned. We'll see exactly what gets stripped,
 what's protected (nikkud), and the one transformation maayan refuses to do automatically.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-1-3"></a>
 
 
@@ -1194,19 +1162,9 @@ corrupted (1.3). Those chunks-as-vectors are sitting in a database, waiting.
 Next: **Module 2** opens that database — where the vectors live, and how a question pulls
 back the relevant few. When you're ready, ask me to **build out Module 2**.
 
-<div class="page-break"></div>
-
-
-<a id="module-2"></a>
-
-
-# Module 2 — Finding the right passages (vector DB & hybrid search)
-
+<h1 id="module-2">Module 2 — Finding the right passages (vector DB & hybrid search)</h1>
 
 <p class="module-goal">Understand where chunks live and how a query pulls back the relevant few.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-2-1"></a>
 
@@ -1352,9 +1310,6 @@ PY
 
 Next: **2.2 — The indexing pipeline** — how chunks actually get
 *into* this collection, in batches, and why running it twice never creates a duplicate.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-2-2"></a>
 
@@ -1502,9 +1457,6 @@ Next: **2.3 — Hybrid retrieval & fusion (RRF)** — the points are in the
 collection; now a question goes in and the relevant few come back. We'll see how dense and
 sparse searches are *fused*, and meet the two different scores that matter.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-2-3"></a>
 
 
@@ -1651,9 +1603,6 @@ junk" is exactly the gap the refusal gate lives in. Write down both `relevance` 
 Next: **2.4 — Reranking & filters** — an optional second pass
 that re-reads the top candidates for sharper ordering, plus the `--book` / `--source` filters
 you've been using.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-2-4"></a>
 
@@ -1821,19 +1770,9 @@ Next: **Module 3** is that decision. We open `generate/`: how retrieved passages
 cited answer, and how the **default-deny gate** uses `relevance` to refuse rather than
 fabricate. When you're ready, ask me to **build out Module 3**.
 
-<div class="page-break"></div>
-
-
-<a id="module-3"></a>
-
-
-# Module 3 — The trust core (generation, grounding, default-deny)
-
+<h1 id="module-3">Module 3 — The trust core (generation, grounding, default-deny)</h1>
 
 <p class="module-goal">Understand how retrieved passages become a cited answer, and how the system refuses rather than fabricate.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-3-1"></a>
 
@@ -1951,9 +1890,6 @@ This lesson is about *seeing the seam*, not running a swap (that's Module 7.3).
 Next: **3.2 — The grounded prompt & citations** — now we look
 *inside* the call: how retrieved sources become a numbered, citable block, and how every `[S#]`
 in the answer resolves back to a real ref.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-3-2"></a>
 
@@ -2100,9 +2036,6 @@ Next: **3.3 — Default-deny: the rule that lives in code, not the prompt** —
 the hard guarantee. We'll meet the gate that refuses *before* the model is ever called, and you'll
 make it open and close with one knob.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-3-3"></a>
 
 
@@ -2247,9 +2180,6 @@ Next: **3.4 — Context-aware follow-ups without losing grounding** —
 how a conversation can help *interpret* a question without ever becoming a citable source, and
 without weakening the gate you just met.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-3-4"></a>
 
 
@@ -2393,19 +2323,9 @@ refusal.
 Next: **Module 4** asks the uncomfortable question — *is it actually any good?* — and replaces
 "it feels right" with numbers. When you're ready, ask me to **build out Module 4**.
 
-<div class="page-break"></div>
-
-
-<a id="module-4"></a>
-
-
-# Module 4 — Knowing if it's actually good (evaluation)
-
+<h1 id="module-4">Module 4 — Knowing if it's actually good (evaluation)</h1>
 
 <p class="module-goal">Replace “it feels right” with numbers.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-4-1"></a>
 
@@ -2535,9 +2455,6 @@ PY
 Next: **4.2 — Running and reading the harness** — run these
 metrics over the whole gold set with one command, and learn to read the table it prints,
 including the default-deny gate rates.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-4-2"></a>
 
@@ -2703,9 +2620,6 @@ Next: **4.3 — Gold sets & honest measurement** — the numbers are only as
 honest as the gold set behind them. We'll see what makes a good case, why negative cases matter,
 and add one yourself.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-4-3"></a>
 
 
@@ -2853,19 +2767,9 @@ Next: **Module 5** turns to *this* system's engineering spine — the house rule
 injection, typed boundaries, config-driven, the Clock) that let you change maayan without fear.
 When you're ready, ask me to **build out Module 5**.
 
-<div class="page-break"></div>
-
-
-<a id="module-5"></a>
-
-
-# Module 5 — How it's built to last (the engineering spine)
-
+<h1 id="module-5">Module 5 — How it's built to last (the engineering spine)</h1>
 
 <p class="module-goal">Understand the house rules that make the system testable, swappable, and trustworthy.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-5-1"></a>
 
@@ -2994,9 +2898,6 @@ Trace one `ask` from the edge to the logic. No need to run anything — follow t
 Next: **5.2 — Typed throughout, pydantic at every boundary** — the
 other half of "change without fear": every datum crossing a module boundary is a typed model,
 checked by `mypy --strict`.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-5-2"></a>
 
@@ -3142,9 +3043,6 @@ to tests passing.
 Next: **5.3 — Config-driven everything** — the third house rule: every
 tunable number lives in one `Settings`, never hardcoded in logic.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-5-3"></a>
 
 
@@ -3263,9 +3161,6 @@ to audit. maayan refuses them on principle.
 Next: **5.4 — The Clock, and testing without the network** — the
 last house rule (no `time.sleep` in logic) and how all of these rules together let the test
 suite run with no network and no real models.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-5-4"></a>
 
@@ -3403,19 +3298,9 @@ Next: **Module 6** — the differentiator. We open the capture & develop loop: h
 reasoning becomes durable, retrievable, attributed knowledge. When you're ready, ask me to
 **build out Module 6**.
 
-<div class="page-break"></div>
-
-
-<a id="module-6"></a>
-
-
-# Module 6 — The differentiator (the capture & develop loop)
-
+<h1 id="module-6">Module 6 — The differentiator (the capture & develop loop)</h1>
 
 <p class="module-goal">Understand how a scholar's reasoning becomes durable, retrievable, attributed knowledge.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-6-1"></a>
 
@@ -3547,9 +3432,6 @@ Next: **6.2 — Capture: an expert note becomes a retrievable chunk** — we mak
 the first non-printed chunk: take a scholar's connection and watch it become searchable knowledge
 in the same index.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-6-2"></a>
 
 
@@ -3679,9 +3561,6 @@ that number.
 Next: **6.3 — Seeds vs. corrections, and the develop step** — not
 every contribution is a finished thought. Some are *seeds*: knowledge plus a directive for the
 model to develop, grounded in the corpus or honestly refused.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-6-3"></a>
 
@@ -3815,9 +3694,6 @@ step does. That symmetry is the whole point: maayan grounds or refuses, never fa
 
 Next: **6.4 — The approval gate → derived corpus** — why a model's
 development stays a proposal until a human says yes, and what happens to lineage when you approve.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-6-4"></a>
 
@@ -3955,9 +3831,6 @@ what was never grounded. The gate protects the corpus from ungrounded claims by 
 Next: **6.5 — Threads & the term lexicon** — the two supporting
 structures: persistent topic threads that hold a line of inquiry together, and the lexicon that
 protects Holy Names from being mangled.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-6-5"></a>
 
@@ -4108,19 +3981,9 @@ maayan more than a search engine — it accumulates *reasoning*, attributed and 
 Next: **Module 7** — running it for real: setup, the knobs that matter, swapping the backend,
 growing the corpus, and the web UI. When you're ready, ask me to **build out Module 7**.
 
-<div class="page-break"></div>
-
-
-<a id="module-7"></a>
-
-
-# Module 7 — Running it for real (operating & tuning)
-
+<h1 id="module-7">Module 7 — Running it for real (operating & tuning)</h1>
 
 <p class="module-goal">Confidently operate, tune, and feed the system day to day.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-7-1"></a>
 
@@ -4249,9 +4112,6 @@ open while you operate.
 Next: **7.2 — The knobs that matter** — now that it runs, the handful of
 config knobs that actually change behavior, what each does, and when to reach for it.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-7-2"></a>
 
 
@@ -4368,9 +4228,6 @@ your contribution climb the ranking. In a sentence: when would boosting *too* ha
 Next: **7.3 — Choosing & swapping the generation backend** — the cloud↔
 local decision you previewed in 3.1, now as an operational choice with a real swap.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-7-3"></a>
 
 
@@ -4482,9 +4339,6 @@ optional real swap.
 
 Next: **7.4 — Growing the corpus** — adding more text, whether it's
 on Sefaria (config) or somewhere else entirely (the chabad adapter).
-
-<div class="page-break"></div>
-
 
 <a id="lesson-7-4"></a>
 
@@ -4620,9 +4474,6 @@ sentence-aware split from the box above.
 Next: **7.5 — The web UI as a thin layer** — the browser front end, and how its
 routes wire to the services you've been driving from the CLI and nothing more.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-7-5"></a>
 
 
@@ -4741,19 +4592,9 @@ Next: **Module 8** — the horizon: using eval to justify a real change, the Pha
 Phase 5 composition layer, and when (and when not) to fine-tune. When you're ready, ask me to
 **build out Module 8**.
 
-<div class="page-break"></div>
-
-
-<a id="module-8"></a>
-
-
-# Module 8 — The horizon (extending it well)
-
+<h1 id="module-8">Module 8 — The horizon (extending it well)</h1>
 
 <p class="module-goal">See where this goes next and how to add capability without breaking the guarantees.</p>
-
-<div class="page-break"></div>
-
 
 <a id="lesson-8-1"></a>
 
@@ -4849,9 +4690,6 @@ Full Tanya indexed (so the gold set is meaningful).
 Next: **8.2 — Phase 4: the eraser & measurement** — the ability to
 *remove* knowledge (provenanced, never silent) and to measure the cross-text claim that earlier
 went unmeasured.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-8-2"></a>
 
@@ -4981,9 +4819,6 @@ measurement catching up to the claim.
 Next: **8.3 — Phase 5: composition** — from grounded *answers* to
 grounded *documents*, by running the unit you already trust once per section.
 
-<div class="page-break"></div>
-
-
 <a id="lesson-8-3"></a>
 
 
@@ -5110,9 +4945,6 @@ you already proved.
 
 Next: **8.4 — When (and when not) to fine-tune** — the last lesson: why RAG
 + citations stays the backbone, and why fine-tuning is a later, register-not-correctness move.
-
-<div class="page-break"></div>
-
 
 <a id="lesson-8-4"></a>
 

@@ -87,6 +87,9 @@ body {{
 }}
 
 h1, h2, h3, h4 {{ line-height: 1.25; break-after: avoid; }}
+/* Page breaks ride on the (non-empty) module/lesson headings themselves. An EMPTY
+   break <div> renders as its own blank page in Chromium, so we never use one. */
+h1, h2 {{ break-before: page; page-break-before: always; }}
 h1 {{ color: var(--deep); font-size: 25pt; margin: 0 0 .2em; }}
 h2 {{ color: var(--teal); font-size: 18pt; border-bottom: 2px solid var(--teal); padding-bottom: .15em; }}
 h3 {{ color: var(--deep); font-size: 13.5pt; }}
@@ -251,7 +254,6 @@ def main() -> None:
         f'<p class="meta">Modules 0–8 &middot; {len(files)} lessons &middot; {today}</p>\n'
         "</div>\n"
     )
-    parts.append('<div class="page-break"></div>\n')
 
     # --- Table of contents ------------------------------------------------
     # Heading is explicit HTML (not markdown) so it renders even in parsers that keep
@@ -273,13 +275,12 @@ def main() -> None:
     # --- Modules & lessons ------------------------------------------------
     for n in sorted(by_module):
         title, goal = MODULES[n]
-        parts.append('<div class="page-break"></div>\n')
-        parts.append(f'<a id="{slug_module(n)}"></a>\n')
-        parts.append(f"# Module {n} — {title}\n")
+        # Raw-HTML heading carries the id so the TOC link lands exactly on this page
+        # (and CSS `h1 { break-before: page }` starts it on a fresh page).
+        parts.append(f'<h1 id="{slug_module(n)}">Module {n} — {title}</h1>')
         parts.append(f'<p class="module-goal">{goal}</p>')
         for f in by_module[n]:
             _, body = transform_body(f.read_text(encoding="utf-8"))
-            parts.append('<div class="page-break"></div>\n')
             parts.append(f'<a id="{slug_lesson(f.stem)}"></a>\n')
             parts.append(body)
 
