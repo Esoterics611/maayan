@@ -71,15 +71,19 @@ STYLE = f"""<style>
 }}
 :root {{ --ink: {INK}; --teal: {TEAL}; --deep: {DEEP}; --accent: {ACCENT}; --muted: {MUTED}; }}
 
-html {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+/* Force a white page + dark text so the document reads correctly regardless of the
+   viewer's theme (a dark-mode previewer otherwise shows dark text on black). */
+html {{ background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 body {{
   /* FreeSerif & Noto carry full Hebrew + nikkud; the browser/UBA handles bidi. */
   font-family: "FreeSerif", "Noto Serif Hebrew", "Noto Serif", "DejaVu Serif", Georgia, serif;
   font-size: 11.5pt;
   line-height: 1.5;
+  background: #ffffff;
   color: var(--ink);
   max-width: 46rem;
   margin: 0 auto;
+  padding: 1rem;
 }}
 
 h1, h2, h3, h4 {{ line-height: 1.25; break-after: avoid; }}
@@ -106,6 +110,7 @@ code {{
   font-family: "DejaVu Sans Mono", "Courier New", monospace;
   font-size: 9.5pt;
   background: #eef4f3;
+  color: #143230;            /* dark — readable inline code */
   padding: .08em .3em;
   border-radius: 3px;
 }}
@@ -119,7 +124,18 @@ pre {{
   break-inside: avoid;
   font-size: 9.5pt;
 }}
-pre code {{ background: none; padding: 0; font-size: 9.5pt; }}
+pre code {{ background: none; padding: 0; font-size: 9.5pt; color: #1b2b2b; }}
+
+/* Override any injected syntax-highlight theme (e.g. md-to-pdf's highlight.js),
+   which defaults to pale, low-contrast text. Force dark base + a readable palette. */
+pre code, pre code.hljs, .hljs {{ color: #1b2b2b !important; background: transparent !important; }}
+.hljs-comment, .hljs-quote {{ color: #5c6770 !important; font-style: italic; }}
+.hljs-string, .hljs-attr, .hljs-addition {{ color: #0a6b3a !important; }}     /* green */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in,
+.hljs-type, .hljs-deletion {{ color: #a3192e !important; }}                    /* red  */
+.hljs-number, .hljs-meta, .hljs-link, .hljs-symbol {{ color: #0b4f9e !important; }}  /* blue */
+.hljs-title, .hljs-section, .hljs-name, .hljs-function,
+.hljs-class .hljs-title, .hljs-variable {{ color: #5a2ca0 !important; }}        /* purple */
 
 table {{ border-collapse: collapse; width: 100%; font-size: 10.5pt; break-inside: avoid; }}
 th, td {{ border: 1px solid #cdd9d7; padding: .35em .55em; text-align: left; vertical-align: top; }}
