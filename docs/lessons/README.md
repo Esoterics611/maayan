@@ -58,4 +58,11 @@ do the hands-on at the bottom. Work through a module in order.
 - [7.4 — Growing the corpus](07-4-growing-the-corpus.md)
 - [7.5 — The web UI as a thin layer](07-5-web-ui.md)
 
-*(More modules get built on request — ask for "Lesson X.Y".)*
+## Module 8 — The horizon (extending it well)
+
+- [8.1 — Reading quality and improving it](08-1-improving-quality.md)
+- [8.2 — Phase 4: the eraser & measurement](08-2-phase4-eraser.md)
+- [8.3 — Phase 5: composition](08-3-phase5-composition.md)
+- [8.4 — When (and when not) to fine-tune](08-4-fine-tuning.md)
+
+*That's the full curriculum — Modules 0–8.*
