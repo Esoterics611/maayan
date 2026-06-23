@@ -42,4 +42,12 @@ do the hands-on at the bottom. Work through a module in order.
 - [5.3 — Config-driven everything](05-3-config-driven.md)
 - [5.4 — The Clock, and testing without the network](05-4-clock-and-testing.md)
 
+## Module 6 — The differentiator (the capture & develop loop)
+
+- [6.1 — Provenance & the source taxonomy](06-1-provenance.md)
+- [6.2 — Capture: an expert note becomes a retrievable chunk](06-2-capture.md)
+- [6.3 — Seeds vs. corrections, and the develop step](06-3-seeds-and-develop.md)
+- [6.4 — The approval gate → derived corpus](06-4-approval-gate.md)
+- [6.5 — Threads & the term lexicon](06-5-threads-and-lexicon.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
