@@ -22,4 +22,11 @@ do the hands-on at the bottom. Work through a module in order.
 - [2.3 — Hybrid retrieval & fusion (RRF)](02-3-hybrid-rrf.md)
 - [2.4 — Reranking & filters](02-4-rerank-and-filters.md)
 
+## Module 3 — The trust core (generation, grounding, default-deny)
+
+- [3.1 — The generation backend (a swappable box)](03-1-generation-backend.md)
+- [3.2 — The grounded prompt & citations](03-2-grounded-prompt.md)
+- [3.3 — Default-deny: the rule that lives in code, not the prompt](03-3-default-deny.md)
+- [3.4 — Context-aware follow-ups without losing grounding](03-4-context-followups.md)
+
 *(More modules get built on request — ask for "Lesson X.Y".)*
