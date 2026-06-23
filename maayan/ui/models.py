@@ -155,3 +155,66 @@ class TermResponse(BaseModel):
     term_type: str
     author: str
     surface_forms: list[str]
+
+
+# ---- Phase 4: retraction (the eraser) --------------------------------------
+
+
+class RetractRequest(BaseModel):
+    target: str  # the ref or chunk id of the expert/derived/term chunk
+    author: str  # required — provenance (blank rejected by the model validator)
+    reason: str = ""
+
+
+class RetractResponse(BaseModel):
+    id: str
+    chunk_id: str
+    ref: str
+    source: str
+    author: str
+    reason: str
+
+
+# ---- Phase 5: composition (brief → outline → fill → review → export) -------
+
+
+class ComposeRequest(BaseModel):
+    title: str
+    intent: str
+    author: str  # required — provenance (blank rejected by the model validator)
+    content_type: str = "shiur_outline"
+    target_sections: int | None = None
+    book: str | None = None  # source-scope filter
+    seed_frameworks: list[str] = Field(default_factory=list)
+    thread_id: str | None = None
+
+
+class SectionOut(BaseModel):
+    heading: str
+    query: str
+    text: str = ""
+    cited_refs: list[str] = Field(default_factory=list)
+    grounded_in: list[str] = Field(default_factory=list)
+    supported: bool = False
+
+
+class CompositionResponse(BaseModel):
+    id: str
+    brief_id: str
+    status: str
+    model: str
+    sections: list[SectionOut]
+    cited_refs: list[str]
+    grounded_in: list[str]
+    supported_sections: int
+    gap_sections: int
+
+
+class PromoteRequest(BaseModel):
+    section_index: int  # 0-based
+    author: str
+    insight: str
+
+
+class ExportResponse(BaseModel):
+    markdown: str

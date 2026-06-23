@@ -26,11 +26,63 @@ app = typer.Typer(
 )
 
 
+# --- runtime mode -----------------------------------------------------------
+# Default: talk to a RUNNING Qdrant (start it with `make up`). `--mock` swaps in an
+# embedded (no-Docker) Qdrant + the hashing embedder so the flow runs offline.
+_MOCK = False
+_MOCK_QDRANT_PATH = "data/qdrant-mock"
+
+
 @app.callback()
-def main() -> None:
-    """maayan — see `maayan --help`. Subcommands land as each build prompt is implemented."""
-    # Presence of a callback forces Typer into multi-command mode, so subcommands
-    # (version, ingest, index, search, ask, ...) are invoked by name.
+def main(
+    mock: bool = typer.Option(
+        False,
+        "--mock",
+        help="Run on an embedded (no-Docker) Qdrant + hashing embedder. Offline demo of "
+        "the flow — NOT real retrieval quality.",
+    ),
+) -> None:
+    """maayan — see `maayan --help`.
+
+    By default the commands talk to a RUNNING Qdrant; one that needs it fails fast with
+    fix-it instructions if it isn't reachable. Pass `--mock` BEFORE the subcommand to run
+    on an embedded store with no Docker and no model download.
+    """
+    global _MOCK
+    _MOCK = mock
+
+
+def _cfg() -> Settings:
+    """Resolve settings, applying `--mock` overrides (embedded Qdrant + hashing embedder)."""
+    settings = get_settings()
+    if _MOCK:
+        settings = settings.model_copy(
+            update={"qdrant_url": _MOCK_QDRANT_PATH, "embed_backend": "hashing"}
+        )
+    return settings
+
+
+def require_qdrant(settings: Settings) -> None:
+    """Fail fast (with how-to-fix guidance) if a live Qdrant is required but unreachable.
+
+    Embedded/in-memory stores (e.g. under `--mock`) are always available, so this is a
+    no-op for them; only an http(s) Qdrant URL is health-checked.
+    """
+    url = settings.qdrant_url
+    if not url.startswith(("http://", "https://")):
+        return
+    from qdrant_client import QdrantClient
+
+    try:
+        client = QdrantClient(url=url, api_key=settings.qdrant_api_key.get_secret_value() or None)
+        client.get_collections()
+        client.close()
+    except Exception:  # noqa: BLE001 - any failure here means "not reachable"
+        typer.secho(f"\n✗ Qdrant is not reachable at {url}.", fg=typer.colors.RED, err=True)
+        typer.echo("  • Start it (Docker):  make up    then re-run.", err=True)
+        typer.echo("  • Or run offline:     add --mock  (embedded store + hashing", err=True)
+        typer.echo("                        embedder; tries the flow, not real quality).", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -49,7 +101,7 @@ def ingest(
     sample: int = typer.Option(5, "--sample", help="How many ingested chunks to print."),
 ) -> None:
     """Pull chassidus/Kabbalah text from Sefaria, normalize, and store as chunks."""
-    settings = get_settings()
+    settings = _cfg()
     if all_books:
         refs = settings.books
     elif book:
@@ -106,7 +158,7 @@ def ingest_chabad(
     ),
 ) -> None:
     """Pull a non-Sefaria text (e.g. Likutei Torah) from chabadlibrary.org into the store."""
-    settings = get_settings()
+    settings = _cfg()
     if all_books:
         chosen = list(settings.chabad_books.items())
     elif book:
@@ -162,7 +214,8 @@ def index(
     from maayan.index.pipeline import index_chunks
     from maayan.index.qdrant import QdrantIndex, build_qdrant_client
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     typer.echo(f"Embedder: {settings.embed_backend} ({settings.embed_model})")
     embedder = build_embedder(settings)
     client = build_qdrant_client(settings)
@@ -210,7 +263,8 @@ def search(
     """Hybrid (dense + sparse) retrieval over the indexed corpus."""
     from maayan.retrieve.factory import build_retriever
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     retriever = build_retriever(settings)
     results = retriever.search(query, k=k, book=book, source=source)
 
@@ -245,7 +299,8 @@ def ask(
     from maayan.generate.rag import RAGService
     from maayan.retrieve.factory import build_retriever
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared with capture
     retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
@@ -363,7 +418,7 @@ def annotate(
     """Record an expert contribution and index it as retrievable expert knowledge."""
     from maayan.capture.factory import build_capture_service
 
-    settings = get_settings()
+    settings = _cfg()
     capture = build_capture_service(settings)
     linked = _parse_refs(ref or [], refs)
     ann = capture.add_annotation(
@@ -384,7 +439,7 @@ def session(session_id: str = typer.Argument(..., help="Session id to display.")
     """Show a recorded session and its expert annotations."""
     from maayan.capture.store import CaptureStore
 
-    settings = get_settings()
+    settings = _cfg()
     store = CaptureStore(settings.db_path)
     s = store.get_session(session_id)
     if s is None:
@@ -416,7 +471,8 @@ def develop(
     from maayan.develop.factory import build_development_service
     from maayan.threads.factory import build_thread_service
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     contribution = CaptureStore(settings.db_path).get_annotation(seed)
     if contribution is None:
         typer.echo(f"Seed contribution {seed!r} not found.")
@@ -459,7 +515,8 @@ def approve(
     """Approve a proposed development → index it as a retrievable `derived` corpus chunk."""
     from maayan.develop.factory import build_development_service
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     try:
         dev = build_development_service(settings).approve(development_id)
     except ValueError as exc:
@@ -477,7 +534,7 @@ def reject(
     """Reject a proposed development. Nothing is indexed; the corpus is unchanged."""
     from maayan.develop.factory import build_development_service
 
-    settings = get_settings()
+    settings = _cfg()
     try:
         dev = build_development_service(settings).reject(development_id)
     except ValueError as exc:
@@ -491,7 +548,7 @@ def threads() -> None:
     """List persisted topic threads (most recently updated first)."""
     from maayan.threads.factory import build_thread_service
 
-    settings = get_settings()
+    settings = _cfg()
     service = build_thread_service(settings)
     rows = service.list_threads()
     if not rows:
@@ -507,7 +564,7 @@ def thread(thread_id: str = typer.Argument(..., help="Thread id to display.")) -
     """Show a topic thread with its ordered turns."""
     from maayan.threads.factory import build_thread_service
 
-    settings = get_settings()
+    settings = _cfg()
     detail = build_thread_service(settings).get_thread_with_turns(thread_id)
     if detail is None:
         typer.echo("Thread not found.")
@@ -549,7 +606,8 @@ def add_term(
     from maayan.lexicon.factory import build_term_service
     from maayan.lexicon.models import TermType
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     term = build_term_service(settings).add_term(
         canonical=canonical, definition=definition, author=author,
         term_type=cast(TermType, term_type), surface_forms=surface or [],
@@ -567,7 +625,7 @@ def terms() -> None:
     """List curated lexicon terms."""
     from maayan.lexicon.factory import build_term_service
 
-    rows = build_term_service(get_settings()).list_terms()
+    rows = build_term_service(_cfg()).list_terms()
     if not rows:
         typer.echo("No terms yet. Define one with `maayan add-term`.")
         return
@@ -582,7 +640,7 @@ def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None
     """Show one lexicon term."""
     from maayan.lexicon.factory import build_term_service
 
-    t = build_term_service(get_settings()).get_term(term_id)
+    t = build_term_service(_cfg()).get_term(term_id)
     if t is None:
         typer.echo("Term not found.")
         return
@@ -598,6 +656,50 @@ def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None
     typer.echo(f"  by {t.author}" + ("  · sacred (Holy Name)" if t.sacred else ""))
 
 
+@app.command()
+def retract(
+    target: str = typer.Argument(
+        ..., help="The ref OR chunk id of the expert/derived/term chunk to retract."
+    ),
+    author: str = typer.Option(..., "--author", help="Who is retracting it (required)."),
+    reason: str = typer.Option(..., "--reason", help="Why, e.g. 'superseded' / 'typo' / 'wrong'."),
+) -> None:
+    """Retract a piece of layered knowledge (expert/derived/term). Printed text is immutable.
+
+    Provenanced, not a silent delete: the chunk leaves retrieval and stays gone across a
+    `--rebuild`, while the retraction is recorded with who/when/why. To CORRECT a mistake,
+    retract the wrong chunk (--reason superseded) and re-add the right one.
+    """
+    from maayan.retract.factory import build_retraction_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        r = build_retraction_service(settings).retract(target, author=author, reason=reason)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Retracted {r.ref}  (source={r.source}, chunk {r.chunk_id}).")
+    typer.echo(f"  by {r.author} · reason: {r.reason}")
+    typer.echo("Gone from retrieval and skipped by `index --rebuild`. The retraction is recorded.")
+
+
+@app.command()
+def retractions() -> None:
+    """List recorded retractions (the provenanced removals of layered knowledge)."""
+    from maayan.retract.factory import build_retraction_service
+
+    rows = build_retraction_service(_cfg()).list_retractions()
+    if not rows:
+        typer.echo("No retractions yet. Retract a chunk with `maayan retract <ref-or-id> ...`.")
+        return
+    typer.echo(f"{len(rows)} retraction(s):")
+    for r in rows:
+        when = r.timestamp.strftime("%Y-%m-%d %H:%M")
+        typer.echo(f"  {when} · [{r.source}] {r.ref}")
+        typer.echo(f"      by {r.author} · {r.reason}")
+
+
 @app.command(name="eval")
 def evaluate(
     goldset: str = typer.Option(
@@ -609,10 +711,26 @@ def evaluate(
     develop: bool = typer.Option(
         False, "--develop", help="Score the DEVELOP step (grounding + honest refusal) instead."
     ),
+    crosstext: bool = typer.Option(
+        False, "--crosstext", help="Score CROSS-TEXT co-retrieval (book-diversity@k) instead."
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
-    """Score retrieval (hit@k, recall@k, MRR) or, with --develop, the develop step."""
-    settings = get_settings()
+    """Score retrieval (hit@k, recall@k, MRR), or the develop step / cross-text co-retrieval."""
+    settings = _cfg()
+    require_qdrant(settings)
+
+    if crosstext:
+        from maayan.eval.crosstext_harness import format_crosstext_report, run_crosstext_eval
+        from maayan.eval.goldset import load_goldset
+        from maayan.retrieve.factory import build_retriever
+
+        ct_path = goldset or settings.eval_crosstext_goldset_path
+        ct_examples = load_goldset(ct_path)
+        typer.echo(f"Cross-text gold set: {ct_path} ({len(ct_examples)} questions)\n")
+        ct_report = run_crosstext_eval(build_retriever(settings), ct_examples, k=k)
+        typer.echo(format_crosstext_report(ct_report))
+        return
 
     if develop:
         from maayan.develop.factory import build_develop_eval_setup
@@ -665,21 +783,226 @@ def evaluate(
 
 
 @app.command()
+def compose(
+    title: str = typer.Option(..., "--title", help="The piece's title."),
+    intent: str = typer.Option(..., "--intent", help="What the piece should do / teach."),
+    author: str = typer.Option(..., "--author", help="Who is composing it (required)."),
+    content_type: str = typer.Option(
+        "shiur_outline", "--type", help="shiur_outline|essay|digest|other"
+    ),
+    sections: int = typer.Option(
+        None, "--sections", help="Desired section count (still capped by compose_max_sections)."
+    ),
+    book: str = typer.Option(None, "--book", help="Restrict retrieval to a book (source scope)."),
+    thread_id: str = typer.Option(None, "--thread", help="Compose within an existing thread."),
+) -> None:
+    """Propose a grounded multi-section outline from a brief (scaffolding; fill it next)."""
+    import uuid as _uuid
+    from typing import cast
+
+    from maayan.capture.convert import detect_lang
+    from maayan.compose.factory import build_composition_service
+    from maayan.compose.models import Brief, ContentType, SourceScope
+
+    settings = _cfg()
+    require_qdrant(settings)
+    brief = Brief(
+        id=str(_uuid.uuid4()), title=title, intent=intent, author=author,
+        content_type=cast(ContentType, content_type),
+        lang=detect_lang(intent),
+        target_sections=sections,
+        source_scope=SourceScope(book=book),
+        thread_id=thread_id,
+    )
+    composition = build_composition_service(settings).propose_outline(brief)
+
+    typer.echo(f'Proposed outline for "{brief.title}" ({brief.content_type}):\n')
+    for i, section in enumerate(composition.sections, 1):
+        typer.echo(f"{i:>2}. {section.heading}")
+        typer.echo(f"      ↳ retrieval: {section.query}")
+    typer.echo(
+        f"\nComposition {composition.id} (status={composition.status}, by {composition.model})."
+    )
+    if settings.compose_auto_outline:
+        _print_filled_document(composition)
+        typer.echo("\ncompose_auto_outline=true → filled immediately.")
+    else:
+        typer.echo("Edit/approve the outline, then fill it:  maayan compose-fill " + composition.id)
+
+
+@app.command(name="compose-fill")
+def compose_fill(
+    composition_id: str = typer.Argument(..., help="Composition id (printed by `compose`)."),
+) -> None:
+    """Fill an outline's sections with grounded, cited passages — or honest gaps."""
+    from maayan.compose.factory import build_composition_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        composition = build_composition_service(settings).fill(composition_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    _print_filled_document(composition)
+
+
+def _print_filled_document(composition: object) -> None:
+    """Render a filled composition: each section, its citations, and gap markers."""
+    sections = getattr(composition, "sections", [])
+    for i, section in enumerate(sections, 1):
+        if section.supported:
+            typer.echo(f"\n## {i}. {section.heading}")
+            typer.echo(section.text)
+            if section.cited_refs:
+                typer.echo(f"   Cited: {', '.join(section.cited_refs)}")
+        else:
+            typer.echo(f"\n## {i}. {section.heading}   [GAP — corpus silent]")
+            typer.echo(section.text)
+    grounded = sum(1 for s in sections if s.supported)
+    typer.echo(f"\n{grounded}/{len(sections)} sections grounded; "
+               f"{len(sections) - grounded} honest gap(s).")
+
+
+@app.command(name="compose-export")
+def compose_export(
+    composition_id: str = typer.Argument(..., help="Composition id to export."),
+    out: str = typer.Option(..., "--out", help="Path to write the assembled markdown to."),
+) -> None:
+    """Assemble a composition into markdown (with a provenance footer) and write it to a file."""
+    from pathlib import Path
+
+    from maayan.compose.factory import build_composition_service
+
+    try:
+        markdown = build_composition_service(_cfg()).assemble(composition_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(markdown, encoding="utf-8")
+    typer.echo(f"Wrote {len(markdown)} chars → {out}")
+
+
+@app.command(name="compose-approve")
+def compose_approve(
+    composition_id: str = typer.Argument(..., help="Composition id to approve."),
+) -> None:
+    """Approve a composition (does NOT bulk-index the prose; promote connections instead)."""
+    from maayan.compose.factory import build_composition_service
+
+    try:
+        composition = build_composition_service(_cfg()).approve(composition_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Approved {composition.id}. Nothing indexed — the prose is a draft, not corpus.")
+    typer.echo("Promote a connection to feed the corpus:  maayan compose-promote "
+               f"{composition.id} --section <n> --author '...' --insight '...'")
+
+
+@app.command(name="compose-reject")
+def compose_reject(
+    composition_id: str = typer.Argument(..., help="Composition id to reject."),
+) -> None:
+    """Reject a composition. Changes nothing in the corpus."""
+    from maayan.compose.factory import build_composition_service
+
+    try:
+        composition = build_composition_service(_cfg()).reject(composition_id)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Rejected {composition.id}. The corpus is unchanged.")
+
+
+@app.command(name="compose-promote")
+def compose_promote(
+    composition_id: str = typer.Argument(..., help="Composition id."),
+    section: int = typer.Option(..., "--section", help="1-based section number to promote."),
+    author: str = typer.Option(..., "--author", help="Who is promoting it (required)."),
+    insight: str = typer.Option(..., "--insight", help="The connecting insight (the knowledge)."),
+) -> None:
+    """Promote one section's connection into the corpus via the existing capture loop."""
+    from maayan.compose.factory import build_composition_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        ann = build_composition_service(settings).promote_connection(
+            composition_id, section - 1, author=author, insight=insight
+        )
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"Promoted section {section} → expert connection {ann.id} by {ann.author}.")
+    if ann.linked_refs:
+        typer.echo(f"Connects: {', '.join(ann.linked_refs)}")
+    typer.echo("Indexed as an expert chunk — it will now surface in retrieval.")
+
+
+@app.command()
+def compositions() -> None:
+    """List compositions (proposed / approved / rejected)."""
+    from maayan.compose.factory import build_composition_service
+
+    rows = build_composition_service(_cfg()).list_compositions()
+    if not rows:
+        typer.echo("No compositions yet. Start one with `maayan compose`.")
+        return
+    typer.echo(f"{len(rows)} composition(s):")
+    for c in rows:
+        typer.echo(f"  {c.id}  · {c.status}  · {len(c.sections)} sections "
+                   f"({c.supported_sections} grounded, {c.gap_sections} gaps)  by {c.model}")
+
+
+@app.command()
+def composition(
+    composition_id: str = typer.Argument(..., help="Composition id to show."),
+) -> None:
+    """Show one composition (assembled markdown)."""
+    from maayan.compose.factory import build_composition_service
+
+    try:
+        typer.echo(build_composition_service(_cfg()).assemble(composition_id))
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def stats() -> None:
+    """A steward's-eye view of the Knowledge base: chunks, contributions, developments, more.
+
+    Read-only. Use it to decide what to retract and to watch the corpus grow.
+    """
+    from maayan.stats.factory import build_stats_service
+    from maayan.stats.service import format_stats
+
+    snapshot = build_stats_service(_cfg()).collect()
+    typer.echo(format_stats(snapshot))
+
+
+@app.command()
 def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
     import uvicorn
 
     from maayan.capture.factory import build_capture_service
+    from maayan.compose.factory import build_composition_service
     from maayan.develop.factory import build_development_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
     from maayan.generate.rag import RAGService
     from maayan.lexicon.factory import build_term_service
+    from maayan.retract.factory import build_retraction_service
     from maayan.retrieve.factory import build_retriever
+    from maayan.stats.factory import build_stats_service
     from maayan.threads.factory import build_thread_service
     from maayan.ui.app import create_app
 
-    settings = get_settings()
+    settings = _cfg()
+    require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared across services
     retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
@@ -688,9 +1011,13 @@ def ui() -> None:
     threads = build_thread_service(settings)
     develop = build_development_service(settings, embedder=embedder)
     terms = build_term_service(settings, embedder=embedder)
+    retraction = build_retraction_service(settings, embedder=embedder)
+    stats = build_stats_service(settings)
+    compose_service = build_composition_service(settings, embedder=embedder)
 
     application = create_app(
-        rag, capture, threads, develop, terms, context_turns=settings.thread_context_turns
+        rag, capture, threads, develop, terms, retraction, stats, compose_service,
+        context_turns=settings.thread_context_turns,
     )
     typer.echo(f"maayan UI → http://{settings.ui_host}:{settings.ui_port}")
     uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)

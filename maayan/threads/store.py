@@ -74,6 +74,10 @@ class ThreadStore:
         )
         return [self._row_to_thread(r) for r in rows]
 
+    def count(self) -> int:
+        """Total number of threads (for the stats dashboard)."""
+        return int(self._conn.execute("SELECT COUNT(*) AS n FROM threads").fetchone()["n"])
+
     # -- turns ---------------------------------------------------------------
     def append_turn(self, turn: ThreadTurn) -> ThreadTurn:
         """Persist a turn and bump the parent thread's updated_at to the turn's time."""

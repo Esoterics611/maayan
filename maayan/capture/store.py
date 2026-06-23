@@ -126,6 +126,13 @@ class CaptureStore:
         ).fetchone()
         return self._row_to_annotation(row) if row else None
 
+    def counts_by_author(self) -> dict[str, int]:
+        """Contribution counts grouped by author (for the stats dashboard)."""
+        rows = self._conn.execute(
+            "SELECT author, COUNT(*) AS n FROM annotations GROUP BY author ORDER BY author"
+        )
+        return {r["author"]: int(r["n"]) for r in rows}
+
     def close(self) -> None:
         self._conn.close()
 

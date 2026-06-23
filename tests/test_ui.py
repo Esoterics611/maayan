@@ -94,11 +94,32 @@ class _StubTerms:
         return []
 
 
+class _StubRetract:
+    def retract(self, target, *, author, reason):  # noqa: ANN001, ANN201
+        raise NotImplementedError
+
+    def list_retractions(self):  # noqa: ANN201
+        return []
+
+
+class _StubStats:
+    def collect(self):  # noqa: ANN201
+        from maayan.stats.models import Stats
+
+        return Stats(total_chunks=0)
+
+
+class _StubCompose:
+    def list_compositions(self):  # noqa: ANN201
+        return []
+
+
 def _client(grounded: bool = True) -> tuple[TestClient, FakeRag, FakeCapture]:
     rag = FakeRag(_answer(grounded))
     capture = FakeCapture()
     app = create_app(  # type: ignore[arg-type]
-        rag, capture, _StubThreads(), _StubDevelop(), _StubTerms()
+        rag, capture, _StubThreads(), _StubDevelop(), _StubTerms(), _StubRetract(),
+        _StubStats(), _StubCompose(),
     )
     return TestClient(app), rag, capture
 

@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     text          TEXT NOT NULL,
     source        TEXT NOT NULL,
     metadata      TEXT NOT NULL,   -- json object
-    indexed       INTEGER NOT NULL DEFAULT 0
+    indexed       INTEGER NOT NULL DEFAULT 0,
+    retracted     INTEGER NOT NULL DEFAULT 0   -- tombstone: removed from retrieval (Prompt 17)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_book ON chunks(book);
 CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
@@ -48,7 +49,21 @@ class ChunkStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Idempotent column migrations for DBs created before a column existed.
+
+        New DBs get `retracted` from `_SCHEMA`; older DBs are missing it, so add it
+        in place (default 0 = not retracted) without disturbing existing rows. Same
+        discipline as the `indexed` column.
+        """
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(chunks)")}
+        if "retracted" not in existing:
+            self._conn.execute(
+                "ALTER TABLE chunks ADD COLUMN retracted INTEGER NOT NULL DEFAULT 0"
+            )
 
     # -- writes --------------------------------------------------------------
     def upsert_chunks(self, chunks: Iterable[Chunk]) -> int:
@@ -98,6 +113,20 @@ class ChunkStore:
         self._conn.executemany("UPDATE chunks SET indexed = 1 WHERE id = ?", [(i,) for i in ids])
         self._conn.commit()
 
+    def mark_retracted(self, ids: Sequence[str]) -> None:
+        """Tombstone chunks so they leave retrieval and survive `index --rebuild` gone.
+
+        A retracted chunk stays in the table (its retraction is provenanced) but is
+        excluded from every retrieval-facing read, so the indexing pipeline never
+        re-embeds it.
+        """
+        if not ids:
+            return
+        self._conn.executemany(
+            "UPDATE chunks SET retracted = 1 WHERE id = ?", [(i,) for i in ids]
+        )
+        self._conn.commit()
+
     # -- reads ---------------------------------------------------------------
     def get_chunks(
         self,
@@ -105,6 +134,7 @@ class ChunkStore:
         source: str | None = None,
         book: str | None = None,
         only_unindexed: bool = False,
+        include_retracted: bool = False,
         limit: int | None = None,
     ) -> list[Chunk]:
         clauses: list[str] = []
@@ -117,6 +147,8 @@ class ChunkStore:
             params.append(book)
         if only_unindexed:
             clauses.append("indexed = 0")
+        if not include_retracted:
+            clauses.append("retracted = 0")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = f"SELECT * FROM chunks {where} ORDER BY ref"
         if limit is not None:
@@ -124,7 +156,43 @@ class ChunkStore:
             params.append(limit)
         return [self._row_to_chunk(r) for r in self._conn.execute(sql, params)]
 
-    def count(self, *, source: str | None = None, only_unindexed: bool = False) -> int:
+    def get_chunk(self, chunk_id: str, *, include_retracted: bool = True) -> Chunk | None:
+        """Fetch one chunk by its stable id (retracted included by default — for resolving)."""
+        row = self._conn.execute("SELECT * FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
+        if row is None or (not include_retracted and row["retracted"]):
+            return None
+        return self._row_to_chunk(row)
+
+    def get_by_ref(self, ref: str, *, include_retracted: bool = True) -> list[Chunk]:
+        """Fetch chunks whose ref matches exactly (a ref may have he+en variants)."""
+        sql = "SELECT * FROM chunks WHERE ref = ?"
+        if not include_retracted:
+            sql += " AND retracted = 0"
+        return [self._row_to_chunk(r) for r in self._conn.execute(sql + " ORDER BY lang", (ref,))]
+
+    def counts_by_source(self, *, include_retracted: bool = False) -> dict[str, int]:
+        """Live chunk counts grouped by source (sefaria/chabad/expert/derived/term)."""
+        where = "" if include_retracted else "WHERE retracted = 0"
+        rows = self._conn.execute(
+            f"SELECT source, COUNT(*) AS n FROM chunks {where} GROUP BY source"
+        )
+        return {r["source"]: int(r["n"]) for r in rows}
+
+    def counts_by_book(self, *, include_retracted: bool = False) -> dict[str, int]:
+        """Live chunk counts grouped by book."""
+        where = "" if include_retracted else "WHERE retracted = 0"
+        rows = self._conn.execute(
+            f"SELECT book, COUNT(*) AS n FROM chunks {where} GROUP BY book ORDER BY book"
+        )
+        return {r["book"]: int(r["n"]) for r in rows}
+
+    def count(
+        self,
+        *,
+        source: str | None = None,
+        only_unindexed: bool = False,
+        include_retracted: bool = False,
+    ) -> int:
         clauses: list[str] = []
         params: list[object] = []
         if source is not None:
@@ -132,6 +200,8 @@ class ChunkStore:
             params.append(source)
         if only_unindexed:
             clauses.append("indexed = 0")
+        if not include_retracted:
+            clauses.append("retracted = 0")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cur = self._conn.execute(f"SELECT COUNT(*) AS n FROM chunks {where}", params)
         return int(cur.fetchone()["n"])

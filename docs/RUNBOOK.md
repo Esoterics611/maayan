@@ -158,12 +158,79 @@ uv run maayan add-term --canonical 'ע"ב (Name of 72)' \
 uv run maayan search 'יחוד מ"ה וב"ן' --source term
 ```
 
+## 7b. Correcting a mistake — retract (the eraser)
+
+You *will* index a wrong connection, a typo'd term, or a development you later
+reconsider. Layered knowledge (`expert` / `derived` / `term`) is **retractable** —
+printed text (`sefaria` / `chabad`) never is. Retraction is provenanced (who / when /
+why), removes the chunk from retrieval, and **survives `index --rebuild`** (it is not
+re-embedded). There is no in-place edit: **to correct, retract + re-add.**
+
+```bash
+# Retract by ref (or by chunk id). --author is REQUIRED; --reason is recorded.
+uv run maayan retract "Expert · connection · 1a2b3c4d" \
+    --author "R. Ginsburgh" --reason "wrong connection — supersede"
+# Re-add the corrected knowledge through the normal loop (annotate / develop / add-term).
+uv run maayan annotate --session <SESSION_ID> --author "R. Ginsburgh" \
+    --kind connection --body '<the corrected insight>' --ref '<ref>' --ref '<ref>'
+
+uv run maayan retractions          # the audit log: who retracted what, when, and why
+```
+
+In the UI, expert/derived/term source cards carry a small **Retract ✕** affordance
+(printed-text cards do not). Attempting to retract printed text is refused, in code.
+
 ## 8. Measure it
 
 ```bash
 uv run maayan eval                # retrieval: hit@k / recall@k / MRR + default-deny gate
 uv run maayan eval --develop      # develop step: develop-rate / refusal-rate / grounding
+uv run maayan eval --crosstext    # cross-text: book-diversity / coverage@k across the 3 books
 ```
+
+## 8b. See the corpus — `maayan stats`
+
+```bash
+uv run maayan stats               # chunks by source/book, contributions by author,
+                                  # developments by status, retractions, threads, terms
+```
+
+The steward's dashboard: what's in the Knowledge base, what's been retracted, and how
+it's growing — the information you need to decide what to retract next. Also at
+`GET /stats` in the UI.
+
+## 9. Compose a shiur outline — a grounded document, section by section
+
+A composition turns one brief into a structured document by running the grounded unit
+(retrieve → default-deny → cited block) **once per section**. Where the corpus is
+silent, the section is an **honest gap**, never fabricated. Approval does **not**
+re-ingest the prose — instead you **promote a connection** back through the capture loop.
+
+```bash
+# 9a. Brief → a proposed outline (each section is a heading + a retrieval sub-question).
+uv run maayan compose --title "בירור הנפש הבהמית" \
+    --intent "שיעור המראה כיצד מבררים את הנפש הבהמית, מתניא ומתורה אור" \
+    --type shiur_outline --author "R. Ginsburgh"
+#   → prints the outline + a COMPOSITION_ID. (Set COMPOSE_AUTO_OUTLINE=true to fill at once.)
+
+# 9b. Fill each section — grounded + cited, or an honest gap where the sources don't reach.
+uv run maayan compose-fill <COMPOSITION_ID>
+
+# 9c. Review + export to markdown (title, sections, gap flags, a provenance footer).
+uv run maayan compose-approve <COMPOSITION_ID>     # or: compose-reject
+uv run maayan compose-export  <COMPOSITION_ID> --out shiur.md
+
+# 9d. Feed the corpus the RIGHT way: promote ONE section's connection (not the prose).
+uv run maayan compose-promote <COMPOSITION_ID> --section 2 \
+    --author "R. Ginsburgh" --insight "שתי הסוגיות נפגשות בענין הביטול"
+#   → a source="expert" connection chunk, linking that section's grounded refs. Retrievable.
+
+uv run maayan compositions          # list      ·   uv run maayan composition <id>   # show
+```
+
+In the UI, the **Compose** panel does the same: write a brief, edit/approve the outline,
+Fill, see per-section citations and gap badges, Approve/Reject/Export, and promote a
+connection.
 
 ---
 

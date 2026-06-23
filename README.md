@@ -49,10 +49,10 @@ three, so the Assistant answers — and you teach it connections — *between* t
 ## 1. Prerequisites
 
 - **Python 3.12** and **[uv](https://docs.astral.sh/uv/)** (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- **Docker** (for local Qdrant)
+- **Docker** (for local Qdrant — the default vector store; or skip it with `--mock`, see below)
 - An **[OpenRouter](https://openrouter.ai/) API key** (only for cloud generation; ingestion/indexing/retrieval need no key)
 - ~16 GB RAM is comfortable for bge-m3 on CPU; a CUDA GPU or Apple-silicon (MPS) makes embedding much faster (auto-detected)
-- First index run downloads **bge-m3 (~2.3 GB)** from Hugging Face
+- First index run downloads **bge-m3 (~2.3 GB)** from Hugging Face (skipped under `--mock`)
 
 ---
 
@@ -85,6 +85,33 @@ make up                          # docker compose up -d   (Qdrant on :6333)
 | `RERANK_ENABLED` | `false` | Enable the local cross-encoder reranker |
 | `EXPERT_BOOST` | `1.0` | Multiplier for expert-sourced chunks (>1 prefers human-vetted) |
 | `DERIVED_BOOST` | `1.0` | Multiplier for derived chunks (approved model developments of a seed) |
+
+### Running against Qdrant (the default) — or `--mock` without it
+
+Commands that retrieve, index, or capture knowledge talk to a **running Qdrant by
+default**. So the normal prerequisite is: **`make up` first** (starts Qdrant on `:6333`
+via Docker). If Qdrant isn't reachable, those commands **fail fast** with instructions
+rather than a stack trace:
+
+```
+✗ Qdrant is not reachable at http://localhost:6333.
+  • Start it (Docker):  make up    then re-run.
+  • Or run offline:     add --mock  (embedded store + hashing embedder; …)
+```
+
+**No Docker? Use `--mock`** (placed *before* the subcommand). It swaps in an **embedded,
+on-disk Qdrant** (no Docker) and the **hashing embedder** (no 2.3 GB bge-m3 download), so
+you can exercise the whole flow offline — *for trying it, not for real retrieval quality*:
+
+```bash
+# A throwaway, no-Docker run. ingest still needs network (Sefaria); generation still needs a key.
+uv run maayan --mock ingest --book "Tanya, Part I; Likkutei Amarim" --limit 3
+uv run maayan --mock index                       # embeds (hashing) into the embedded store
+uv run maayan --mock search "נפש הבהמית"          # retrieves — no Qdrant, no model download
+uv run maayan --mock ui                           # the web UI, offline
+```
+
+Everything below assumes the **default** (a real Qdrant via `make up`) unless you add `--mock`.
 
 ---
 
@@ -361,13 +388,37 @@ CI (GitHub Actions) runs lint + typecheck + tests on every push/PR.
 is measured by the develop eval, and the term lexicon protects Holy Names from
 expansion while surfacing their definitions in retrieval.
 
-### Phase 3 — companion texts + cross-text connections (in progress)
+### Phase 3 — companion texts + cross-text connections (COMPLETE)
 
 - [x] Ollama backup backend (Prompt 8)
 - [x] **Torah Or** ingested from Sefaria (24 parsha nodes)
 - [x] **Likutei Torah** ingested from chabadlibrary.org (new `source="chabad"` adapter; not on Sefaria)
 - [x] Cross-text connections: co-retrieval across all three texts + taught `expert` connections whose `linked_refs` span books (visible in `search`)
 - [x] "Connect these sources" affordance in the web UI — tick ≥2 sources of an answer and link them with your insight (CLI flow also works; see [RUNBOOK](docs/RUNBOOK.md) §6)
+
+**Phase 3 is complete.** All three texts (Tanya, Torah Or, Likutei Torah) are
+indexed and co-retrievable, and a question can cite across them. The cross-text
+claim is now backed by a number — see Prompt 18 below.
+
+### Phase 4 — steward-ready: correct, measure, see the corpus ([plan](docs/BUILD_PLAN_PHASE4.md))
+
+- [x] **Prompt 17** — Retract & correct (the eraser): provenanced retraction of `expert`/`derived`/`term` chunks — gone from retrieval and skipped by `index --rebuild`; printed text (`sefaria`/`chabad`) is immutable. Correction = retract + re-add. (`maayan retract` / `maayan retractions`; UI affordance on source cards)
+- [x] **Prompt 18** — Cross-text retrieval eval: measures Phase 3's headline — book-diversity / cross-text coverage@k over a dedicated gold set (`maayan eval --crosstext`)
+- [x] **Prompt 19** — Knowledge-base health: `maayan stats` — chunks by source/book, contributions by author, developments by status, retractions, threads, terms (the steward's dashboard; `GET /stats`)
+
+**Phase 4 is complete.** A scholar can now make mistakes safely (retract,
+provenanced, durable across a rebuild), the cross-text claim is measured, and a
+steward can see the whole asset at a glance.
+
+### Phase 5 — composition: from grounded answers to grounded documents ([plan](docs/BUILD_PLAN_PHASE5.md))
+
+- [x] **Prompt 20** — Brief + outline: a single brief → a proposed, editable shiur outline (each section = a retrieval sub-question); config-gated approval (`compose_auto_outline`). (`maayan compose`)
+- [x] **Prompt 21** — Per-section grounded fill: the default-deny gate runs PER SECTION — an unsupported section is an honest gap (no model call), never fabricated prose. (`maayan compose-fill`)
+- [x] **Prompt 22** — Assemble, review, export: render to markdown with a provenance footer; approve/reject; export; and promote a section's connection back into the corpus via the existing capture loop (never re-ingesting the prose). (`maayan compose-export` / `compositions` / `composition` / `compose-promote`; UI Compose panel)
+
+**Phase 5 is complete.** A brief becomes a grounded, section-by-section document with
+honest gaps where the corpus is silent; it's reviewable, exportable markdown, and its
+connections — not its prose — flow back into the Knowledge base.
 
 ---
 

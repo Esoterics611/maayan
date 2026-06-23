@@ -73,6 +73,13 @@
         <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Lexicon</div>
         <div id="termList"></div>
       </div>
+      <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Knowledge base</div>
+          <button class="ghost" title="Refresh" onclick="loadStats()">↻</button>
+        </div>
+        <div id="statsPanel" class="hint">…</div>
+      </div>
     </aside>
 
     <main>
@@ -85,6 +92,7 @@
           <button id="askBtn">Ask</button>
           <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
           <button id="termToggle" class="secondary" title="Define a term / Holy Name">Term ▾</button>
+          <button id="composeToggle" class="secondary" title="Compose a grounded document">Compose ▾</button>
         </div>
         <div class="hint">Answers come only from retrieved sources, with citations; follow-ups use the thread as context but never bypass the refusal gate.</div>
 
@@ -128,6 +136,27 @@
           <label class="field" style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="termSacred" style="width:auto" /> Holy Name (handle with care)</label>
           <div class="actions"><button id="termBtn">Define term</button><span id="termStatus" class="hint"></span></div>
         </div>
+
+        <div id="composeBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
+          <div class="hint" style="margin-bottom:6px">Compose a grounded document (a shiur outline first): a brief → an editable outline → a fill that grounds each section or leaves an <b>honest gap</b> where the corpus is silent. Approval never re-ingests prose — promote a section's <i>connection</i> instead.</div>
+          <div class="row">
+            <div><label class="field">Author <span class="hint">(required)</span></label><input id="composeAuthor" placeholder="Your name" /></div>
+            <div><label class="field">Type</label>
+              <select id="composeType">
+                <option value="shiur_outline">shiur_outline</option>
+                <option value="essay">essay</option>
+                <option value="digest">digest</option>
+                <option value="other">other</option>
+              </select>
+            </div>
+          </div>
+          <label class="field">Title</label>
+          <input id="composeTitle" dir="auto" placeholder="e.g. בירור הנפש הבהמית" />
+          <label class="field">Intent <span class="hint">(what the piece should teach)</span></label>
+          <textarea id="composeIntent" rows="2" dir="auto" placeholder="e.g. שיעור המראה כיצד מבררים את הנפש הבהמית, מתניא ומתורה אור"></textarea>
+          <div class="actions"><button id="composeBtn">Propose outline</button><span id="composeStatus" class="hint"></span></div>
+          <div id="composeDoc"></div>
+        </div>
       </div>
     </main>
   </div>
@@ -165,6 +194,23 @@
         ).join('') : '<div class="hint">No terms yet.</div>';
       } catch (e) { $('termList').innerHTML = '<div class="hint">No terms yet.</div>'; }
     }
+
+    async function loadStats() {
+      try {
+        const s = await j(await fetch('/stats'));
+        const bySrc = Object.entries(s.chunks_by_source || {})
+          .map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '—';
+        const dev = s.developments_by_status || {};
+        $('statsPanel').innerHTML =
+          `<div><b>${s.total_chunks}</b> live chunks`
+          + (s.qdrant_points != null ? ` · ${s.qdrant_points} indexed` : '') + `</div>`
+          + `<div>${bySrc}</div>`
+          + `<div>devs: ${(dev.approved||0)} approved · ${(dev.proposed||0)} proposed`
+          + ` · ${(dev.retracted||0)} retracted</div>`
+          + `<div>${s.retractions} retraction(s) · ${s.threads} thread(s) · ${s.terms} term(s)</div>`;
+      } catch (e) { $('statsPanel').innerHTML = '<div class="hint">stats unavailable</div>'; }
+    }
+    window.loadStats = loadStats;
 
     async function newTopic(title) {
       const t = await j(await fetch('/threads', { method:'POST', headers:{'Content-Type':'application/json'},
@@ -210,9 +256,13 @@
         const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
                     : s.source === 'derived' ? '<span class="badge derived">derived</span>'
                     : s.source === 'term' ? '<span class="badge term">term</span>' : '';
+        // Only layered knowledge (expert/derived/term) is retractable; printed text never is.
+        const retract = ['expert', 'derived', 'term'].includes(s.source)
+          ? `<button class="ghost" style="color:#a33;margin-left:auto"
+                title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
-            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}</div>
+            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${retract}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
@@ -251,6 +301,24 @@
       } else { const e = await j(r); status.textContent = 'Error: ' + (e.detail || r.status); }
     }
     window.connectSelected = connectSelected;
+
+    async function retractSource(i) {
+      const src = lastAnswer && lastAnswer.sources[i];
+      if (!src) return;
+      // Author is required + sticky (as Prompt 9); a reason is requested.
+      const author = (prompt('Retract “' + src.ref + '”.\nYour name (required):',
+        localStorage.getItem(AUTHOR_KEY) || '') || '').trim();
+      if (!author) return;
+      localStorage.setItem(AUTHOR_KEY, author);
+      const reason = (prompt('Why are you retracting it? (e.g. superseded / typo / wrong)', '') || '').trim();
+      const r = await fetch('/retract', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ target: src.ref, author, reason }) });
+      const status = $('connectStatus');
+      if (r.ok) {
+        if (status) status.textContent = `Retracted ✓ — “${src.ref}” left the corpus (it stays gone across a rebuild).`;
+      } else { const e = await j(r); alert('Could not retract: ' + (e.detail || r.status)); }
+    }
+    window.retractSource = retractSource;
 
     async function ask() {
       const q = $('q').value.trim(); if (!q) return;
@@ -317,6 +385,80 @@
     }
     window.developSeed = developSeed; window.decide = decide;
 
+    // -- Compose: brief → outline → fill → review → export ------------------
+    let lastComposition = null;
+
+    function renderComposition(c) {
+      lastComposition = c;
+      const gated = !c.sections.some(s => s.text);  // outline-only (no fills yet)
+      const rows = c.sections.map((s, i) => {
+        const badge = s.supported
+          ? '<span class="badge derived">grounded</span>'
+          : (s.text ? '<span class="badge" style="background:#a33;color:#fff">honest gap</span>' : '');
+        const cites = s.cited_refs && s.cited_refs.length
+          ? `<div class="hint">Cited: ${esc(s.cited_refs.join(', '))}</div>` : '';
+        const body = s.text ? `<div dir="auto">${esc(s.text)}</div>` : `<div class="hint">↳ ${esc(s.query)}</div>`;
+        const promote = (s.grounded_in && s.grounded_in.length)
+          ? `<button class="ghost" onclick="composePromote(${i})" title="Promote this connection into the corpus">Promote connection →</button>` : '';
+        return `<div class="src"><div class="ref"><b>${i + 1}. ${esc(s.heading)}</b> ${badge} ${promote}</div>${body}${cites}</div>`;
+      }).join('');
+      const actions = `<div class="actions" style="margin-top:8px">
+        ${gated ? `<button onclick="composeFill()">Fill sections →</button>` : ''}
+        <button class="secondary" onclick="composeReview('approve')">Approve</button>
+        <button class="secondary" onclick="composeReview('reject')">Reject</button>
+        <button class="secondary" onclick="composeExport()">Export ⤓</button>
+        <span class="hint">status: ${esc(c.status)} · ${c.supported_sections} grounded · ${c.gap_sections} gap(s)</span>
+      </div>`;
+      $('composeDoc').innerHTML = rows + actions;
+    }
+
+    async function composeOutline() {
+      const author = $('composeAuthor').value.trim();
+      if (!author) { $('composeStatus').textContent = 'Author is required.'; return; }
+      const title = $('composeTitle').value.trim(), intent = $('composeIntent').value.trim();
+      if (!title || !intent) { $('composeStatus').textContent = 'Title and intent are required.'; return; }
+      localStorage.setItem(AUTHOR_KEY, author);
+      $('composeStatus').textContent = 'Proposing outline…';
+      const r = await fetch('/compose', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ title, intent, author, content_type: $('composeType').value, thread_id: active }) });
+      if (r.ok) { $('composeStatus').textContent = 'Outline ready — edit mentally, then Fill.'; renderComposition(await j(r)); }
+      else { const e = await j(r); $('composeStatus').textContent = 'Error: ' + (e.detail || r.status); }
+    }
+    async function composeFill() {
+      if (!lastComposition) return;
+      $('composeStatus').textContent = 'Filling section by section (refusing where the corpus is silent)…';
+      const r = await fetch('/compositions/' + lastComposition.id + '/fill', { method:'POST' });
+      if (r.ok) { $('composeStatus').textContent = 'Filled.'; renderComposition(await j(r)); }
+      else { const e = await j(r); $('composeStatus').textContent = 'Error: ' + (e.detail || r.status); }
+    }
+    async function composeReview(action) {
+      if (!lastComposition) return;
+      const r = await fetch('/compositions/' + lastComposition.id + '/' + action, { method:'POST' });
+      if (r.ok) renderComposition(await j(r));
+    }
+    async function composeExport() {
+      if (!lastComposition) return;
+      const r = await fetch('/compositions/' + lastComposition.id + '/export');
+      if (!r.ok) return;
+      const md = (await j(r)).markdown;
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'composition.md'; a.click();
+    }
+    async function composePromote(i) {
+      if (!lastComposition) return;
+      const author = ($('composeAuthor').value || localStorage.getItem(AUTHOR_KEY) || '').trim();
+      if (!author) { alert('Author is required.'); return; }
+      const insight = (prompt('Your insight linking this section’s sources:', '') || '').trim();
+      if (!insight) return;
+      const r = await fetch('/compositions/' + lastComposition.id + '/promote', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ section_index: i, author, insight }) });
+      if (r.ok) { $('composeStatus').textContent = 'Connection promoted to the corpus ✓'; loadStats(); }
+      else { const e = await j(r); alert('Could not promote: ' + (e.detail || r.status)); }
+    }
+    window.composeFill = composeFill; window.composeReview = composeReview;
+    window.composeExport = composeExport; window.composePromote = composePromote;
+
     $('askBtn').onclick = ask;
     $('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
     $('newBtn').onclick = () => { const t = $('newTitle').value.trim(); if (t) { $('newTitle').value=''; newTopic(t); } };
@@ -332,9 +474,12 @@
       }
       $('termBox').classList.toggle('hidden');
     };
+    $('composeToggle').onclick = () => $('composeBox').classList.toggle('hidden');
+    $('composeBtn').onclick = composeOutline;
     const savedAuthor = localStorage.getItem(AUTHOR_KEY) || '';
     $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
-    loadKinds(); loadThreads(); loadTerms();
+    $('composeAuthor').value = savedAuthor;
+    loadKinds(); loadThreads(); loadTerms(); loadStats();
   </script>
 </body>
 </html>

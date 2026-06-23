@@ -187,6 +187,28 @@ class Settings(BaseSettings):
         description="If true, develop() approves immediately; else it waits for approve().",
     )
 
+    # ---- Compose step (Phase 5) ---------------------------------------------
+    compose_auto_outline: bool = Field(
+        default=False,
+        description=(
+            "If true, a proposed outline is filled immediately (quick drafts); if false, "
+            "the outline is returned for the expert to edit/approve before any fill."
+        ),
+    )
+    compose_max_sections: int = Field(
+        default=8, description="Hard cap on sections an outline may propose."
+    )
+    compose_section_top_k: int = Field(
+        default=6, description="Sources retrieved per section to ground (and gate) its fill."
+    )
+    compose_transitions: bool = Field(
+        default=False,
+        description=(
+            "If true, assembly adds connective transitions between supported sections "
+            "(glue only — the prompt forbids any new claim or citation in a transition)."
+        ),
+    )
+
     # ---- Storage / paths ----------------------------------------------------
     db_path: str = Field(default="data/maayan.sqlite3")
 
@@ -195,6 +217,10 @@ class Settings(BaseSettings):
     eval_develop_goldset_path: str = Field(
         default="eval/develop_goldset.yaml",
         description="Seeds (supported/unsupported) for scoring the develop step (Prompt 15).",
+    )
+    eval_crosstext_goldset_path: str = Field(
+        default="eval/crosstext_goldset.yaml",
+        description="Questions whose expected refs span ≥2 books, for the cross-text eval.",
     )
     eval_ks: list[int] = Field(default=[1, 3, 5, 10])
 
