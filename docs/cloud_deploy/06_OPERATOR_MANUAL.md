@@ -123,6 +123,31 @@ irreplaceable part. Copy backups off the machine periodically.
 | `app` exits / "Qdrant is not reachable" | `qdrant` not healthy yet → `docker compose -f docker-compose.prod.yml ps`; check `logs qdrant`. |
 | Locked out (no admin) | `… exec app uv run maayan user create-admin --username root` (or `user passwd <u>`). |
 | Port 8000 in use | something else is bound; stop it, or change the host port in `docker-compose.prod.yml`. |
+| **WSL2:** browser says `localhost:8000` can't be reached, but the server log looks healthy | WSL2's localhost-forwarding relay is broken — see below. |
+
+### WSL2 (Windows): the UI runs but the browser can't reach it
+Symptom: the server log shows `Uvicorn running on http://0.0.0.0:8000` and `curl
+localhost:8000/healthz` **from inside WSL** returns 200, but the Windows browser shows
+"can't be reached". Testing from Windows shows a WSL error like
+`UtilAcceptVsock: accept4 failed 110` — that's WSL2's Windows↔WSL networking relay timing
+out, **not** a maayan problem.
+
+Fixes, easiest first (all run **on Windows**, not inside WSL):
+1. **Restart WSL** (fixes the transient relay break): open Windows PowerShell or cmd and run
+   `wsl --shutdown`, wait ~10 s, reopen your WSL terminal, then
+   `cd ~/code/maayan && uv run maayan ui` and browse `http://localhost:8000`.
+2. **Bind to all interfaces** (already the default for the deploy): ensure `UI_HOST=0.0.0.0`
+   in `.env` (a `127.0.0.1` bind is sometimes not forwarded from Windows).
+3. **Use the WSL IP directly** as a fallback: `hostname -I` in WSL, then browse
+   `http://<that-ip>:8000` from Windows.
+4. **Durable fix if it keeps breaking** (Windows 11 only; may interact with Docker Desktop —
+   apply only if needed): add to `C:\Users\<you>\.wslconfig`:
+   ```ini
+   [wsl2]
+   networkingMode=mirrored
+   ```
+   then `wsl --shutdown` and reopen. This makes WSL share the Windows network stack so
+   `localhost` always works.
 
 ## Quick reference
 ```bash
