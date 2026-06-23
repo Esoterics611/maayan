@@ -89,6 +89,32 @@ def require_qdrant(settings: Settings) -> None:
         raise typer.Exit(1) from None
 
 
+def _primary_ip() -> str:
+    """Best-effort primary outbound IP (no packets sent). Empty string on failure."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))  # selects the outbound interface; sends nothing
+            ip: str = sock.getsockname()[0]
+            return ip
+    except OSError:
+        return ""
+
+
+def _ui_display_urls(ui_host: str, port: int) -> list[str]:
+    """Browsable URLs for the startup banner. ``0.0.0.0``/``::`` are bind addresses, not
+    routable in a browser, so list loopback plus the machine's primary IP (e.g. the WSL2 /
+    LAN address — handy when localhost forwarding into the VM doesn't work)."""
+    if ui_host not in ("0.0.0.0", "::"):
+        return [f"http://{ui_host}:{port}"]
+    urls = [f"http://127.0.0.1:{port}"]
+    ip = _primary_ip()
+    if ip and ip != "127.0.0.1":
+        urls.append(f"http://{ip}:{port}")
+    return urls
+
+
 @app.command()
 def version() -> None:
     """Print the maayan version."""
@@ -1034,10 +1060,10 @@ def ui() -> None:
         cookie_secure=settings.auth_cookie_secure,
         cookie_max_age=settings.session_ttl_hours * 3600,
     )
-    typer.echo(
-        f"maayan UI → http://{settings.ui_host}:{settings.ui_port}"
-        f"{'  [auth: login required]' if settings.auth_enabled else ''}"
-    )
+    urls = _ui_display_urls(settings.ui_host, settings.ui_port)
+    suffix = "  [auth: login required]" if settings.auth_enabled else ""
+    typer.echo("maayan UI → " + "  or  ".join(urls) + suffix)
+    typer.echo("  (open one of those in your browser; not the 0.0.0.0 bind address)")
     uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)
 
 
