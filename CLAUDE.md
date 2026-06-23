@@ -34,6 +34,11 @@ A pipeline that:
 | Qdrant, embeddings, reranker, app code, UI | **Local** |
 | Final generation call | **Cloud** (OpenRouter) — swappable to local Ollama (Prompt 8) |
 
+> **Deployment:** the same stack can run on a free always-on VM (Oracle Always Free + a
+> public URL via Tailscale, with per-user login). The whole backend stays together — only
+> the host moves. Plan, manual steps, and runbook: [docs/cloud_deploy/](docs/cloud_deploy/README.md).
+> Auth is off by default (`auth_enabled=false`) so local dev/tests are unchanged.
+
 ---
 
 ## House rules (non-negotiable)
