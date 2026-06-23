@@ -3,6 +3,27 @@
 Full lessons for the [curriculum](../CURRICULUM.md). Each is self-contained: read it, then
 do the hands-on at the bottom. Work through a module in order.
 
+## One-file / PDF edition
+
+All lessons are also assembled into a single, print-ready document,
+[../CURRICULUM_FULL.md](../CURRICULUM_FULL.md) — branded title page, clickable table of
+contents, and each lesson on its own page. Regenerate it after editing any lesson:
+
+```bash
+python docs/build_curriculum.py        # writes docs/CURRICULUM_FULL.md
+```
+
+Convert it to a PDF with any HTML/CSS-based engine (they render the Hebrew correctly; a
+LaTeX/pdflatex path would not):
+
+```bash
+md-to-pdf docs/CURRICULUM_FULL.md                                   # npm i -g md-to-pdf
+pandoc docs/CURRICULUM_FULL.md -o maayan-curriculum.pdf --pdf-engine=weasyprint
+```
+
+The layout (fonts tuned for Hebrew + nikkud, page size, page breaks, branding) is carried in
+an inline `<style>` block, so the single `.md` is self-contained.
+
 ## Module 0 — Orientation: the whole loop in your hands
 
 - [0.1 — What RAG is, and the problem it solves](00-1-what-is-rag.md)
