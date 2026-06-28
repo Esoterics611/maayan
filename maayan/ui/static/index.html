@@ -91,6 +91,29 @@
     .field.with-mic { display:flex; justify-content:space-between; align-items:center; }
     #voiceLang { min-width:34px; text-align:center; }
 
+    /* --- reader / library overlays + reading modes (Prompt 29) --- */
+    .srcref { cursor:pointer; } .srcref:hover { text-decoration:underline; }
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:70; display:flex; }
+    .reader { background:var(--panel); color:var(--ink); margin:auto; width:min(820px,94vw);
+              max-height:92vh; overflow:auto; border-radius:12px; box-shadow:0 12px 48px rgba(0,0,0,.25); }
+    .reader-head { position:sticky; top:0; background:var(--panel); border-bottom:1px solid var(--line);
+                   padding:11px 16px; display:flex; align-items:center; gap:8px; z-index:1; }
+    .reader-head .title { font-weight:650; flex:1; min-width:0; }
+    .reader-body { padding:18px 22px;
+      font-family:"Frank Ruhl Libre","Frank Ruehl CLM","David Libre",David,"Times New Roman",serif;
+      font-size:calc(18px * var(--read-scale,1)); line-height:2; }
+    .reader-seg { padding:6px 4px; margin:2px 0; border-radius:6px; }
+    .reader-seg.cited { background:rgba(184,134,11,.16); box-shadow:inset 3px 0 0 var(--cited); padding-left:12px; }
+    .reader-seg .seg-ref { font-family:-apple-system,Segoe UI,sans-serif; font-size:12px; color:var(--muted); margin-bottom:2px; }
+    .lib-body { padding:14px 16px; }
+    .lib-item { padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin:6px 0; cursor:pointer; }
+    .lib-item:hover { background:var(--bg); }
+    body[data-read-mode="sepia"] .reader, body[data-read-mode="sepia"] .reader-head { background:#f4ecd8; color:#43381f; }
+    body[data-read-mode="sepia"] .reader-body { color:#43381f; }
+    body[data-read-mode="dark"] .reader, body[data-read-mode="dark"] .reader-head { background:#201e1a; color:#e9e3d7; border-color:#3a352d; }
+    body[data-read-mode="dark"] .reader-body { color:#e9e3d7; }
+    body[data-read-mode="dark"] .reader-seg .seg-ref { color:#a59b88; }
+
     @media (max-width: 720px) {
       h1 { font-size:17px; } h1 small { display:none; }
       .menu-btn { display:inline-flex; }
@@ -343,7 +366,7 @@
                 title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
-            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
+            <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
@@ -590,7 +613,7 @@
         $('seedBox').classList.remove('hidden');
         $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
       } else if (tab === 'library') {
-        toast('Library — the full reading view arrives in the next update.');  // Prompt 29 anchor
+        openLibrary();
       }
     });
 
@@ -835,6 +858,83 @@
       const f = e.target.files && e.target.files[0]; if (f) handleShiurBlob(f, f.name);
     };
     if ($('shiurToggle')) $('shiurToggle').onclick = () => $('shiurBox').classList.toggle('hidden');
+
+    // -- Reading experience: modes + source-in-context + sefer browser ------
+    const READ_MODE_KEY = 'maayan.readmode', READ_SCALE_KEY = 'maayan.readscale';
+    const READ_MODES = ['light', 'sepia', 'dark'];
+    const attr = (x) => JSON.stringify(x).replace(/'/g, '&#39;');  // safe in single-quoted attrs
+    function applyReading() {
+      document.body.setAttribute('data-read-mode', localStorage.getItem(READ_MODE_KEY) || 'light');
+      document.documentElement.style.setProperty('--read-scale', localStorage.getItem(READ_SCALE_KEY) || '1');
+    }
+    function cycleReadMode() {
+      const cur = localStorage.getItem(READ_MODE_KEY) || 'light';
+      localStorage.setItem(READ_MODE_KEY, READ_MODES[(READ_MODES.indexOf(cur) + 1) % READ_MODES.length]);
+      applyReading();
+    }
+    function bumpReadScale(d) {
+      let s = parseFloat(localStorage.getItem(READ_SCALE_KEY) || '1') + d;
+      s = Math.max(0.8, Math.min(1.8, s));
+      localStorage.setItem(READ_SCALE_KEY, s.toFixed(2)); applyReading();
+    }
+    applyReading();
+
+    function closeOverlay() { const o = $('overlay'); if (o) o.remove(); }
+    function mkOverlay(inner) {
+      closeOverlay();
+      const o = document.createElement('div'); o.className = 'overlay'; o.id = 'overlay';
+      o.innerHTML = '<div class="reader">' + inner + '</div>';
+      o.addEventListener('click', (e) => { if (e.target === o) closeOverlay(); });
+      document.body.appendChild(o);
+    }
+
+    async function openReader(ref, lang) {
+      let data;
+      const q = '/api/source?ref=' + encodeURIComponent(ref) + (lang ? '&lang=' + encodeURIComponent(lang) : '');
+      try { data = await j(await fetch(q)); }
+      catch (e) { toast('Could not open source.'); return; }
+      if (!data || !data.chunks) { toast('Source not found.'); return; }
+      const segs = data.chunks.map(c =>
+        `<div class="reader-seg ${c.cited ? 'cited' : ''}"${c.ref === ref ? ' id="citedSeg"' : ''}>
+           <div class="seg-ref">${esc(c.ref)}</div><div dir="auto">${esc(c.text)}</div></div>`).join('');
+      mkOverlay(
+        `<div class="reader-head">
+           <span class="title" dir="auto">${esc(data.label)} <span class="hint">${esc(data.book)}</span></span>
+           <button class="ghost" onclick="cycleReadMode()" title="Light / sepia / dark">◑</button>
+           <button class="ghost" onclick="bumpReadScale(-0.1)" title="Smaller">A−</button>
+           <button class="ghost" onclick="bumpReadScale(0.1)" title="Larger">A+</button>
+           <button class="ghost" onclick="closeOverlay()" title="Close">✕</button>
+         </div><div class="reader-body">${segs}</div>`);
+      const c = $('citedSeg'); if (c) c.scrollIntoView({ block: 'center' });
+    }
+
+    async function openLibrary() {
+      document.body.classList.remove('drawer-open');
+      let lib;
+      try { lib = await j(await fetch('/api/library')); } catch (e) { toast('Library unavailable.'); return; }
+      const items = (lib.entries || []).map(e =>
+        `<div class="lib-item" onclick='openBook(${attr(e.book)})'>
+           <b dir="auto">${esc(e.book)}</b> <span class="badge ${esc(e.source)}">${esc(e.source)}</span>
+           <span class="hint">· ${e.count}</span></div>`).join('') || '<div class="hint">Nothing indexed yet.</div>';
+      mkOverlay(`<div class="reader-head"><span class="title">Library</span>
+         <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+         <div class="lib-body">${items}</div>`);
+    }
+    async function openBook(book) {
+      let data;
+      try { data = await j(await fetch('/api/library/sections?book=' + encodeURIComponent(book))); }
+      catch (e) { toast('Could not open book.'); return; }
+      const items = (data.sections || []).map(s =>
+        `<div class="lib-item" dir="auto" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})'>${esc(s.label)}</div>`).join('')
+        || '<div class="hint">No sections.</div>';
+      mkOverlay(`<div class="reader-head">
+           <button class="ghost" onclick="openLibrary()" title="Back">←</button>
+           <span class="title" dir="auto">${esc(book)}</span>
+           <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+         <div class="lib-body">${items}</div>`);
+    }
+    window.openReader = openReader; window.openLibrary = openLibrary; window.openBook = openBook;
+    window.cycleReadMode = cycleReadMode; window.bumpReadScale = bumpReadScale; window.closeOverlay = closeOverlay;
   </script>
   <script>
   // --- auth chrome: only active when the server has AUTH_ENABLED=true ---------

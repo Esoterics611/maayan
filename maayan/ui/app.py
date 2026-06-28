@@ -26,6 +26,7 @@ from maayan.capture.models import Annotation
 from maayan.capture.service import CaptureService
 from maayan.compose.models import Brief, Composition, SourceScope
 from maayan.compose.service import Composing
+from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.generate.rag import Answer, RAGService
@@ -56,17 +57,23 @@ from maayan.ui.models import (
     DevelopmentResponse,
     DevelopRequest,
     ExportResponse,
+    LibraryEntry,
+    LibraryResponse,
     LoginRequest,
     MeResponse,
     PromoteRequest,
     RetractRequest,
     RetractResponse,
+    SectionEntry,
     SectionOut,
+    SectionsResponse,
     SeedRequest,
     SeedResponse,
     SessionResponse,
     SetActiveRequest,
     SetPasswordRequest,
+    SourceContextChunk,
+    SourceContextResponse,
     SourceOut,
     TermRequest,
     TermResponse,
@@ -169,6 +176,7 @@ def create_app(
     *,
     users: UserService | None = None,
     transcription: TranscriptionService | None = None,
+    chunks: ChunkStore | None = None,
     context_turns: int = 6,
     auth_enabled: bool = False,
     session_cookie_name: str = "maayan_session",
@@ -189,6 +197,11 @@ def create_app(
         if transcription is None:  # transcription wiring absent — routes are inert
             raise HTTPException(status_code=503, detail="transcription not configured")
         return transcription
+
+    def _chunks_store() -> ChunkStore:
+        if chunks is None:  # reader/library wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="library not configured")
+        return chunks
 
     def _require_admin(request: Request) -> User:
         user: User | None = getattr(request.state, "user", None)
@@ -637,5 +650,42 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return svc.suggest_corrections(rejected)
+
+    # -- reading / library (source-in-context + sefer browser) --------------
+    @app.get("/api/source")
+    def source_in_context(ref: str, lang: str | None = None) -> SourceContextResponse:
+        section = _chunks_store().get_section(ref, lang=lang)
+        if not section:
+            raise HTTPException(status_code=404, detail="ref not found")
+        anchor = section[0]
+        label = " · ".join(anchor.section_path[:-1]) or anchor.book
+        return SourceContextResponse(
+            ref=ref, label=label, book=anchor.book,
+            chunks=[
+                SourceContextChunk(
+                    ref=c.ref, lang=c.lang, text=c.text, source=c.source, cited=c.ref == ref
+                )
+                for c in section
+            ],
+        )
+
+    @app.get("/api/library")
+    def library() -> LibraryResponse:
+        return LibraryResponse(
+            entries=[
+                LibraryEntry(book=b, source=s, count=n)
+                for (b, s, n) in _chunks_store().library_index()
+            ]
+        )
+
+    @app.get("/api/library/sections")
+    def library_sections(book: str) -> SectionsResponse:
+        return SectionsResponse(
+            book=book,
+            sections=[
+                SectionEntry(label=label, ref=ref, lang=lang)
+                for (label, ref, lang) in _chunks_store().list_sections(book)
+            ],
+        )
 
     return app

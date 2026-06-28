@@ -72,8 +72,8 @@ def transcript_to_chunks(
         chunks.append(
             Chunk.make(
                 ref=ref,
-                book=SHIUR_BOOK,
-                section_path=[SHIUR_BOOK, title],
+                book=title,  # each shiur is its own "book" → Library browses shiurim by title
+                section_path=[SHIUR_BOOK],
                 lang=detect_lang(text),
                 text=text,
                 source=SHIUR_SOURCE,

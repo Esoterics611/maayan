@@ -269,3 +269,13 @@ def test_voice_dictation_controls_present() -> None:
     assert "MediaRecorder" in html
     # The Prompt 26 server path is stubbed honestly, not half-wired.
     assert "server transcription" in html
+
+
+def test_reading_experience_controls_present() -> None:
+    # Prompt 29 reader/library + reading modes ship in the page (browser-driven UI).
+    client, _, _ = _client()
+    html = client.get("/").text
+    assert "openReader" in html        # source-in-context reader
+    assert "openLibrary" in html       # sefer browser (Library tab)
+    assert "maayan.readmode" in html   # reading mode persisted in localStorage
+    assert "cycleReadMode" in html

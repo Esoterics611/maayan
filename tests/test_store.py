@@ -65,3 +65,42 @@ def test_filters_by_source_and_book() -> None:
     assert store.count(source="expert") == 1
     assert {c.source for c in store.get_chunks(source="sefaria")} == {"sefaria"}
     store.close()
+
+
+# -- reading / library (Prompt 29) -------------------------------------------
+def _mk(ref: str, section_path: list[str], *, book: str = "Tanya", lang: str = "he") -> Chunk:
+    return Chunk.make(ref=ref, book=book, section_path=section_path, lang=lang, text=ref)
+
+
+def test_get_section_returns_same_chapter_he_preferred() -> None:
+    store = ChunkStore(":memory:")
+    store.upsert_chunks([
+        _mk("Tanya 1:1", ["Chapter 1", "Paragraph 1"]),
+        _mk("Tanya 1:2", ["Chapter 1", "Paragraph 2"]),
+        _mk("Tanya 1:2", ["Chapter 1", "Paragraph 2"], lang="en"),
+        _mk("Tanya 2:1", ["Chapter 2", "Paragraph 1"]),
+    ])
+    section = store.get_section("Tanya 1:2")  # he preferred, same chapter only
+    assert [(c.ref, c.lang) for c in section] == [("Tanya 1:1", "he"), ("Tanya 1:2", "he")]
+    # Explicit lang override pulls the English section.
+    en = store.get_section("Tanya 1:2", lang="en")
+    assert [c.lang for c in en] == ["en"]
+    assert store.get_section("missing") == []
+    store.close()
+
+
+def test_library_index_and_sections() -> None:
+    store = ChunkStore(":memory:")
+    store.upsert_chunks([
+        _mk("Tanya 1:1", ["Chapter 1", "Paragraph 1"]),
+        _mk("Tanya 2:1", ["Chapter 2", "Paragraph 1"]),
+        Chunk.make(ref="Shiur: Demo §1 @ 00:00", book="Demo", section_path=["Shiur"],
+                   lang="he", text="x", source="shiur"),
+    ])
+    index = store.library_index()
+    assert ("Tanya", "sefaria", 2) in index
+    assert ("Demo", "shiur", 1) in index
+    # Tanya's table of contents = its two chapters; a shiur is one section.
+    assert [label for (label, _r, _l) in store.list_sections("Tanya")] == ["Chapter 1", "Chapter 2"]
+    assert [label for (label, _r, _l) in store.list_sections("Demo")] == ["Demo"]
+    store.close()
