@@ -1071,7 +1071,9 @@ def ui() -> None:
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
     from maayan.generate.rag import RAGService
+    from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
+    from maayan.ocr.factory import build_ocrer
     from maayan.retract.factory import build_retraction_service
     from maayan.retrieve.factory import build_retriever
     from maayan.stats.factory import build_stats_service
@@ -1095,6 +1097,8 @@ def ui() -> None:
     compose_service = build_composition_service(settings, embedder=embedder)
     transcription = build_transcription_service(settings, terms=terms, embedder=embedder)
     chunks_store = ChunkStore(settings.db_path)  # read-only reader/library browsing
+    ocr = build_ocrer(settings)  # None unless OCR_BACKEND set (additive capture surface)
+    inbox = build_inbox_service(settings)
     users = build_user_service(settings)
     if settings.auth_enabled:
         seeded = users.ensure_seed_admin()
@@ -1106,6 +1110,9 @@ def ui() -> None:
         users=users,
         transcription=transcription,
         chunks=chunks_store,
+        ocr=ocr,
+        inbox=inbox,
+        ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
         auth_enabled=settings.auth_enabled,
         session_cookie_name=settings.session_cookie_name,

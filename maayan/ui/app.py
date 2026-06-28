@@ -30,8 +30,11 @@ from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.generate.rag import Answer, RAGService
+from maayan.inbox.models import InboxItem
+from maayan.inbox.service import InboxService
 from maayan.lexicon.models import TermType
 from maayan.lexicon.service import TermService
+from maayan.ocr.base import OCRer
 from maayan.retract.service import Retracting
 from maayan.retrieve.models import SearchResult
 from maayan.stats.models import Stats
@@ -50,6 +53,7 @@ from maayan.ui.models import (
     AskInThreadRequest,
     AskRequest,
     AskResponse,
+    CaptureThoughtRequest,
     ComposeRequest,
     CompositionResponse,
     CreateThreadRequest,
@@ -57,10 +61,13 @@ from maayan.ui.models import (
     DevelopmentResponse,
     DevelopRequest,
     ExportResponse,
+    InboxItemOut,
     LibraryEntry,
     LibraryResponse,
     LoginRequest,
     MeResponse,
+    MoveInboxRequest,
+    OcrResponse,
     PromoteRequest,
     RetractRequest,
     RetractResponse,
@@ -177,6 +184,9 @@ def create_app(
     users: UserService | None = None,
     transcription: TranscriptionService | None = None,
     chunks: ChunkStore | None = None,
+    ocr: OCRer | None = None,
+    inbox: InboxService | None = None,
+    ocr_lang: str = "heb",
     context_turns: int = 6,
     auth_enabled: bool = False,
     session_cookie_name: str = "maayan_session",
@@ -202,6 +212,16 @@ def create_app(
         if chunks is None:  # reader/library wiring absent — routes are inert
             raise HTTPException(status_code=503, detail="library not configured")
         return chunks
+
+    def _ocr() -> OCRer:
+        if ocr is None:  # OCR disabled (ocr_backend="none") — route is inert
+            raise HTTPException(status_code=503, detail="ocr not configured")
+        return ocr
+
+    def _inbox() -> InboxService:
+        if inbox is None:  # inbox wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="inbox not configured")
+        return inbox
 
     def _require_admin(request: Request) -> User:
         user: User | None = getattr(request.state, "user", None)
@@ -687,5 +707,70 @@ def create_app(
                 for (label, ref, lang) in _chunks_store().list_sections(book)
             ],
         )
+
+    # -- OCR capture (photograph a page → text → review field; never auto-ingested) --
+    @app.post("/api/ocr")
+    async def ocr_image(
+        request: Request, lang: str | None = None, file: UploadFile = File(...)
+    ) -> OcrResponse:
+        ocrer = _ocr()
+        language = lang or ocr_lang
+        suffix = Path(file.filename or "").suffix or ".png"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        try:
+            text = ocrer.ocr(Path(tmp_path), language)
+        finally:
+            os.unlink(tmp_path)
+        # Text is returned for the human to review + drop into a capture field — the
+        # same gate as every contribution. Nothing is embedded or indexed here.
+        return OcrResponse(text=text, lang=language)
+
+    # -- quick-capture inbox (park a thought → triage into a thread later) ---------
+    def _inbox_out(item: InboxItem) -> InboxItemOut:
+        return InboxItemOut(
+            id=item.id, author=item.author, text=item.text,
+            created_at=item.created_at.isoformat(), status=item.status,
+            thread_id=item.thread_id, record_id=item.record_id,
+        )
+
+    @app.post("/api/inbox")
+    def capture_thought(req: CaptureThoughtRequest, request: Request) -> InboxItemOut:
+        user: User | None = getattr(request.state, "user", None)
+        author = user.display_name if user else req.author  # logged-in identity = provenance
+        try:
+            return _inbox_out(_inbox().capture(text=req.text, author=author))
+        except ValueError as exc:  # blank author/text
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/inbox")
+    def list_inbox() -> list[InboxItemOut]:
+        return [_inbox_out(i) for i in _inbox().list_open()]
+
+    @app.post("/api/inbox/{item_id}/move")
+    def move_inbox_item(
+        item_id: str, req: MoveInboxRequest
+    ) -> InboxItemOut:
+        svc = _inbox()
+        item = svc.get(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        if threads.get_thread_with_turns(req.thread_id) is None:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        # Reuse the EXISTING seed flow: the parked thought becomes a develop-able seed
+        # on the thread, attributed to its original author (provenance is sticky).
+        try:
+            seed: Annotation = capture.add_annotation(
+                req.thread_id, author=item.author, kind=req.kind, body=item.text,
+                directive=req.directive, opens_aspect=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        threads.add_turn(
+            req.thread_id, turn_type="seed", author=seed.author, text=seed.body,
+            record_id=seed.id,
+        )
+        return _inbox_out(svc.mark_moved(item_id, thread_id=req.thread_id, record_id=seed.id))
 
     return app

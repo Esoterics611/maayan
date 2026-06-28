@@ -310,3 +310,37 @@ class SectionEntry(BaseModel):
 class SectionsResponse(BaseModel):
     book: str
     sections: list[SectionEntry] = Field(default_factory=list)
+
+
+# -- OCR + quick-capture inbox (Prompt 30) -----------------------------------
+class OcrResponse(BaseModel):
+    """Text extracted from a photographed page. Never auto-ingested — the UI drops it
+    into a capture field for the same human review gate as every other contribution."""
+
+    text: str
+    lang: str
+
+
+class CaptureThoughtRequest(BaseModel):
+    """One-tap quick capture. Author required (provenance); blank rejected by the model."""
+
+    text: str
+    author: str = ""  # filled from the logged-in user when auth is on
+
+
+class InboxItemOut(BaseModel):
+    id: str
+    author: str
+    text: str
+    created_at: str
+    status: str
+    thread_id: str | None = None
+    record_id: str | None = None
+
+
+class MoveInboxRequest(BaseModel):
+    """Triage a parked thought into a thread, where it becomes a develop-able seed."""
+
+    thread_id: str
+    kind: str = "addition"
+    directive: str | None = None

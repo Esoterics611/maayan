@@ -104,6 +104,9 @@ Or run the web UI and do it in the browser:
 make ui            # → http://127.0.0.1:8000   (ask · teach · connect · develop)
 ```
 
+> Using the app (web + installable phone PWA — voice, OCR, highlight-to-act, inbox,
+> reader, shiur transcription): **[UI_GUIDE.md](UI_GUIDE.md)**.
+
 ## 6. Teach the Assistant a connection — and confirm it learned
 
 This is the core of your plan: *most of the learning is the Tanya ↔ Likutei Torah

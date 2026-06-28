@@ -239,6 +239,18 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- OCR capture (Phase 6, Prompt 30) -----------------------------------
+    # Swappable like the transcription backend: "none" (off; default — OCR is
+    # additive), "fake" (deterministic/offline; also via CLI --mock), "tesseract"
+    # (local pytesseract; needs the tesseract-ocr + heb traineddata system deps),
+    # "cloud" (documented swap). OCR text is never auto-ingested — it fills a capture
+    # field for the same human review gate as every other contribution.
+    ocr_backend: str = Field(default="none")
+    ocr_lang: str = Field(
+        default="heb",
+        description='Tesseract language code(s), e.g. "heb", "eng", "heb+eng".',
+    )
+
     # ---- Storage / paths ----------------------------------------------------
     db_path: str = Field(default="data/maayan.sqlite3")
 

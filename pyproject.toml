@@ -63,7 +63,10 @@ plugins = ["pydantic.mypy"]
 # Third-party libs without type stubs, or heavy ml-extra deps not installed in the
 # light CI (torch/FlagEmbedding). CI syncs core+dev+ui, so these stay ignorable.
 [[tool.mypy.overrides]]
-module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*", "faster_whisper.*"]
+module = [
+    "FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*", "faster_whisper.*",
+    "pytesseract.*", "PIL.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff]

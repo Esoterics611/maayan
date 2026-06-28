@@ -217,6 +217,10 @@ make up      # Qdrant
 make ui      # → http://127.0.0.1:8000
 ```
 
+> **Full walkthrough:** **[docs/UI_GUIDE.md](docs/UI_GUIDE.md)** — the user guide to the
+> app (web + installable phone PWA), including voice dictation, OCR, highlight-to-act,
+> the quick-capture inbox, the reader, and shiur transcription.
+
 The UI is organized around **topic threads**. Start (or reopen) a topic from the
 sidebar, then within that thread you can:
 
@@ -235,6 +239,12 @@ sidebar, then within that thread you can:
   an entity (canonical, type, definition, surface forms, gematria). Select text in a
   source first to pre-fill its surface form. Defined terms show in the sidebar lexicon
   and surface in retrieval, badged **term**.
+
+**Beyond typing (mobile-first):** dictate into any field with **🎤** (continuous until you
+tap stop), **📷** photographs a page → OCR text into a field for review, **selecting source
+text** pops a Connect / Define / Seed menu, and **📥** is a quick-capture inbox you triage
+into a thread later. None of it auto-ingests — it all flows through the same review gate.
+See **[docs/UI_GUIDE.md](docs/UI_GUIDE.md)**.
 
 ---
 
