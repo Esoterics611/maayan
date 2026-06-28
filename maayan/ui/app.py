@@ -11,13 +11,16 @@ seed → develop → approve/reject — each a thin route over a service.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from maayan.audio.models import AudioAsset
 from maayan.capture.convert import detect_lang
 from maayan.capture.models import Annotation
 from maayan.capture.service import CaptureService
@@ -34,6 +37,8 @@ from maayan.stats.service import Statsing
 from maayan.threads.flow import ask_in_thread
 from maayan.threads.models import Thread, ThreadTurn
 from maayan.threads.service import ThreadService
+from maayan.transcribe.models import Transcript, TranscriptionJob
+from maayan.transcribe.service import TranscriptionService
 from maayan.ui.models import (
     AnnotateRequest,
     AnnotateResponse,
@@ -155,6 +160,7 @@ def create_app(
     compose: Composing,
     *,
     users: UserService | None = None,
+    transcription: TranscriptionService | None = None,
     context_turns: int = 6,
     auth_enabled: bool = False,
     session_cookie_name: str = "maayan_session",
@@ -170,6 +176,11 @@ def create_app(
         if users is None:  # auth wiring absent (auth disabled) — these routes are inert
             raise HTTPException(status_code=503, detail="auth not configured")
         return users
+
+    def _transcription() -> TranscriptionService:
+        if transcription is None:  # transcription wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="transcription not configured")
+        return transcription
 
     def _require_admin(request: Request) -> User:
         user: User | None = getattr(request.state, "user", None)
@@ -520,5 +531,46 @@ def create_app(
             annotation_id=ann.id, session_id=ann.session_id, kind=ann.kind,
             author=ann.author, linked_refs=ann.linked_refs, opens_aspect=ann.opens_aspect,
         )
+
+    # -- shiur transcription (audio → async job → transcript) ---------------
+    @app.post("/api/audio")
+    async def upload_audio(request: Request, file: UploadFile = File(...)) -> AudioAsset:
+        svc = _transcription()
+        user: User | None = getattr(request.state, "user", None)
+        owner = user.username if user else "local"  # uploads owned by the logged-in user
+        suffix = Path(file.filename or "").suffix or ".webm"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        try:
+            return svc.store_audio(tmp_path, owner=owner, original_filename=file.filename)
+        finally:
+            os.unlink(tmp_path)
+
+    @app.post("/api/audio/{audio_id}/transcribe")
+    def start_transcription(
+        audio_id: str, background_tasks: BackgroundTasks
+    ) -> TranscriptionJob:
+        svc = _transcription()
+        if svc.get_audio(audio_id) is None:
+            raise HTTPException(status_code=404, detail="audio not found")
+        job = svc.enqueue(audio_id)
+        # Off the request thread; the UI polls /api/jobs/{id}. No blocking wait here.
+        background_tasks.add_task(svc.run_job, job.id)
+        return job
+
+    @app.get("/api/jobs/{job_id}")
+    def get_job(job_id: str) -> TranscriptionJob:
+        job = _transcription().get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job
+
+    @app.get("/api/transcripts/{transcript_id}")
+    def get_transcript(transcript_id: str) -> Transcript:
+        transcript = _transcription().get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="transcript not found")
+        return transcript
 
     return app

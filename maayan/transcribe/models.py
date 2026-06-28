@@ -15,6 +15,9 @@ from pydantic import BaseModel, Field
 # raw → reviewed (human edited) → approved (ingested as shiur corpus) | rejected.
 TranscriptStatus = Literal["raw", "reviewed", "approved", "rejected"]
 
+# queued → running → done | error. Polled by the UI; the work runs off the request.
+JobStatus = Literal["queued", "running", "done", "error"]
+
 
 class TranscriptSegment(BaseModel):
     """One timestamped span of speech."""
@@ -43,3 +46,17 @@ class Transcript(BaseModel):
     status: TranscriptStatus = "raw"
     segments: list[TranscriptSegment] = Field(default_factory=list)
     created_at: datetime
+
+
+class TranscriptionJob(BaseModel):
+    """An async transcription unit the UI polls. The work runs off the request thread
+    (FastAPI BackgroundTasks); progress/status land here, never via a blocking wait."""
+
+    id: str
+    audio_id: str
+    status: JobStatus = "queued"
+    progress: float = 0.0
+    transcript_id: str | None = None
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime

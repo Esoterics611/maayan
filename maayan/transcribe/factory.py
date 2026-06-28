@@ -7,9 +7,14 @@ backend (also selected by the CLI `--mock` flag).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from maayan.clock import Clock, SystemClock
 from maayan.config import Settings
 from maayan.transcribe.base import Transcriber
+
+if TYPE_CHECKING:
+    from maayan.transcribe.service import TranscriptionService
 
 
 def build_transcriber(settings: Settings, *, clock: Clock | None = None) -> Transcriber:
@@ -37,3 +42,21 @@ def build_transcriber(settings: Settings, *, clock: Clock | None = None) -> Tran
             "Whisper, or =fake for the offline/test backend."
         )
     raise ValueError(f"Unknown transcribe_backend: {backend!r}")
+
+
+def build_transcription_service(
+    settings: Settings, *, clock: Clock | None = None
+) -> TranscriptionService:
+    """Assemble the TranscriptionService wired to the same DB + audio dir (DI at the edge)."""
+    from maayan.audio.store import AudioStore
+    from maayan.transcribe.service import TranscriptionService
+    from maayan.transcribe.store import TranscriptionStore
+
+    clock = clock or SystemClock()
+    return TranscriptionService(
+        build_transcriber(settings, clock=clock),
+        AudioStore(settings.db_path, clock),
+        TranscriptionStore(settings.db_path),
+        clock,
+        audio_dir=settings.audio_dir,
+    )

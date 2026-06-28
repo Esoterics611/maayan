@@ -1075,6 +1075,7 @@ def ui() -> None:
     from maayan.retrieve.factory import build_retriever
     from maayan.stats.factory import build_stats_service
     from maayan.threads.factory import build_thread_service
+    from maayan.transcribe.factory import build_transcription_service
     from maayan.ui.app import create_app
     from maayan.users.factory import build_user_service
 
@@ -1091,6 +1092,7 @@ def ui() -> None:
     retraction = build_retraction_service(settings, embedder=embedder)
     stats = build_stats_service(settings)
     compose_service = build_composition_service(settings, embedder=embedder)
+    transcription = build_transcription_service(settings)
     users = build_user_service(settings)
     if settings.auth_enabled:
         seeded = users.ensure_seed_admin()
@@ -1100,6 +1102,7 @@ def ui() -> None:
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
         users=users,
+        transcription=transcription,
         context_turns=settings.thread_context_turns,
         auth_enabled=settings.auth_enabled,
         session_cookie_name=settings.session_cookie_name,
