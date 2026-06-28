@@ -23,10 +23,12 @@ dependencies = [
 ml = [
     "FlagEmbedding>=1.2.10",
     "torch>=2.2",
+    "faster-whisper>=1.0",   # local shiur transcription (CTranslate2 Whisper); Prompt 25+
 ]
 ui = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",   # FastAPI multipart uploads (audio); Prompt 26+
 ]
 
 [dependency-groups]
@@ -61,7 +63,7 @@ plugins = ["pydantic.mypy"]
 # Third-party libs without type stubs, or heavy ml-extra deps not installed in the
 # light CI (torch/FlagEmbedding). CI syncs core+dev+ui, so these stay ignorable.
 [[tool.mypy.overrides]]
-module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*"]
+module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*", "faster_whisper.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
@@ -70,3 +72,11 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's parameter helpers are the framework idiom for argument defaults (not a
+# mutable-default bug) — allow them so B008 doesn't fire on routes.
+extend-immutable-calls = [
+    "fastapi.File", "fastapi.Form", "fastapi.Depends",
+    "fastapi.Query", "fastapi.Path", "fastapi.Header",
+]

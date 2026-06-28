@@ -1,0 +1,17 @@
+{
+  "name": "maayan · מעיין",
+  "short_name": "maayan",
+  "description": "Grounded, cited learning + the expert capture loop for Tanya, Torah Or, and Likutei Torah.",
+  "lang": "he",
+  "dir": "auto",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f4ef",
+  "theme_color": "#6b4f2a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

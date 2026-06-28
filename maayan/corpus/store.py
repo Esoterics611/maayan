@@ -170,6 +170,61 @@ class ChunkStore:
             sql += " AND retracted = 0"
         return [self._row_to_chunk(r) for r in self._conn.execute(sql + " ORDER BY lang", (ref,))]
 
+    def get_section(
+        self, ref: str, *, lang: str | None = None, include_retracted: bool = False
+    ) -> list[Chunk]:
+        """The full section a ref sits in: same book, same parent path, same language.
+
+        For printed text the section is the perek/os (siblings under the same chapter);
+        for a shiur it is the whole transcript. The anchor language is `lang` if given,
+        else Hebrew when present (a Torah reader is Hebrew-first), else whatever exists.
+        Ordered as the book is (by ref). Powers the reader's source-in-context view.
+        """
+        anchors = self.get_by_ref(ref, include_retracted=include_retracted)
+        if not anchors:
+            return []
+        anchor = None
+        if lang is not None:
+            anchor = next((c for c in anchors if c.lang == lang), None)
+        if anchor is None:
+            anchor = next((c for c in anchors if c.lang == "he"), anchors[0])
+        parent = anchor.section_path[:-1]
+        return [
+            c
+            for c in self.get_chunks(book=anchor.book, include_retracted=include_retracted)
+            if c.lang == anchor.lang and c.section_path[:-1] == parent
+        ]
+
+    def library_index(self, *, include_retracted: bool = False) -> list[tuple[str, str, int]]:
+        """(book, source, count) for every (book, source), for the Library browser."""
+        where = "" if include_retracted else "WHERE retracted = 0"
+        rows = self._conn.execute(
+            f"SELECT book, source, COUNT(*) AS n FROM chunks {where} "
+            "GROUP BY book, source ORDER BY source, book"
+        )
+        return [(r["book"], r["source"], int(r["n"])) for r in rows]
+
+    def list_sections(
+        self, book: str, *, include_retracted: bool = False
+    ) -> list[tuple[str, str, str]]:
+        """(label, ref, lang) one per section of a book, Hebrew preferred — the book's TOC."""
+        order: list[tuple[str, ...]] = []
+        by_key: dict[tuple[str, ...], dict[str, str]] = {}
+        for c in self.get_chunks(book=book, include_retracted=include_retracted):
+            key = tuple(c.section_path[:-1]) or (c.book,)
+            entry = by_key.get(key)
+            if entry is None:
+                entry = {"label": " · ".join(c.section_path[:-1]) or c.book}
+                by_key[key] = entry
+                order.append(key)
+            entry.setdefault(c.lang, c.ref)
+        sections: list[tuple[str, str, str]] = []
+        for key in order:
+            e = by_key[key]
+            lang = "he" if "he" in e else ("en" if "en" in e else "")
+            sections.append((e["label"], e.get(lang, ""), lang))
+        return sections
+
     def counts_by_source(self, *, include_retracted: bool = False) -> dict[str, int]:
         """Live chunk counts grouped by source (sefaria/chabad/expert/derived/term)."""
         where = "" if include_retracted else "WHERE retracted = 0"

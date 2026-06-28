@@ -95,6 +95,10 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier for source='term' chunks (curated lexicon entries / Holy Names).",
     )
+    shiur_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='shiur' chunks (approved transcribed recordings).",
+    )
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
@@ -206,6 +210,32 @@ class Settings(BaseSettings):
         description=(
             "If true, assembly adds connective transitions between supported sections "
             "(glue only — the prompt forbids any new claim or citation in a transition)."
+        ),
+    )
+
+    # ---- Transcription / shiur pipeline (Phase 6) ---------------------------
+    # Swappable like the generation backend: "whisper" (local, faster-whisper),
+    # "fake" (deterministic/offline; also via CLI --mock), "cloud" (documented swap).
+    transcribe_backend: str = Field(default="whisper")
+    whisper_model: str = Field(
+        default="large-v3",
+        description='faster-whisper model; "medium" trades Hebrew quality for speed.',
+    )
+    whisper_device: str = Field(default="auto", description='"auto" | "cpu" | "cuda".')
+    whisper_compute_type: str = Field(
+        default="float16", description='CTranslate2 compute type; CPU falls back to int8.'
+    )
+    transcribe_lang: str = Field(default="he", description="Default ASR language code.")
+    transcribe_diarize: bool = Field(
+        default=False, description="Label speakers (shiur Q&A); wired in a later prompt."
+    )
+    audio_dir: str = Field(default="data/audio", description="Where stored recordings live.")
+    shiur_chunk_chars: int = Field(
+        default=800,
+        description=(
+            "Target max characters per shiur chunk on approval: consecutive transcript "
+            "segments are packed up to this budget (chabad_chunk_chars-style) so retrieval "
+            "units are coherent, not per-utterance. 0 = one chunk for the whole transcript."
         ),
     )
 

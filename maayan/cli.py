@@ -61,9 +61,19 @@ def _cfg() -> Settings:
     settings = get_settings()
     if _MOCK:
         settings = settings.model_copy(
-            update={"qdrant_url": _MOCK_QDRANT_PATH, "embed_backend": "hashing"}
+            update={
+                "qdrant_url": _MOCK_QDRANT_PATH,
+                "embed_backend": "hashing",
+                "transcribe_backend": "fake",
+            }
         )
     return settings
+
+
+def _fmt_ts(seconds: float) -> str:
+    """Seconds → MM:SS (for transcript segment timestamps)."""
+    total = int(seconds)
+    return f"{total // 60:02d}:{total % 60:02d}"
 
 
 def require_qdrant(settings: Settings) -> None:
@@ -1014,12 +1024,49 @@ def stats() -> None:
 
 
 @app.command()
+def transcribe(
+    audio_path: str = typer.Argument(..., help="Path to an audio file (a shiur recording)."),
+    lang: str = typer.Option(None, "--lang", help="ASR language code (default from config)."),
+) -> None:
+    """Store + transcribe a recording into timestamped segments (the shiur pipeline spine).
+
+    Idempotent by content hash. The transcript is printed, not yet ingested — review
+    and approval into source="shiur" corpus come in later prompts. Use `--mock` (or
+    TRANSCRIBE_BACKEND=fake) to try the flow offline without downloading Whisper.
+    """
+    from pathlib import Path
+
+    from maayan.audio.store import AudioStore
+    from maayan.transcribe.factory import build_transcriber
+
+    settings = _cfg()
+    transcriber = build_transcriber(settings)
+    used_lang = lang or settings.transcribe_lang
+    typer.echo(f"Transcriber: {settings.transcribe_backend} (lang={used_lang})")
+
+    with AudioStore(settings.db_path) as store:
+        asset = store.store_file(audio_path, owner="cli", audio_dir=settings.audio_dir)
+    meta = f", {asset.duration_s:.1f}s @ {asset.sample_rate}Hz" if asset.duration_s else ""
+    typer.echo(f"Stored audio {asset.id} ({asset.filename}){meta}")
+
+    transcript = transcriber.transcribe(Path(asset.path), lang=lang)
+    transcript = transcript.model_copy(update={"audio_id": asset.id})
+    typer.echo(
+        f"\nTranscript {transcript.id} — {transcript.backend}/{transcript.model}, "
+        f"{transcript.lang}, {len(transcript.segments)} segment(s):\n"
+    )
+    for seg in transcript.segments:
+        typer.echo(f"  [{_fmt_ts(seg.start_s)}–{_fmt_ts(seg.end_s)}] {seg.display_text}")
+
+
+@app.command()
 def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
     import uvicorn
 
     from maayan.capture.factory import build_capture_service
     from maayan.compose.factory import build_composition_service
+    from maayan.corpus.store import ChunkStore
     from maayan.develop.factory import build_development_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
@@ -1029,6 +1076,7 @@ def ui() -> None:
     from maayan.retrieve.factory import build_retriever
     from maayan.stats.factory import build_stats_service
     from maayan.threads.factory import build_thread_service
+    from maayan.transcribe.factory import build_transcription_service
     from maayan.ui.app import create_app
     from maayan.users.factory import build_user_service
 
@@ -1045,6 +1093,8 @@ def ui() -> None:
     retraction = build_retraction_service(settings, embedder=embedder)
     stats = build_stats_service(settings)
     compose_service = build_composition_service(settings, embedder=embedder)
+    transcription = build_transcription_service(settings, terms=terms, embedder=embedder)
+    chunks_store = ChunkStore(settings.db_path)  # read-only reader/library browsing
     users = build_user_service(settings)
     if settings.auth_enabled:
         seeded = users.ensure_seed_admin()
@@ -1054,6 +1104,8 @@ def ui() -> None:
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
         users=users,
+        transcription=transcription,
+        chunks=chunks_store,
         context_turns=settings.thread_context_turns,
         auth_enabled=settings.auth_enabled,
         session_cookie_name=settings.session_cookie_name,

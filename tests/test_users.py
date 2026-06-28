@@ -246,3 +246,14 @@ def test_auth_disabled_is_no_regression(tmp_path: Path) -> None:
     assert me.status_code == 200
     assert me.json() == {"auth_enabled": False, "user": None}
     assert client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_pwa_assets_bypass_auth_wall(tmp_path: Path) -> None:
+    # The PWA shell must load on the login page (and let the SW update) without a
+    # session — it carries no user data. Everything else still requires login.
+    app, _ = _app(tmp_path)  # auth_enabled=True
+    client = TestClient(app)  # type: ignore[arg-type]
+    for path in ("/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png"):
+        assert client.get(path, follow_redirects=False).status_code == 200, path
+    # A protected page still redirects to login.
+    assert client.get("/", follow_redirects=False).status_code == 303

@@ -214,3 +214,68 @@ def test_get_session() -> None:
     assert r.status_code == 200
     assert r.json()["id"] == "sess-1"
     assert client.get("/session/missing").status_code == 404
+
+
+# -- PWA shell (Prompt 23) ---------------------------------------------------
+def test_manifest_served() -> None:
+    client, _, _ = _client()
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/manifest+json")
+    body = r.json()
+    assert body["name"].startswith("maayan")
+    assert any(icon["sizes"] == "512x512" for icon in body["icons"])
+
+
+def test_service_worker_served() -> None:
+    client, _, _ = _client()
+    r = client.get("/sw.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
+    # Served from the root so its scope can cover the whole app.
+    assert r.headers["service-worker-allowed"] == "/"
+    assert "addEventListener" in r.text
+
+
+def test_icons_served() -> None:
+    client, _, _ = _client()
+    for path in ("/icon-192.png", "/icon-512.png"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers["content-type"] == "image/png"
+
+
+def test_index_references_pwa_and_mobile_chrome() -> None:
+    client, _, _ = _client()
+    html = client.get("/").text
+    assert "/manifest.webmanifest" in html
+    assert "/sw.js" in html
+    assert 'id="tabbar"' in html  # the bottom mobile nav
+    assert 'id="menuBtn"' in html  # the drawer hamburger
+
+
+def test_voice_dictation_controls_present() -> None:
+    # Prompt 24 is browser-API UI; we assert the affordances + fallback branch ship,
+    # not that real speech recognition runs.
+    client, _, _ = _client()
+    html = client.get("/").text
+    # A mic button next to each static capture field, plus the language toggle.
+    for el_id in ('id="micQ"', 'id="micSeed"', 'id="micTerm"', 'id="voiceLang"'):
+        assert el_id in html, el_id
+    # The dynamic connection field gets a mic via the reusable builder.
+    assert "mkMic" in html
+    # Web Speech happy path + graceful MediaRecorder fallback both exist.
+    assert "webkitSpeechRecognition" in html
+    assert "MediaRecorder" in html
+    # The Prompt 26 server path is stubbed honestly, not half-wired.
+    assert "server transcription" in html
+
+
+def test_reading_experience_controls_present() -> None:
+    # Prompt 29 reader/library + reading modes ship in the page (browser-driven UI).
+    client, _, _ = _client()
+    html = client.get("/").text
+    assert "openReader" in html        # source-in-context reader
+    assert "openLibrary" in html       # sefer browser (Library tab)
+    assert "maayan.readmode" in html   # reading mode persisted in localStorage
+    assert "cycleReadMode" in html

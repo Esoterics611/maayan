@@ -42,5 +42,6 @@ def build_retriever(
         expert_boost=settings.expert_boost,
         derived_boost=settings.derived_boost,
         term_boost=settings.term_boost,
+        shiur_boost=settings.shiur_boost,
         hybrid=True if hybrid is None else hybrid,
     )

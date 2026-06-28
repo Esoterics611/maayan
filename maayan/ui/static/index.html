@@ -2,16 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>maayan · מעיין</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#6b4f2a" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="maayan" />
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
             --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
-            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; }
+            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; --shiur:#b5651d; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
            font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-    header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel); }
+    header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel);
+             display:flex; align-items:center; gap:12px; }
     h1 { margin:0; font-size:19px; font-weight:650; }
     h1 small { color:var(--muted); font-weight:400; margin-left:8px; }
     .layout { display:flex; height:calc(100vh - 56px); }
@@ -44,12 +51,13 @@
     .badge.expert { color:var(--expert); border-color:var(--expert); }
     .badge.derived { color:var(--derived); border-color:var(--derived); }
     .badge.term { color:var(--term); border-color:var(--term); }
+    .badge.shiur { color:var(--shiur); border-color:var(--shiur); }
     .badge.proposed { color:var(--seed); border-color:var(--seed); }
     .badge.approved { color:var(--expert); border-color:var(--expert); }
     .badge.rejected { color:#9a3b2f; border-color:#9a3b2f; }
     .src { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; font-size:14px; }
     .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
-    .src.term { border-color:var(--term); }
+    .src.term { border-color:var(--term); } .src.shiur { border-color:var(--shiur); }
     .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
     .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
     .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
@@ -58,10 +66,76 @@
     label.field { display:block; margin:8px 0 3px; font-size:13px; color:var(--muted); }
     .hidden { display:none; }
     .empty { color:var(--muted); text-align:center; margin-top:40px; }
+
+    /* --- mobile chrome (hidden on desktop) --- */
+    .menu-btn { display:none; background:transparent; color:var(--ink); font-size:20px;
+                padding:4px 8px; border:1px solid var(--line); border-radius:8px; }
+    .scrim { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:39; }
+    .tabbar { display:none; position:fixed; left:0; right:0; bottom:0; z-index:30;
+              border-top:1px solid var(--line); background:var(--panel);
+              padding-bottom:env(safe-area-inset-bottom); }
+    .tabbar button { flex:1; background:transparent; color:var(--muted); font-weight:600;
+                     border-radius:0; padding:11px 4px; font-size:13px; }
+    .tabbar button.active { color:var(--accent); }
+    .toast { position:fixed; left:50%; bottom:74px; transform:translateX(-50%);
+             background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px;
+             font-size:14px; max-width:88%; text-align:center; z-index:60; opacity:0;
+             transition:opacity .2s; pointer-events:none; }
+    .toast.show { opacity:.96; }
+
+    /* --- voice dictation mic --- */
+    .mic { background:#efe9dd; color:var(--accent); padding:7px 10px; font-size:15px; }
+    .mic.recording { background:#9a3b2f; color:#fff; animation:micpulse 1.1s infinite; }
+    button.recording { background:#9a3b2f; color:#fff; }
+    @keyframes micpulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+    .field.with-mic { display:flex; justify-content:space-between; align-items:center; }
+    #voiceLang { min-width:34px; text-align:center; }
+
+    /* --- reader / library overlays + reading modes (Prompt 29) --- */
+    .srcref { cursor:pointer; } .srcref:hover { text-decoration:underline; }
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:70; display:flex; }
+    .reader { background:var(--panel); color:var(--ink); margin:auto; width:min(820px,94vw);
+              max-height:92vh; overflow:auto; border-radius:12px; box-shadow:0 12px 48px rgba(0,0,0,.25); }
+    .reader-head { position:sticky; top:0; background:var(--panel); border-bottom:1px solid var(--line);
+                   padding:11px 16px; display:flex; align-items:center; gap:8px; z-index:1; }
+    .reader-head .title { font-weight:650; flex:1; min-width:0; }
+    .reader-body { padding:18px 22px;
+      font-family:"Frank Ruhl Libre","Frank Ruehl CLM","David Libre",David,"Times New Roman",serif;
+      font-size:calc(18px * var(--read-scale,1)); line-height:2; }
+    .reader-seg { padding:6px 4px; margin:2px 0; border-radius:6px; }
+    .reader-seg.cited { background:rgba(184,134,11,.16); box-shadow:inset 3px 0 0 var(--cited); padding-left:12px; }
+    .reader-seg .seg-ref { font-family:-apple-system,Segoe UI,sans-serif; font-size:12px; color:var(--muted); margin-bottom:2px; }
+    .lib-body { padding:14px 16px; }
+    .lib-item { padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin:6px 0; cursor:pointer; }
+    .lib-item:hover { background:var(--bg); }
+    body[data-read-mode="sepia"] .reader, body[data-read-mode="sepia"] .reader-head { background:#f4ecd8; color:#43381f; }
+    body[data-read-mode="sepia"] .reader-body { color:#43381f; }
+    body[data-read-mode="dark"] .reader, body[data-read-mode="dark"] .reader-head { background:#201e1a; color:#e9e3d7; border-color:#3a352d; }
+    body[data-read-mode="dark"] .reader-body { color:#e9e3d7; }
+    body[data-read-mode="dark"] .reader-seg .seg-ref { color:#a59b88; }
+
+    @media (max-width: 720px) {
+      h1 { font-size:17px; } h1 small { display:none; }
+      .menu-btn { display:inline-flex; }
+      .layout { height:calc(100vh - 56px - 54px); height:calc(100dvh - 56px - 54px); }
+      aside { position:fixed; top:56px; bottom:0; left:0; width:84%; max-width:300px; z-index:40;
+              transform:translateX(-100%); transition:transform .2s ease;
+              box-shadow:2px 0 24px rgba(0,0,0,.18); }
+      body.drawer-open aside { transform:translateX(0); }
+      body.drawer-open .scrim { display:block; }
+      .turns { padding:14px; }
+      .composer { padding:12px 14px; }
+      .composer .row { flex-wrap:wrap; }
+      .composer .row #q { flex:1 1 100%; }
+      .tabbar { display:flex; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1></header>
+  <header>
+    <button class="menu-btn" id="menuBtn" aria-label="Topics & lexicon">☰</button>
+    <h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1>
+  </header>
   <div class="layout">
     <aside>
       <div class="row" style="margin-bottom:10px">
@@ -89,10 +163,13 @@
         <div id="answerSources"></div>
         <div class="row">
           <input id="q" placeholder="Ask within this topic…  e.g. מהי נפש הבהמית" dir="auto" />
+          <button id="micQ" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
+          <button id="voiceLang" type="button" class="ghost" title="Voice language (tap to switch)">עב</button>
           <button id="askBtn">Ask</button>
           <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
           <button id="termToggle" class="secondary" title="Define a term / Holy Name">Term ▾</button>
           <button id="composeToggle" class="secondary" title="Compose a grounded document">Compose ▾</button>
+          <button id="shiurToggle" class="secondary" title="Transcribe a shiur recording">Shiur ▾</button>
         </div>
         <div class="hint">Answers come only from retrieved sources, with citations; follow-ups use the thread as context but never bypass the refusal gate.</div>
 
@@ -101,7 +178,8 @@
             <div><label class="field">Author <span class="hint">(required)</span></label><input id="author" placeholder="Your name" /></div>
             <div><label class="field">Kind</label><select id="kind"></select></div>
           </div>
-          <label class="field">Seed knowledge (often from outside the corpus)</label>
+          <label class="field with-mic"><span>Seed knowledge (often from outside the corpus)</span>
+            <button id="micSeed" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button></label>
           <textarea id="seedBody" rows="2" dir="auto" placeholder="e.g. אהבה בתענוגים היא גילוי שם ע&quot;ב…"></textarea>
           <label class="field">Directive — what should the model develop? <span class="hint">(kept out of the embedded text)</span></label>
           <input id="directive" dir="auto" placeholder="e.g. find where this is hinted at in Tanya" />
@@ -127,7 +205,8 @@
           <input id="termSurfaces" dir="auto" placeholder='e.g. ע"ב, עב' />
           <label class="field">Canonical (display form)</label>
           <input id="termCanonical" dir="auto" placeholder='e.g. ע"ב (Name of 72 / Ab)' />
-          <label class="field">Definition <span class="hint">(the knowledge — what gets embedded)</span></label>
+          <label class="field with-mic"><span>Definition <span class="hint">(the knowledge — what gets embedded)</span></span>
+            <button id="micTerm" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button></label>
           <textarea id="termDef" rows="2" dir="auto" placeholder='e.g. the Ab expansion of Havayah, gematria 72'></textarea>
           <div class="row">
             <div><label class="field">Related terms <span class="hint">(comma-separated)</span></label><input id="termRelated" dir="auto" placeholder='ס"ג, מ"ה, ב"ן' /></div>
@@ -157,9 +236,28 @@
           <div class="actions"><button id="composeBtn">Propose outline</button><span id="composeStatus" class="hint"></span></div>
           <div id="composeDoc"></div>
         </div>
+
+        <div id="shiurBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
+          <div class="hint" style="margin-bottom:6px">Transcribe a shiur: record in-app or upload a file. It's stored and transcribed in the background (keep working — the job is polled), then shown for review. Nothing enters the Knowledge base until you approve it (next update).</div>
+          <div class="row">
+            <button id="shiurRec" type="button" class="secondary" title="Record a shiur">● Record</button>
+            <label class="secondary" style="flex:0 0 auto; padding:9px 15px; border-radius:8px; cursor:pointer" title="Upload an audio file">Upload<input id="shiurFile" type="file" accept="audio/*" style="display:none" /></label>
+            <span id="shiurStatus" class="hint" style="flex:1"></span>
+          </div>
+          <div id="shiurTranscript" style="margin-top:8px"></div>
+        </div>
       </div>
     </main>
   </div>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="toast" id="toast"></div>
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="ask">Ask</button>
+    <button data-tab="threads">Threads</button>
+    <button data-tab="capture">Capture</button>
+    <button data-tab="library">Library</button>
+  </nav>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -220,6 +318,7 @@
 
     async function openThread(id) {
       active = id; $('answerSources').innerHTML = '';
+      document.body.classList.remove('drawer-open');  // close the mobile drawer on pick
       const d = await j(await fetch('/threads/' + id));
       [...document.querySelectorAll('.thread-item')].forEach(el =>
         el.classList.toggle('active', el.dataset.id === id));
@@ -255,14 +354,19 @@
       const srcs = sources.map((s, i) => {
         const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
                     : s.source === 'derived' ? '<span class="badge derived">derived</span>'
-                    : s.source === 'term' ? '<span class="badge term">term</span>' : '';
-        // Only layered knowledge (expert/derived/term) is retractable; printed text never is.
-        const retract = ['expert', 'derived', 'term'].includes(s.source)
+                    : s.source === 'term' ? '<span class="badge term">term</span>'
+                    : s.source === 'shiur' ? '<span class="badge shiur">shiur</span>' : '';
+        // A cited shiur source can play from its moment in the recording.
+        const play = (s.source === 'shiur' && s.audio_id)
+          ? `<button class="ghost" title="Play from here"
+                onclick="playCitation('${esc(s.audio_id)}', ${s.start_s || 0})">▶ ${fmtTs(s.start_s || 0)}</button>` : '';
+        // Only layered knowledge (expert/derived/term/shiur) is retractable; printed text never is.
+        const retract = ['expert', 'derived', 'term', 'shiur'].includes(s.source)
           ? `<button class="ghost" style="color:#a33;margin-left:auto"
                 title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
-            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${retract}</div>
+            <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
@@ -280,6 +384,8 @@
         <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}${connect}</div>`;
       const ca = $('connectAuthor');
       if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
+      const cb = $('connectBody');                       // dictation on the connection insight
+      if (cb) cb.insertAdjacentElement('afterend', mkMic(cb));
     }
 
     async function connectSelected() {
@@ -480,6 +586,355 @@
     $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
     $('composeAuthor').value = savedAuthor;
     loadKinds(); loadThreads(); loadTerms(); loadStats();
+
+    // -- PWA: register the service worker (no-op where unsupported) ----------
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () =>
+        navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+
+    // -- mobile chrome: slide-over drawer + bottom tab bar ------------------
+    let toastTimer = null;
+    function toast(msg) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+    }
+    window.toast = toast;
+    const closeDrawer = () => document.body.classList.remove('drawer-open');
+    $('menuBtn').onclick = () => document.body.classList.toggle('drawer-open');
+    $('scrim').onclick = closeDrawer;
+    [...document.querySelectorAll('#tabbar button')].forEach(btn => btn.onclick = () => {
+      const tab = btn.dataset.tab;
+      if (tab === 'threads') { document.body.classList.toggle('drawer-open'); return; }
+      closeDrawer();
+      if (tab === 'ask') {
+        $('q').scrollIntoView({ block: 'center' }); $('q').focus();
+      } else if (tab === 'capture') {
+        $('seedBox').classList.remove('hidden');
+        $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else if (tab === 'library') {
+        openLibrary();
+      }
+    });
+
+    // -- Voice dictation: Web Speech where available, MediaRecorder fallback --
+    // Typing nikkud/gershayim on a phone is the adoption blocker; speak instead.
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const VOICE_LANG_KEY = 'maayan.voicelang';
+    const voiceLang = () => localStorage.getItem(VOICE_LANG_KEY) || 'he-IL';
+
+    function setupMic(btn, target) {
+      if (!btn || !target) return;
+      if (SpeechRec) {
+        let rec = null, listening = false;
+        btn.onclick = () => {
+          if (listening) { if (rec) rec.stop(); return; }
+          rec = new SpeechRec();
+          rec.lang = voiceLang(); rec.interimResults = true; rec.continuous = false;
+          const base = target.value ? target.value + ' ' : '';
+          rec.onresult = (e) => {
+            let txt = ''; for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+            target.value = base + txt;
+          };
+          rec.onerror = () => { listening = false; btn.classList.remove('recording'); };
+          rec.onend = () => { listening = false; btn.classList.remove('recording'); target.focus(); };
+          listening = true; btn.classList.add('recording'); rec.start();
+        };
+      } else {
+        setupServerMic(btn, target);  // graceful fallback (no Web Speech, e.g. iOS Safari)
+      }
+    }
+
+    function setupServerMic(btn, target) {
+      let recorder = null, chunks = [], recording = false;
+      btn.onclick = async () => {
+        if (recording) { if (recorder) recorder.stop(); return; }
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+          toast('Voice typing needs a newer browser — server transcription arrives in Prompt 26.');
+          return;
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recorder = new MediaRecorder(stream); chunks = [];
+          recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+          recorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            recording = false; btn.classList.remove('recording');
+            uploadForTranscription(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }), target);
+          };
+          recording = true; btn.classList.add('recording'); recorder.start();
+        } catch (err) { toast('Microphone permission is needed for voice input.'); }
+      };
+    }
+
+    // Server transcription for the dictation fallback: upload → job → fill the field.
+    async function uploadForTranscription(blob, target) {
+      toast('Transcribing…');
+      const tr = await transcribeBlob(blob, 'dictation.webm');
+      if (!tr) { toast('Transcription failed.'); return; }
+      const text = tr.segments.map(s => (s.edited_text != null ? s.edited_text : s.text)).join(' ');
+      target.value = (target.value ? target.value + ' ' : '') + text;
+      target.focus();
+    }
+
+    function mkMic(target) {  // build + wire a mic button for a dynamically-rendered field
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'mic'; b.textContent = '🎤';
+      b.title = 'Dictate (voice)'; b.setAttribute('aria-label', 'Dictate');
+      setupMic(b, target); return b;
+    }
+
+    function updateVoiceLangBtn() {
+      const el = $('voiceLang'); if (!el) return;
+      el.textContent = voiceLang() === 'he-IL' ? 'עב' : 'EN';
+      el.title = 'Voice language: ' + voiceLang() + ' — tap to switch';
+    }
+    if ($('voiceLang')) $('voiceLang').onclick = () => {
+      localStorage.setItem(VOICE_LANG_KEY, voiceLang() === 'he-IL' ? 'en-US' : 'he-IL');
+      updateVoiceLangBtn();
+    };
+    updateVoiceLangBtn();
+    setupMic($('micQ'), $('q'));
+    setupMic($('micSeed'), $('seedBody'));
+    setupMic($('micTerm'), $('termDef'));
+
+    // -- Shiur transcription: upload/record → poll the job → show transcript --
+    const fmtTs = (sec) => { sec = Math.floor(sec || 0);
+      return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0'); };
+
+    async function transcribeBlob(blob, filename, onStatus) {
+      const fd = new FormData();
+      fd.append('file', blob, filename || 'recording.webm');
+      let r = await fetch('/api/audio', { method: 'POST', body: fd });
+      if (!r.ok) { if (onStatus) onStatus({ status: 'error', error: 'upload failed' }); return null; }
+      const asset = await j(r);
+      r = await fetch('/api/audio/' + asset.id + '/transcribe', { method: 'POST' });
+      if (!r.ok) { if (onStatus) onStatus({ status: 'error', error: 'could not start' }); return null; }
+      let job = await j(r);
+      while (job.status === 'queued' || job.status === 'running') {
+        if (onStatus) onStatus(job);
+        await new Promise(res => setTimeout(res, 700));   // browser-side poll; no server-side wait
+        job = await j(await fetch('/api/jobs/' + job.id));
+      }
+      if (onStatus) onStatus(job);
+      if (job.status !== 'done' || !job.transcript_id) return null;
+      return await j(await fetch('/api/transcripts/' + job.transcript_id));
+    }
+    window.transcribeBlob = transcribeBlob;
+
+    let currentTr = null;   // the transcript under review (with lexicon suggestions)
+
+    function renderTranscript(tr) {
+      const box = $('shiurTranscript');
+      if (!tr) { box.innerHTML = '<div class="hint refused">Transcription failed.</div>'; return; }
+      currentTr = tr;
+      const audio = tr.audio_id
+        ? `<audio id="shiurAudio" controls preload="none" src="/api/audio/${esc(tr.audio_id)}/file" style="width:100%; margin-bottom:8px"></audio>`
+        : '';
+      const reviewed = tr.status === 'reviewed';
+      const rows = tr.segments.map((s, i) => {
+        const text = (s.edited_text != null ? s.edited_text : s.text);
+        const chips = (s.suggestions || []).map((sg, k) =>
+          `<button class="ghost" title="Use the lexicon form" onclick="acceptSuggestion(${i},${k})">`
+          + `${esc(sg.surface)} → ${esc(sg.canonical)}</button>`).join(' ');
+        return `<div class="src">
+          <div class="ref">
+            <button class="ghost" onclick="seekAudio(${s.start_s})" title="Play from here">▶ ${fmtTs(s.start_s)}</button>
+            <span class="hint">–${fmtTs(s.end_s)}</span>
+          </div>
+          <textarea id="seg-${i}" rows="2" dir="auto" onchange="saveSegment(${i})">${esc(text)}</textarea>
+          <div class="row" style="margin-top:4px">
+            <input id="spk-${i}" placeholder="speaker (optional)" value="${esc(s.speaker || '')}" onchange="saveSegment(${i})" />
+            <button class="ghost" onclick="defineTermFromSegment()" title="Define selected text as a term">Define term</button>
+          </div>
+          ${chips ? `<div style="margin-top:4px">${chips}</div>` : ''}
+        </div>`;
+      }).join('');
+      const approved = tr.status === 'approved';
+      const footer = `<div class="actions" style="margin-top:8px">
+        <button onclick="markReviewed()" ${reviewed || approved ? 'disabled' : ''}>${reviewed || approved ? 'Reviewed ✓' : 'Mark reviewed'}</button>
+        <button onclick="approveTranscript()" ${reviewed ? '' : 'disabled'} title="Add to the Knowledge base as a shiur source">Approve → corpus</button>
+        <button class="secondary" onclick="rejectTranscript()" ${approved ? 'disabled' : ''}>Reject</button>
+        <span class="hint">status: ${esc(tr.status)}</span>
+      </div>`;
+      box.innerHTML = `<div class="hint">Transcript (${esc(tr.lang)} · ${esc(tr.backend)}) — edit text, accept lexicon fixes, then mark reviewed.</div>`
+        + audio + rows + footer;
+    }
+
+    function seekAudio(t) { const a = $('shiurAudio'); if (a) { a.currentTime = t || 0; a.play().catch(() => {}); } }
+    async function saveSegment(idx, rerender) {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/segments/' + idx, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edited_text: $('seg-' + idx).value, speaker: $('spk-' + idx).value || null }) });
+      if (!r.ok) { toast('Could not save segment.'); return; }
+      currentTr = await j(r);
+      if (rerender) renderTranscript(currentTr);   // reflect revalidated suggestions
+    }
+    function acceptSuggestion(i, k) {
+      const seg = currentTr && currentTr.segments[i];
+      const sg = seg && seg.suggestions && seg.suggestions[k];
+      if (!sg) return;
+      const ta = $('seg-' + i);
+      ta.value = ta.value.replace(sg.surface, sg.canonical);
+      saveSegment(i, true);
+    }
+    function defineTermFromSegment() {
+      const sel = (window.getSelection && window.getSelection().toString().trim()) || '';
+      if (sel) { if (!$('termSurfaces').value) $('termSurfaces').value = sel;
+        if (!$('termCanonical').value) $('termCanonical').value = sel; }
+      $('termBox').classList.remove('hidden');
+      $('termBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    async function markReviewed() {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/review', { method: 'POST' });
+      if (r.ok) { renderTranscript(await j(r)); toast('Marked reviewed ✓'); }
+      else toast('Could not mark reviewed.');
+    }
+    async function approveTranscript() {
+      if (!currentTr) return;
+      const author = localStorage.getItem(AUTHOR_KEY) || '';
+      if (!author) { toast('Set your name (author) first — e.g. in the Seed panel.'); return; }
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author }) });
+      if (r.ok) {
+        const d = await j(r);
+        toast('Approved ✓ — added ' + d.chunk_count + ' shiur chunk(s) to the Knowledge base.');
+        currentTr = { ...currentTr, status: 'approved' }; renderTranscript(currentTr); loadStats();
+      } else { const e = await j(r); toast('Could not approve: ' + (e.detail || r.status)); }
+    }
+    async function rejectTranscript() {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/reject', { method: 'POST' });
+      if (r.ok) { renderTranscript(await j(r)); toast('Rejected.'); }
+      else toast('Could not reject.');
+    }
+    function playCitation(audioId, startS) {
+      let a = $('citeAudio');
+      if (!a) { a = document.createElement('audio'); a.id = 'citeAudio'; a.style.display = 'none'; document.body.appendChild(a); }
+      const src = '/api/audio/' + audioId + '/file';
+      if (a.getAttribute('src') !== src) { a.setAttribute('src', src); a.load(); }
+      const go = () => { a.currentTime = startS || 0; a.play().catch(() => {}); };
+      if (a.readyState >= 1) go(); else a.addEventListener('loadedmetadata', go, { once: true });
+    }
+    window.seekAudio = seekAudio; window.saveSegment = saveSegment;
+    window.acceptSuggestion = acceptSuggestion; window.defineTermFromSegment = defineTermFromSegment;
+    window.markReviewed = markReviewed; window.approveTranscript = approveTranscript;
+    window.rejectTranscript = rejectTranscript; window.playCitation = playCitation;
+
+    function shiurStatus(job) {
+      const m = { queued: 'Queued…', running: 'Transcribing…', done: 'Done ✓',
+        error: 'Error: ' + (job.error || 'failed') };
+      $('shiurStatus').textContent = m[job.status] || job.status;
+    }
+
+    async function handleShiurBlob(blob, filename) {
+      $('shiurTranscript').innerHTML = '';
+      renderTranscript(await transcribeBlob(blob, filename, shiurStatus));
+    }
+
+    let shiurRecorder = null, shiurChunks = [], shiurRecording = false;
+    if ($('shiurRec')) $('shiurRec').onclick = async () => {
+      if (shiurRecording) { if (shiurRecorder) shiurRecorder.stop(); return; }
+      if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording needs a newer browser.'); return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        shiurRecorder = new MediaRecorder(stream); shiurChunks = [];
+        shiurRecorder.ondataavailable = (e) => { if (e.data.size) shiurChunks.push(e.data); };
+        shiurRecorder.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          shiurRecording = false;
+          $('shiurRec').textContent = '● Record'; $('shiurRec').classList.remove('recording');
+          handleShiurBlob(new Blob(shiurChunks, { type: shiurRecorder.mimeType || 'audio/webm' }), 'shiur.webm');
+        };
+        shiurRecording = true;
+        $('shiurRec').textContent = '■ Stop'; $('shiurRec').classList.add('recording');
+        shiurRecorder.start();
+      } catch (e) { toast('Microphone permission is needed to record.'); }
+    };
+    if ($('shiurFile')) $('shiurFile').onchange = (e) => {
+      const f = e.target.files && e.target.files[0]; if (f) handleShiurBlob(f, f.name);
+    };
+    if ($('shiurToggle')) $('shiurToggle').onclick = () => $('shiurBox').classList.toggle('hidden');
+
+    // -- Reading experience: modes + source-in-context + sefer browser ------
+    const READ_MODE_KEY = 'maayan.readmode', READ_SCALE_KEY = 'maayan.readscale';
+    const READ_MODES = ['light', 'sepia', 'dark'];
+    const attr = (x) => JSON.stringify(x).replace(/'/g, '&#39;');  // safe in single-quoted attrs
+    function applyReading() {
+      document.body.setAttribute('data-read-mode', localStorage.getItem(READ_MODE_KEY) || 'light');
+      document.documentElement.style.setProperty('--read-scale', localStorage.getItem(READ_SCALE_KEY) || '1');
+    }
+    function cycleReadMode() {
+      const cur = localStorage.getItem(READ_MODE_KEY) || 'light';
+      localStorage.setItem(READ_MODE_KEY, READ_MODES[(READ_MODES.indexOf(cur) + 1) % READ_MODES.length]);
+      applyReading();
+    }
+    function bumpReadScale(d) {
+      let s = parseFloat(localStorage.getItem(READ_SCALE_KEY) || '1') + d;
+      s = Math.max(0.8, Math.min(1.8, s));
+      localStorage.setItem(READ_SCALE_KEY, s.toFixed(2)); applyReading();
+    }
+    applyReading();
+
+    function closeOverlay() { const o = $('overlay'); if (o) o.remove(); }
+    function mkOverlay(inner) {
+      closeOverlay();
+      const o = document.createElement('div'); o.className = 'overlay'; o.id = 'overlay';
+      o.innerHTML = '<div class="reader">' + inner + '</div>';
+      o.addEventListener('click', (e) => { if (e.target === o) closeOverlay(); });
+      document.body.appendChild(o);
+    }
+
+    async function openReader(ref, lang) {
+      let data;
+      const q = '/api/source?ref=' + encodeURIComponent(ref) + (lang ? '&lang=' + encodeURIComponent(lang) : '');
+      try { data = await j(await fetch(q)); }
+      catch (e) { toast('Could not open source.'); return; }
+      if (!data || !data.chunks) { toast('Source not found.'); return; }
+      const segs = data.chunks.map(c =>
+        `<div class="reader-seg ${c.cited ? 'cited' : ''}"${c.ref === ref ? ' id="citedSeg"' : ''}>
+           <div class="seg-ref">${esc(c.ref)}</div><div dir="auto">${esc(c.text)}</div></div>`).join('');
+      mkOverlay(
+        `<div class="reader-head">
+           <span class="title" dir="auto">${esc(data.label)} <span class="hint">${esc(data.book)}</span></span>
+           <button class="ghost" onclick="cycleReadMode()" title="Light / sepia / dark">◑</button>
+           <button class="ghost" onclick="bumpReadScale(-0.1)" title="Smaller">A−</button>
+           <button class="ghost" onclick="bumpReadScale(0.1)" title="Larger">A+</button>
+           <button class="ghost" onclick="closeOverlay()" title="Close">✕</button>
+         </div><div class="reader-body">${segs}</div>`);
+      const c = $('citedSeg'); if (c) c.scrollIntoView({ block: 'center' });
+    }
+
+    async function openLibrary() {
+      document.body.classList.remove('drawer-open');
+      let lib;
+      try { lib = await j(await fetch('/api/library')); } catch (e) { toast('Library unavailable.'); return; }
+      const items = (lib.entries || []).map(e =>
+        `<div class="lib-item" onclick='openBook(${attr(e.book)})'>
+           <b dir="auto">${esc(e.book)}</b> <span class="badge ${esc(e.source)}">${esc(e.source)}</span>
+           <span class="hint">· ${e.count}</span></div>`).join('') || '<div class="hint">Nothing indexed yet.</div>';
+      mkOverlay(`<div class="reader-head"><span class="title">Library</span>
+         <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+         <div class="lib-body">${items}</div>`);
+    }
+    async function openBook(book) {
+      let data;
+      try { data = await j(await fetch('/api/library/sections?book=' + encodeURIComponent(book))); }
+      catch (e) { toast('Could not open book.'); return; }
+      const items = (data.sections || []).map(s =>
+        `<div class="lib-item" dir="auto" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})'>${esc(s.label)}</div>`).join('')
+        || '<div class="hint">No sections.</div>';
+      mkOverlay(`<div class="reader-head">
+           <button class="ghost" onclick="openLibrary()" title="Back">←</button>
+           <span class="title" dir="auto">${esc(book)}</span>
+           <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+         <div class="lib-body">${items}</div>`);
+    }
+    window.openReader = openReader; window.openLibrary = openLibrary; window.openBook = openBook;
+    window.cycleReadMode = cycleReadMode; window.bumpReadScale = bumpReadScale; window.closeOverlay = closeOverlay;
   </script>
   <script>
   // --- auth chrome: only active when the server has AUTH_ENABLED=true ---------

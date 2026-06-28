@@ -11,33 +11,42 @@ seed → develop → approve/reject — each a thin route over a service.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from maayan.audio.models import AudioAsset
 from maayan.capture.convert import detect_lang
 from maayan.capture.models import Annotation
 from maayan.capture.service import CaptureService
 from maayan.compose.models import Brief, Composition, SourceScope
 from maayan.compose.service import Composing
+from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.generate.rag import Answer, RAGService
 from maayan.lexicon.models import TermType
 from maayan.lexicon.service import TermService
 from maayan.retract.service import Retracting
+from maayan.retrieve.models import SearchResult
 from maayan.stats.models import Stats
 from maayan.stats.service import Statsing
 from maayan.threads.flow import ask_in_thread
 from maayan.threads.models import Thread, ThreadTurn
 from maayan.threads.service import ThreadService
+from maayan.transcribe.models import Transcript, TranscriptionJob
+from maayan.transcribe.service import TranscriptionService
 from maayan.ui.models import (
     AnnotateRequest,
     AnnotateResponse,
     AnnotationOut,
+    ApproveTranscriptRequest,
+    ApproveTranscriptResponse,
     AskInThreadRequest,
     AskRequest,
     AskResponse,
@@ -48,28 +57,45 @@ from maayan.ui.models import (
     DevelopmentResponse,
     DevelopRequest,
     ExportResponse,
+    LibraryEntry,
+    LibraryResponse,
     LoginRequest,
     MeResponse,
     PromoteRequest,
     RetractRequest,
     RetractResponse,
+    SectionEntry,
     SectionOut,
+    SectionsResponse,
     SeedRequest,
     SeedResponse,
     SessionResponse,
     SetActiveRequest,
     SetPasswordRequest,
+    SourceContextChunk,
+    SourceContextResponse,
     SourceOut,
     TermRequest,
     TermResponse,
     ThreadDetailResponse,
     ThreadOut,
     TurnOut,
+    UpdateSegmentRequest,
 )
 from maayan.users.models import User, UserOut
 from maayan.users.service import UserService
 
 _STATIC = Path(__file__).parent / "static"
+
+
+def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
+    meta = s.payload.get("metadata") or {} if isinstance(s.payload, dict) else {}
+    is_shiur = s.source == "shiur"
+    return SourceOut(
+        ref=s.ref, text=s.text, lang=s.lang, source=s.source, score=s.score, cited=cited,
+        audio_id=meta.get("audio_id") if is_shiur else None,
+        start_s=meta.get("start_s") if is_shiur else None,
+    )
 
 
 def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
@@ -80,13 +106,7 @@ def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
         answer=answer.text,
         grounded=answer.grounded,
         cited_refs=answer.cited_refs,
-        sources=[
-            SourceOut(
-                ref=s.ref, text=s.text, lang=s.lang, source=s.source,
-                score=s.score, cited=s.ref in cited,
-            )
-            for s in answer.sources
-        ],
+        sources=[_source_out(s, cited=s.ref in cited) for s in answer.sources],
     )
 
 
@@ -155,6 +175,8 @@ def create_app(
     compose: Composing,
     *,
     users: UserService | None = None,
+    transcription: TranscriptionService | None = None,
+    chunks: ChunkStore | None = None,
     context_turns: int = 6,
     auth_enabled: bool = False,
     session_cookie_name: str = "maayan_session",
@@ -170,6 +192,16 @@ def create_app(
         if users is None:  # auth wiring absent (auth disabled) — these routes are inert
             raise HTTPException(status_code=503, detail="auth not configured")
         return users
+
+    def _transcription() -> TranscriptionService:
+        if transcription is None:  # transcription wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="transcription not configured")
+        return transcription
+
+    def _chunks_store() -> ChunkStore:
+        if chunks is None:  # reader/library wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="library not configured")
+        return chunks
 
     def _require_admin(request: Request) -> User:
         user: User | None = getattr(request.state, "user", None)
@@ -187,7 +219,12 @@ def create_app(
         if not auth_enabled or users is None:
             return await call_next(request)
         path = request.url.path
-        if path in {"/login", "/api/login", "/healthz"}:
+        # PWA shell assets carry no user data and must load on the login page (and
+        # let the service worker update without a session), so they bypass the wall.
+        if path in {
+            "/login", "/api/login", "/healthz",
+            "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png",
+        }:
             return await call_next(request)
         user = users.current_user(request.cookies.get(session_cookie_name))
         if user is None:
@@ -204,6 +241,30 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    # -- PWA shell (installable, offline-tolerant reads) ---------------------
+    @app.get("/manifest.webmanifest")
+    def manifest() -> FileResponse:
+        return FileResponse(
+            _STATIC / "manifest.webmanifest", media_type="application/manifest+json"
+        )
+
+    @app.get("/sw.js")
+    def service_worker() -> FileResponse:
+        # Served from the app root so its scope covers the whole site.
+        return FileResponse(
+            _STATIC / "sw.js",
+            media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/"},
+        )
+
+    @app.get("/icon-192.png")
+    def icon_192() -> FileResponse:
+        return FileResponse(_STATIC / "icon-192.png", media_type="image/png")
+
+    @app.get("/icon-512.png")
+    def icon_512() -> FileResponse:
+        return FileResponse(_STATIC / "icon-512.png", media_type="image/png")
 
     # -- auth / users -------------------------------------------------------
     @app.get("/login")
@@ -490,6 +551,141 @@ def create_app(
         return AnnotateResponse(
             annotation_id=ann.id, session_id=ann.session_id, kind=ann.kind,
             author=ann.author, linked_refs=ann.linked_refs, opens_aspect=ann.opens_aspect,
+        )
+
+    # -- shiur transcription (audio → async job → transcript) ---------------
+    @app.post("/api/audio")
+    async def upload_audio(request: Request, file: UploadFile = File(...)) -> AudioAsset:
+        svc = _transcription()
+        user: User | None = getattr(request.state, "user", None)
+        owner = user.username if user else "local"  # uploads owned by the logged-in user
+        suffix = Path(file.filename or "").suffix or ".webm"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        try:
+            return svc.store_audio(tmp_path, owner=owner, original_filename=file.filename)
+        finally:
+            os.unlink(tmp_path)
+
+    @app.post("/api/audio/{audio_id}/transcribe")
+    def start_transcription(
+        audio_id: str, background_tasks: BackgroundTasks
+    ) -> TranscriptionJob:
+        svc = _transcription()
+        if svc.get_audio(audio_id) is None:
+            raise HTTPException(status_code=404, detail="audio not found")
+        job = svc.enqueue(audio_id)
+        # Off the request thread; the UI polls /api/jobs/{id}. No blocking wait here.
+        background_tasks.add_task(svc.run_job, job.id)
+        return job
+
+    @app.get("/api/audio/{audio_id}/file")
+    def get_audio_file(audio_id: str) -> FileResponse:
+        asset = _transcription().get_audio(audio_id)
+        if asset is None or not Path(asset.path).exists():
+            raise HTTPException(status_code=404, detail="audio not found")
+        return FileResponse(asset.path)  # lets "▶ play from here" seek the recording
+
+    @app.get("/api/jobs/{job_id}")
+    def get_job(job_id: str) -> TranscriptionJob:
+        job = _transcription().get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job
+
+    # -- transcript review (the human gate; lexicon-assisted) ---------------
+    @app.get("/api/transcripts/{transcript_id}")
+    def get_transcript(transcript_id: str) -> Transcript:
+        svc = _transcription()
+        transcript = svc.get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="transcript not found")
+        return svc.suggest_corrections(transcript)  # enrich with lexicon suggestions
+
+    @app.patch("/api/transcripts/{transcript_id}/segments/{idx}")
+    def edit_segment(
+        transcript_id: str, idx: int, req: UpdateSegmentRequest
+    ) -> Transcript:
+        svc = _transcription()
+        try:
+            updated = svc.update_segment(
+                transcript_id, idx, edited_text=req.edited_text, speaker=req.speaker
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(updated)  # revalidate after the edit
+
+    @app.post("/api/transcripts/{transcript_id}/review")
+    def review_transcript(transcript_id: str) -> Transcript:
+        svc = _transcription()
+        try:
+            reviewed = svc.mark_reviewed(transcript_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(reviewed)
+
+    @app.post("/api/transcripts/{transcript_id}/approve")
+    def approve_transcript(
+        transcript_id: str, req: ApproveTranscriptRequest, request: Request
+    ) -> ApproveTranscriptResponse:
+        svc = _transcription()
+        user: User | None = getattr(request.state, "user", None)
+        author = user.display_name if user else req.author  # reviewer = provenance
+        try:
+            chunks = svc.approve(transcript_id, author=author)
+        except ValueError as exc:
+            code = 404 if "not found" in str(exc) else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        return ApproveTranscriptResponse(
+            transcript_id=transcript_id, status="approved",
+            chunk_count=len(chunks), refs=[c.ref for c in chunks],
+        )
+
+    @app.post("/api/transcripts/{transcript_id}/reject")
+    def reject_transcript(transcript_id: str) -> Transcript:
+        svc = _transcription()
+        try:
+            rejected = svc.reject(transcript_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(rejected)
+
+    # -- reading / library (source-in-context + sefer browser) --------------
+    @app.get("/api/source")
+    def source_in_context(ref: str, lang: str | None = None) -> SourceContextResponse:
+        section = _chunks_store().get_section(ref, lang=lang)
+        if not section:
+            raise HTTPException(status_code=404, detail="ref not found")
+        anchor = section[0]
+        label = " · ".join(anchor.section_path[:-1]) or anchor.book
+        return SourceContextResponse(
+            ref=ref, label=label, book=anchor.book,
+            chunks=[
+                SourceContextChunk(
+                    ref=c.ref, lang=c.lang, text=c.text, source=c.source, cited=c.ref == ref
+                )
+                for c in section
+            ],
+        )
+
+    @app.get("/api/library")
+    def library() -> LibraryResponse:
+        return LibraryResponse(
+            entries=[
+                LibraryEntry(book=b, source=s, count=n)
+                for (b, s, n) in _chunks_store().library_index()
+            ]
+        )
+
+    @app.get("/api/library/sections")
+    def library_sections(book: str) -> SectionsResponse:
+        return SectionsResponse(
+            book=book,
+            sections=[
+                SectionEntry(label=label, ref=ref, lang=lang)
+                for (label, ref, lang) in _chunks_store().list_sections(book)
+            ],
         )
 
     return app

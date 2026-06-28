@@ -19,6 +19,9 @@ class SourceOut(BaseModel):
     source: str
     score: float
     cited: bool = False
+    # For source="shiur": lets a cited source play from its moment in the recording.
+    audio_id: str | None = None
+    start_s: float | None = None
 
 
 class AskResponse(BaseModel):
@@ -250,3 +253,60 @@ class MeResponse(BaseModel):
 
     auth_enabled: bool
     user: UserOut | None = None
+
+
+class UpdateSegmentRequest(BaseModel):
+    """Edit one transcript segment during review (Prompt 27). Both fields optional."""
+
+    edited_text: str | None = None
+    speaker: str | None = None
+
+
+class ApproveTranscriptRequest(BaseModel):
+    """Approve a reviewed transcript into shiur corpus. Author required (provenance)."""
+
+    author: str
+
+
+class ApproveTranscriptResponse(BaseModel):
+    transcript_id: str
+    status: str
+    chunk_count: int
+    refs: list[str] = Field(default_factory=list)
+
+
+# -- reading / library (Prompt 29) -------------------------------------------
+class SourceContextChunk(BaseModel):
+    ref: str
+    lang: str
+    text: str
+    source: str
+    cited: bool = False  # the segment the citation pointed at (highlight in the reader)
+
+
+class SourceContextResponse(BaseModel):
+    ref: str
+    label: str  # the section label (parent path), e.g. "Chapter 1"
+    book: str
+    chunks: list[SourceContextChunk] = Field(default_factory=list)
+
+
+class LibraryEntry(BaseModel):
+    book: str
+    source: str
+    count: int
+
+
+class LibraryResponse(BaseModel):
+    entries: list[LibraryEntry] = Field(default_factory=list)
+
+
+class SectionEntry(BaseModel):
+    label: str
+    ref: str
+    lang: str
+
+
+class SectionsResponse(BaseModel):
+    book: str
+    sections: list[SectionEntry] = Field(default_factory=list)
