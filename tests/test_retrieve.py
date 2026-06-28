@@ -46,6 +46,18 @@ def test_hybrid_retrieves_relevant_above_unrelated() -> None:
     assert results[0].score >= results[-1].score
 
 
+def test_shiur_boost_promotes_shiur_source() -> None:
+    emb = HashingEmbedder(dim=DIM)
+    chunks = [
+        _chunk("Sefaria 1:1", "בחירה חופשית של האדם", source="sefaria"),
+        _chunk("Shiur: Demo §1", "בחירה חופשית של האדם", source="shiur"),
+    ]
+    idx = _seeded_index(chunks, emb)
+    # Identical text → tied scores; a strong shiur_boost makes the shiur win.
+    boosted = Retriever(idx, emb, top_k=5, shiur_boost=5.0).search("בחירה חופשית")
+    assert boosted[0].source == "shiur"
+
+
 def test_metadata_filter_by_source() -> None:
     emb = HashingEmbedder(dim=DIM)
     chunks = [

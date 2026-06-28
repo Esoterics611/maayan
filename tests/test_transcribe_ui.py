@@ -54,7 +54,14 @@ class _BoomTranscriber:
 def _service(
     tmp_path: Path, transcriber: object | None = None, terms: object | None = None
 ) -> TranscriptionService:
+    from qdrant_client import QdrantClient
+
+    from maayan.corpus.store import ChunkStore
+    from maayan.embed.fake import HashingEmbedder
+    from maayan.index.qdrant import QdrantIndex
+
     clock = FakeClock()
+    emb = HashingEmbedder(dim=64)
     return TranscriptionService(
         transcriber or FakeTranscriber(clock),  # type: ignore[arg-type]
         AudioStore(":memory:", clock),
@@ -62,6 +69,10 @@ def _service(
         clock,
         audio_dir=str(tmp_path / "audio"),
         terms=terms,  # type: ignore[arg-type]
+        embedder=emb,
+        chunk_store=ChunkStore(":memory:"),
+        index=QdrantIndex(QdrantClient(location=":memory:"), "ui_shiur", emb.dim),
+        shiur_chunk_chars=0,
     )
 
 
@@ -191,6 +202,29 @@ def test_audio_file_is_served(tmp_path: Path) -> None:
     r = client.get(f"/api/audio/{audio_id}/file")
     assert r.status_code == 200
     assert client.get("/api/audio/nope/file").status_code == 404
+
+
+def test_approve_route_gates_then_adds_shiur_chunks(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _, transcript_id = _make_transcript(client)
+    # Must be reviewed before approval.
+    pre = client.post(f"/api/transcripts/{transcript_id}/approve", json={"author": "R. G"})
+    assert pre.status_code == 400
+    client.post(f"/api/transcripts/{transcript_id}/review")
+    r = client.post(f"/api/transcripts/{transcript_id}/approve", json={"author": "R. G"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "approved"
+    assert body["chunk_count"] >= 1
+    assert body["refs"][0].startswith("Shiur:")
+
+
+def test_reject_route_sets_status(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _, transcript_id = _make_transcript(client)
+    r = client.post(f"/api/transcripts/{transcript_id}/reject")
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
 
 
 def test_audio_endpoints_require_auth_when_enabled(tmp_path: Path) -> None:

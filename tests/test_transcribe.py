@@ -211,3 +211,95 @@ def test_mark_reviewed_flips_status(tmp_path: Path) -> None:
     assert svc.mark_reviewed("t1").status == "reviewed"
     again = store.get_transcript("t1")
     assert again is not None and again.status == "reviewed"
+
+
+# -- approve → shiur chunks → index (Prompt 28) ------------------------------
+def test_transcript_to_chunks_windows_and_carries_provenance() -> None:
+    from maayan.transcribe.convert import transcript_to_chunks
+
+    tr = Transcript(
+        id="t1", audio_id="a1", lang="he", backend="fake", model="fake",
+        created_at=FakeClock().now(),
+        segments=[
+            TranscriptSegment(idx=0, start_s=0.0, end_s=2.0, text="alpha", speaker="R"),
+            TranscriptSegment(idx=1, start_s=2.0, end_s=4.0, text="beta"),
+            TranscriptSegment(idx=2, start_s=4.0, end_s=6.0, text="gamma"),
+        ],
+    )
+    one = transcript_to_chunks(tr, title="Demo", author="R. G", max_chars=0)
+    assert len(one) == 1
+    c = one[0]
+    assert c.source == "shiur"
+    assert c.text == "alpha beta gamma"
+    assert c.ref.startswith("Shiur: Demo")
+    assert c.metadata["audio_id"] == "a1" and c.metadata["author"] == "R. G"
+    assert c.metadata["start_s"] == 0.0 and c.metadata["end_s"] == 6.0
+    # Deterministic id (idempotent re-approve).
+    assert transcript_to_chunks(tr, title="Demo", author="R. G", max_chars=0)[0].id == c.id
+    # A small budget windows into several chunks, each keeping its own start.
+    many = transcript_to_chunks(tr, title="Demo", author="R. G", max_chars=6)
+    assert len(many) >= 2
+    assert many[0].metadata["start_s"] == 0.0
+
+
+def _indexed_svc(
+    tmp_path: Path,
+) -> tuple[TranscriptionService, TranscriptionStore, object, object, object]:
+    from qdrant_client import QdrantClient
+
+    from maayan.corpus.store import ChunkStore
+    from maayan.embed.fake import HashingEmbedder
+    from maayan.index.qdrant import QdrantIndex
+
+    clock = FakeClock()
+    store = TranscriptionStore(":memory:")
+    chunk_store = ChunkStore(":memory:")
+    emb = HashingEmbedder(dim=64)
+    index = QdrantIndex(QdrantClient(location=":memory:"), "shiur_test", emb.dim)
+    svc = TranscriptionService(
+        FakeTranscriber(clock), AudioStore(":memory:", clock), store, clock,
+        audio_dir=str(tmp_path / "a"), embedder=emb, chunk_store=chunk_store,
+        index=index, shiur_chunk_chars=0,
+    )
+    return svc, store, chunk_store, index, emb
+
+
+def test_approve_gates_on_reviewed_then_indexes_retrievable_shiur(tmp_path: Path) -> None:
+    from maayan.retrieve.retriever import Retriever
+
+    svc, store, chunk_store, index, emb = _indexed_svc(tmp_path)
+    store.save_transcript(_transcript())  # status "raw"
+
+    with pytest.raises(ValueError, match="reviewed"):
+        svc.approve("t1", author="R. G")
+
+    svc.mark_reviewed("t1")
+    produced = svc.approve("t1", author="R. G")
+    assert produced and all(c.source == "shiur" for c in produced)
+    assert all(c.metadata["author"] == "R. G" for c in produced)
+    assert store.get_transcript("t1").status == "approved"  # type: ignore[union-attr]
+    assert chunk_store.counts_by_source().get("shiur", 0) >= 1
+
+    # Retrievable alongside the rest of the corpus.
+    results = Retriever(index, emb, top_k=5).search("אהבה רבה")  # type: ignore[arg-type]
+    assert any(r.source == "shiur" for r in results)
+
+
+def test_approve_requires_author(tmp_path: Path) -> None:
+    svc, store, *_ = _indexed_svc(tmp_path)
+    store.save_transcript(_transcript().model_copy(update={"status": "reviewed"}))
+    with pytest.raises(ValueError, match="author is required"):
+        svc.approve("t1", author="   ")
+
+
+def test_approve_without_indexing_configured_errors(tmp_path: Path) -> None:
+    svc, store = _review_svc(tmp_path)  # no embedder/chunk_store/index
+    store.save_transcript(_transcript().model_copy(update={"status": "reviewed"}))
+    with pytest.raises(ValueError, match="indexing not configured"):
+        svc.approve("t1", author="R. G")
+
+
+def test_reject_sets_status(tmp_path: Path) -> None:
+    svc, store, *_ = _indexed_svc(tmp_path)
+    store.save_transcript(_transcript())
+    assert svc.reject("t1").status == "rejected"

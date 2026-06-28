@@ -95,6 +95,10 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier for source='term' chunks (curated lexicon entries / Holy Names).",
     )
+    shiur_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='shiur' chunks (approved transcribed recordings).",
+    )
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
@@ -226,6 +230,14 @@ class Settings(BaseSettings):
         default=False, description="Label speakers (shiur Q&A); wired in a later prompt."
     )
     audio_dir: str = Field(default="data/audio", description="Where stored recordings live.")
+    shiur_chunk_chars: int = Field(
+        default=800,
+        description=(
+            "Target max characters per shiur chunk on approval: consecutive transcript "
+            "segments are packed up to this budget (chabad_chunk_chars-style) so retrieval "
+            "units are coherent, not per-utterance. 0 = one chunk for the whole transcript."
+        ),
+    )
 
     # ---- Storage / paths ----------------------------------------------------
     db_path: str = Field(default="data/maayan.sqlite3")

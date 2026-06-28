@@ -19,7 +19,7 @@ from maayan.stats.models import Stats
 from maayan.threads.store import ThreadStore
 
 # The canonical source order for display (others, if any, are appended after).
-_SOURCE_ORDER = ("sefaria", "chabad", "expert", "derived", "term")
+_SOURCE_ORDER = ("sefaria", "chabad", "expert", "derived", "term", "shiur")
 
 
 class Statsing(Protocol):

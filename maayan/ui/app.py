@@ -32,6 +32,7 @@ from maayan.generate.rag import Answer, RAGService
 from maayan.lexicon.models import TermType
 from maayan.lexicon.service import TermService
 from maayan.retract.service import Retracting
+from maayan.retrieve.models import SearchResult
 from maayan.stats.models import Stats
 from maayan.stats.service import Statsing
 from maayan.threads.flow import ask_in_thread
@@ -43,6 +44,8 @@ from maayan.ui.models import (
     AnnotateRequest,
     AnnotateResponse,
     AnnotationOut,
+    ApproveTranscriptRequest,
+    ApproveTranscriptResponse,
     AskInThreadRequest,
     AskRequest,
     AskResponse,
@@ -78,6 +81,16 @@ from maayan.users.service import UserService
 _STATIC = Path(__file__).parent / "static"
 
 
+def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
+    meta = s.payload.get("metadata") or {} if isinstance(s.payload, dict) else {}
+    is_shiur = s.source == "shiur"
+    return SourceOut(
+        ref=s.ref, text=s.text, lang=s.lang, source=s.source, score=s.score, cited=cited,
+        audio_id=meta.get("audio_id") if is_shiur else None,
+        start_s=meta.get("start_s") if is_shiur else None,
+    )
+
+
 def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
     cited = set(answer.cited_refs)
     return AskResponse(
@@ -86,13 +99,7 @@ def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
         answer=answer.text,
         grounded=answer.grounded,
         cited_refs=answer.cited_refs,
-        sources=[
-            SourceOut(
-                ref=s.ref, text=s.text, lang=s.lang, source=s.source,
-                score=s.score, cited=s.ref in cited,
-            )
-            for s in answer.sources
-        ],
+        sources=[_source_out(s, cited=s.ref in cited) for s in answer.sources],
     )
 
 
@@ -604,5 +611,31 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return svc.suggest_corrections(reviewed)
+
+    @app.post("/api/transcripts/{transcript_id}/approve")
+    def approve_transcript(
+        transcript_id: str, req: ApproveTranscriptRequest, request: Request
+    ) -> ApproveTranscriptResponse:
+        svc = _transcription()
+        user: User | None = getattr(request.state, "user", None)
+        author = user.display_name if user else req.author  # reviewer = provenance
+        try:
+            chunks = svc.approve(transcript_id, author=author)
+        except ValueError as exc:
+            code = 404 if "not found" in str(exc) else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        return ApproveTranscriptResponse(
+            transcript_id=transcript_id, status="approved",
+            chunk_count=len(chunks), refs=[c.ref for c in chunks],
+        )
+
+    @app.post("/api/transcripts/{transcript_id}/reject")
+    def reject_transcript(transcript_id: str) -> Transcript:
+        svc = _transcription()
+        try:
+            rejected = svc.reject(transcript_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(rejected)
 
     return app

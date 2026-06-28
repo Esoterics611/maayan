@@ -15,8 +15,13 @@ from typing import TYPE_CHECKING
 from maayan.audio.models import AudioAsset
 from maayan.audio.store import AudioStore
 from maayan.clock import Clock
+from maayan.corpus.models import Chunk
 from maayan.corpus.normalize import fold_surface
+from maayan.corpus.store import ChunkStore
+from maayan.embed.base import Embedder
+from maayan.index.qdrant import QdrantIndex
 from maayan.transcribe.base import Transcriber
+from maayan.transcribe.convert import transcript_to_chunks
 from maayan.transcribe.models import TermSuggestion, Transcript, TranscriptionJob
 from maayan.transcribe.store import TranscriptionStore
 
@@ -40,6 +45,10 @@ class TranscriptionService:
         *,
         audio_dir: str,
         terms: TermService | None = None,
+        embedder: Embedder | None = None,
+        chunk_store: ChunkStore | None = None,
+        index: QdrantIndex | None = None,
+        shiur_chunk_chars: int = 0,
     ) -> None:
         self._transcriber = transcriber
         self._audio = audio_store
@@ -47,6 +56,10 @@ class TranscriptionService:
         self._clock = clock
         self._audio_dir = audio_dir
         self._terms = terms
+        self._embedder = embedder
+        self._chunks = chunk_store
+        self._index = index
+        self._shiur_chunk_chars = shiur_chunk_chars
 
     # -- audio ---------------------------------------------------------------
     def store_audio(
@@ -163,8 +176,48 @@ class TranscriptionService:
         return self._store.save_transcript(transcript.model_copy(update={"segments": segments}))
 
     def mark_reviewed(self, transcript_id: str) -> Transcript:
-        """Flip status to 'reviewed' (the human gate before corpus ingestion in Prompt 28)."""
+        """Flip status to 'reviewed' (the human gate before corpus ingestion)."""
         transcript = self._store.get_transcript(transcript_id)
         if transcript is None:
             raise ValueError("transcript not found")
         return self._store.save_transcript(transcript.model_copy(update={"status": "reviewed"}))
+
+    # -- approval → corpus ---------------------------------------------------
+    def approve(self, transcript_id: str, *, author: str) -> list[Chunk]:
+        """Gate on review, window into source="shiur" chunks, embed + index them.
+
+        Reuses the EXISTING embed + index pipeline (no parallel ingest path), so shiur
+        chunks become retrievable alongside sefaria/expert/derived/term. Author is the
+        reviewer and is required (provenance, as Prompt 9). Printed text is untouched.
+        """
+        author = (author or "").strip()
+        if not author:
+            raise ValueError("author is required (no anonymous shiur approvals)")
+        if self._embedder is None or self._chunks is None or self._index is None:
+            raise ValueError("indexing not configured")
+        transcript = self._store.get_transcript(transcript_id)
+        if transcript is None:
+            raise ValueError("transcript not found")
+        if transcript.status != "reviewed":
+            raise ValueError("transcript must be reviewed before approval")
+
+        asset = self._audio.get(transcript.audio_id)
+        title = Path(asset.filename).stem if asset else transcript.audio_id
+        chunks = transcript_to_chunks(
+            transcript, title=title, author=author, max_chars=self._shiur_chunk_chars
+        )
+        if chunks:
+            self._chunks.upsert_chunks(chunks)
+            self._chunks.mark_indexed([c.id for c in chunks])
+            self._index.ensure_collection()
+            embeddings = self._embedder.embed([c.text for c in chunks])
+            self._index.upsert_chunks(list(zip(chunks, embeddings, strict=True)))
+        self._store.save_transcript(transcript.model_copy(update={"status": "approved"}))
+        return chunks
+
+    def reject(self, transcript_id: str) -> Transcript:
+        """Reject a transcript (symmetry with approve); it never enters the corpus."""
+        transcript = self._store.get_transcript(transcript_id)
+        if transcript is None:
+            raise ValueError("transcript not found")
+        return self._store.save_transcript(transcript.model_copy(update={"status": "rejected"}))

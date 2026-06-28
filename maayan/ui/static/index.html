@@ -13,7 +13,7 @@
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
             --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
-            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; }
+            --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; --shiur:#b5651d; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
            font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
@@ -51,12 +51,13 @@
     .badge.expert { color:var(--expert); border-color:var(--expert); }
     .badge.derived { color:var(--derived); border-color:var(--derived); }
     .badge.term { color:var(--term); border-color:var(--term); }
+    .badge.shiur { color:var(--shiur); border-color:var(--shiur); }
     .badge.proposed { color:var(--seed); border-color:var(--seed); }
     .badge.approved { color:var(--expert); border-color:var(--expert); }
     .badge.rejected { color:#9a3b2f; border-color:#9a3b2f; }
     .src { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; font-size:14px; }
     .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
-    .src.term { border-color:var(--term); }
+    .src.term { border-color:var(--term); } .src.shiur { border-color:var(--shiur); }
     .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
     .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
     .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
@@ -330,14 +331,19 @@
       const srcs = sources.map((s, i) => {
         const badge = s.source === 'expert' ? '<span class="badge expert">expert</span>'
                     : s.source === 'derived' ? '<span class="badge derived">derived</span>'
-                    : s.source === 'term' ? '<span class="badge term">term</span>' : '';
-        // Only layered knowledge (expert/derived/term) is retractable; printed text never is.
-        const retract = ['expert', 'derived', 'term'].includes(s.source)
+                    : s.source === 'term' ? '<span class="badge term">term</span>'
+                    : s.source === 'shiur' ? '<span class="badge shiur">shiur</span>' : '';
+        // A cited shiur source can play from its moment in the recording.
+        const play = (s.source === 'shiur' && s.audio_id)
+          ? `<button class="ghost" title="Play from here"
+                onclick="playCitation('${esc(s.audio_id)}', ${s.start_s || 0})">▶ ${fmtTs(s.start_s || 0)}</button>` : '';
+        // Only layered knowledge (expert/derived/term/shiur) is retractable; printed text never is.
+        const retract = ['expert', 'derived', 'term', 'shiur'].includes(s.source)
           ? `<button class="ghost" style="color:#a33;margin-left:auto"
                 title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
-            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${retract}</div>
+            <span class="${s.cited ? 'cited' : ''}">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
           <div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
@@ -721,9 +727,12 @@
           ${chips ? `<div style="margin-top:4px">${chips}</div>` : ''}
         </div>`;
       }).join('');
+      const approved = tr.status === 'approved';
       const footer = `<div class="actions" style="margin-top:8px">
-        <button onclick="markReviewed()" ${reviewed ? 'disabled' : ''}>${reviewed ? 'Reviewed ✓' : 'Mark reviewed'}</button>
-        <span class="hint">status: ${esc(tr.status)} · approval into the Knowledge base comes next update</span>
+        <button onclick="markReviewed()" ${reviewed || approved ? 'disabled' : ''}>${reviewed || approved ? 'Reviewed ✓' : 'Mark reviewed'}</button>
+        <button onclick="approveTranscript()" ${reviewed ? '' : 'disabled'} title="Add to the Knowledge base as a shiur source">Approve → corpus</button>
+        <button class="secondary" onclick="rejectTranscript()" ${approved ? 'disabled' : ''}>Reject</button>
+        <span class="hint">status: ${esc(tr.status)}</span>
       </div>`;
       box.innerHTML = `<div class="hint">Transcript (${esc(tr.lang)} · ${esc(tr.backend)}) — edit text, accept lexicon fixes, then mark reviewed.</div>`
         + audio + rows + footer;
@@ -760,9 +769,37 @@
       if (r.ok) { renderTranscript(await j(r)); toast('Marked reviewed ✓'); }
       else toast('Could not mark reviewed.');
     }
+    async function approveTranscript() {
+      if (!currentTr) return;
+      const author = localStorage.getItem(AUTHOR_KEY) || '';
+      if (!author) { toast('Set your name (author) first — e.g. in the Seed panel.'); return; }
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author }) });
+      if (r.ok) {
+        const d = await j(r);
+        toast('Approved ✓ — added ' + d.chunk_count + ' shiur chunk(s) to the Knowledge base.');
+        currentTr = { ...currentTr, status: 'approved' }; renderTranscript(currentTr); loadStats();
+      } else { const e = await j(r); toast('Could not approve: ' + (e.detail || r.status)); }
+    }
+    async function rejectTranscript() {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/reject', { method: 'POST' });
+      if (r.ok) { renderTranscript(await j(r)); toast('Rejected.'); }
+      else toast('Could not reject.');
+    }
+    function playCitation(audioId, startS) {
+      let a = $('citeAudio');
+      if (!a) { a = document.createElement('audio'); a.id = 'citeAudio'; a.style.display = 'none'; document.body.appendChild(a); }
+      const src = '/api/audio/' + audioId + '/file';
+      if (a.getAttribute('src') !== src) { a.setAttribute('src', src); a.load(); }
+      const go = () => { a.currentTime = startS || 0; a.play().catch(() => {}); };
+      if (a.readyState >= 1) go(); else a.addEventListener('loadedmetadata', go, { once: true });
+    }
     window.seekAudio = seekAudio; window.saveSegment = saveSegment;
     window.acceptSuggestion = acceptSuggestion; window.defineTermFromSegment = defineTermFromSegment;
-    window.markReviewed = markReviewed;
+    window.markReviewed = markReviewed; window.approveTranscript = approveTranscript;
+    window.rejectTranscript = rejectTranscript; window.playCitation = playCitation;
 
     function shiurStatus(job) {
       const m = { queued: 'Queued…', running: 'Transcribing…', done: 'Done ✓',

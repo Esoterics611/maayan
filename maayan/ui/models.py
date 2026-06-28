@@ -19,6 +19,9 @@ class SourceOut(BaseModel):
     source: str
     score: float
     cited: bool = False
+    # For source="shiur": lets a cited source play from its moment in the recording.
+    audio_id: str | None = None
+    start_s: float | None = None
 
 
 class AskResponse(BaseModel):
@@ -257,3 +260,16 @@ class UpdateSegmentRequest(BaseModel):
 
     edited_text: str | None = None
     speaker: str | None = None
+
+
+class ApproveTranscriptRequest(BaseModel):
+    """Approve a reviewed transcript into shiur corpus. Author required (provenance)."""
+
+    author: str
+
+
+class ApproveTranscriptResponse(BaseModel):
+    transcript_id: str
+    status: str
+    chunk_count: int
+    refs: list[str] = Field(default_factory=list)
