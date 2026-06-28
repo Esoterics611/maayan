@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>maayan · מעיין</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#6b4f2a" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="maayan" />
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
             --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
@@ -11,7 +17,8 @@
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
            font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-    header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel); }
+    header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel);
+             display:flex; align-items:center; gap:12px; }
     h1 { margin:0; font-size:19px; font-weight:650; }
     h1 small { color:var(--muted); font-weight:400; margin-left:8px; }
     .layout { display:flex; height:calc(100vh - 56px); }
@@ -58,10 +65,45 @@
     label.field { display:block; margin:8px 0 3px; font-size:13px; color:var(--muted); }
     .hidden { display:none; }
     .empty { color:var(--muted); text-align:center; margin-top:40px; }
+
+    /* --- mobile chrome (hidden on desktop) --- */
+    .menu-btn { display:none; background:transparent; color:var(--ink); font-size:20px;
+                padding:4px 8px; border:1px solid var(--line); border-radius:8px; }
+    .scrim { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:39; }
+    .tabbar { display:none; position:fixed; left:0; right:0; bottom:0; z-index:30;
+              border-top:1px solid var(--line); background:var(--panel);
+              padding-bottom:env(safe-area-inset-bottom); }
+    .tabbar button { flex:1; background:transparent; color:var(--muted); font-weight:600;
+                     border-radius:0; padding:11px 4px; font-size:13px; }
+    .tabbar button.active { color:var(--accent); }
+    .toast { position:fixed; left:50%; bottom:74px; transform:translateX(-50%);
+             background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px;
+             font-size:14px; max-width:88%; text-align:center; z-index:60; opacity:0;
+             transition:opacity .2s; pointer-events:none; }
+    .toast.show { opacity:.96; }
+
+    @media (max-width: 720px) {
+      h1 { font-size:17px; } h1 small { display:none; }
+      .menu-btn { display:inline-flex; }
+      .layout { height:calc(100vh - 56px - 54px); height:calc(100dvh - 56px - 54px); }
+      aside { position:fixed; top:56px; bottom:0; left:0; width:84%; max-width:300px; z-index:40;
+              transform:translateX(-100%); transition:transform .2s ease;
+              box-shadow:2px 0 24px rgba(0,0,0,.18); }
+      body.drawer-open aside { transform:translateX(0); }
+      body.drawer-open .scrim { display:block; }
+      .turns { padding:14px; }
+      .composer { padding:12px 14px; }
+      .composer .row { flex-wrap:wrap; }
+      .composer .row #q { flex:1 1 100%; }
+      .tabbar { display:flex; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1></header>
+  <header>
+    <button class="menu-btn" id="menuBtn" aria-label="Topics & lexicon">☰</button>
+    <h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1>
+  </header>
   <div class="layout">
     <aside>
       <div class="row" style="margin-bottom:10px">
@@ -161,6 +203,15 @@
     </main>
   </div>
 
+  <div class="scrim" id="scrim"></div>
+  <div class="toast" id="toast"></div>
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="ask">Ask</button>
+    <button data-tab="threads">Threads</button>
+    <button data-tab="capture">Capture</button>
+    <button data-tab="library">Library</button>
+  </nav>
+
   <script>
     const $ = (id) => document.getElementById(id);
     const AUTHOR_KEY = 'maayan.author';
@@ -220,6 +271,7 @@
 
     async function openThread(id) {
       active = id; $('answerSources').innerHTML = '';
+      document.body.classList.remove('drawer-open');  // close the mobile drawer on pick
       const d = await j(await fetch('/threads/' + id));
       [...document.querySelectorAll('.thread-item')].forEach(el =>
         el.classList.toggle('active', el.dataset.id === id));
@@ -480,6 +532,36 @@
     $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
     $('composeAuthor').value = savedAuthor;
     loadKinds(); loadThreads(); loadTerms(); loadStats();
+
+    // -- PWA: register the service worker (no-op where unsupported) ----------
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () =>
+        navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+
+    // -- mobile chrome: slide-over drawer + bottom tab bar ------------------
+    let toastTimer = null;
+    function toast(msg) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+    }
+    window.toast = toast;
+    const closeDrawer = () => document.body.classList.remove('drawer-open');
+    $('menuBtn').onclick = () => document.body.classList.toggle('drawer-open');
+    $('scrim').onclick = closeDrawer;
+    [...document.querySelectorAll('#tabbar button')].forEach(btn => btn.onclick = () => {
+      const tab = btn.dataset.tab;
+      if (tab === 'threads') { document.body.classList.toggle('drawer-open'); return; }
+      closeDrawer();
+      if (tab === 'ask') {
+        $('q').scrollIntoView({ block: 'center' }); $('q').focus();
+      } else if (tab === 'capture') {
+        $('seedBox').classList.remove('hidden');
+        $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else if (tab === 'library') {
+        toast('Library — the full reading view arrives in the next update.');  // Prompt 29 anchor
+      }
+    });
   </script>
   <script>
   // --- auth chrome: only active when the server has AUTH_ENABLED=true ---------

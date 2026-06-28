@@ -187,7 +187,12 @@ def create_app(
         if not auth_enabled or users is None:
             return await call_next(request)
         path = request.url.path
-        if path in {"/login", "/api/login", "/healthz"}:
+        # PWA shell assets carry no user data and must load on the login page (and
+        # let the service worker update without a session), so they bypass the wall.
+        if path in {
+            "/login", "/api/login", "/healthz",
+            "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png",
+        }:
             return await call_next(request)
         user = users.current_user(request.cookies.get(session_cookie_name))
         if user is None:
@@ -204,6 +209,30 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    # -- PWA shell (installable, offline-tolerant reads) ---------------------
+    @app.get("/manifest.webmanifest")
+    def manifest() -> FileResponse:
+        return FileResponse(
+            _STATIC / "manifest.webmanifest", media_type="application/manifest+json"
+        )
+
+    @app.get("/sw.js")
+    def service_worker() -> FileResponse:
+        # Served from the app root so its scope covers the whole site.
+        return FileResponse(
+            _STATIC / "sw.js",
+            media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/"},
+        )
+
+    @app.get("/icon-192.png")
+    def icon_192() -> FileResponse:
+        return FileResponse(_STATIC / "icon-192.png", media_type="image/png")
+
+    @app.get("/icon-512.png")
+    def icon_512() -> FileResponse:
+        return FileResponse(_STATIC / "icon-512.png", media_type="image/png")
 
     # -- auth / users -------------------------------------------------------
     @app.get("/login")
