@@ -252,3 +252,20 @@ def test_index_references_pwa_and_mobile_chrome() -> None:
     assert "/sw.js" in html
     assert 'id="tabbar"' in html  # the bottom mobile nav
     assert 'id="menuBtn"' in html  # the drawer hamburger
+
+
+def test_voice_dictation_controls_present() -> None:
+    # Prompt 24 is browser-API UI; we assert the affordances + fallback branch ship,
+    # not that real speech recognition runs.
+    client, _, _ = _client()
+    html = client.get("/").text
+    # A mic button next to each static capture field, plus the language toggle.
+    for el_id in ('id="micQ"', 'id="micSeed"', 'id="micTerm"', 'id="voiceLang"'):
+        assert el_id in html, el_id
+    # The dynamic connection field gets a mic via the reusable builder.
+    assert "mkMic" in html
+    # Web Speech happy path + graceful MediaRecorder fallback both exist.
+    assert "webkitSpeechRecognition" in html
+    assert "MediaRecorder" in html
+    # The Prompt 26 server path is stubbed honestly, not half-wired.
+    assert "server transcription" in html
