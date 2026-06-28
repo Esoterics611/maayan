@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from maayan.audio.store import AudioStore
 from maayan.clock import FakeClock, SystemClock
 from maayan.config import Settings
+from maayan.lexicon.models import Term
 from maayan.transcribe.fake import FakeTranscriber
 from maayan.transcribe.models import Transcript
 from maayan.transcribe.service import TranscriptionService
@@ -23,6 +24,16 @@ from maayan.transcribe.store import TranscriptionStore
 from maayan.ui.app import create_app
 from maayan.users.service import UserService
 from maayan.users.store import UserStore
+
+
+class _Terms:
+    """TermService stand-in for review suggestions; only list_terms() is used."""
+
+    def __init__(self, terms: list[Term]) -> None:
+        self._terms = terms
+
+    def list_terms(self) -> list[Term]:
+        return self._terms
 
 
 def _wav_bytes(rate: int = 8000, secs: float = 0.2) -> bytes:
@@ -40,7 +51,9 @@ class _BoomTranscriber:
         raise RuntimeError("decode failed")
 
 
-def _service(tmp_path: Path, transcriber: object | None = None) -> TranscriptionService:
+def _service(
+    tmp_path: Path, transcriber: object | None = None, terms: object | None = None
+) -> TranscriptionService:
     clock = FakeClock()
     return TranscriptionService(
         transcriber or FakeTranscriber(clock),  # type: ignore[arg-type]
@@ -48,15 +61,26 @@ def _service(tmp_path: Path, transcriber: object | None = None) -> Transcription
         TranscriptionStore(":memory:"),
         clock,
         audio_dir=str(tmp_path / "audio"),
+        terms=terms,  # type: ignore[arg-type]
     )
 
 
-def _client(tmp_path: Path, transcriber: object | None = None) -> TestClient:
-    svc = _service(tmp_path, transcriber)
+def _client(
+    tmp_path: Path, transcriber: object | None = None, terms: object | None = None
+) -> TestClient:
+    svc = _service(tmp_path, transcriber, terms)
     app = create_app(  # type: ignore[arg-type]
         None, None, None, None, None, None, None, None, transcription=svc
     )
     return TestClient(app)
+
+
+def _make_transcript(client: TestClient) -> tuple[str, str]:
+    """Upload + transcribe a clip; return (audio_id, transcript_id)."""
+    audio_id = _upload(client)
+    job = client.post(f"/api/audio/{audio_id}/transcribe").json()
+    job = client.get(f"/api/jobs/{job['id']}").json()
+    return audio_id, job["transcript_id"]
 
 
 def _upload(client: TestClient) -> str:
@@ -114,6 +138,59 @@ def test_failed_transcription_sets_error(tmp_path: Path) -> None:
     assert job["status"] == "error"
     assert "decode failed" in job["error"]
     assert job["transcript_id"] is None
+
+
+def test_get_transcript_includes_lexicon_suggestions(tmp_path: Path) -> None:
+    nefesh = Term(
+        id="nef", canonical="נפש (Nefesh)", surface_forms=["נפש"],
+        definition="the soul", author="R. G",
+    )
+    client = _client(tmp_path, terms=_Terms([nefesh]))
+    _, transcript_id = _make_transcript(client)
+    tr = client.get(f"/api/transcripts/{transcript_id}").json()
+    # The fake transcript's 2nd segment contains "נפש" → a suggestion is offered.
+    seg = next(s for s in tr["segments"] if any(sg for sg in s["suggestions"]))
+    assert seg["suggestions"][0]["canonical"] == "נפש (Nefesh)"
+    # The raw text is untouched (suggestion only).
+    assert seg["edited_text"] is None
+
+
+def test_patch_segment_persists_edit(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _, transcript_id = _make_transcript(client)
+    r = client.patch(
+        f"/api/transcripts/{transcript_id}/segments/0",
+        json={"edited_text": "תוקן", "speaker": "Maggid"},
+    )
+    assert r.status_code == 200
+    assert r.json()["segments"][0]["edited_text"] == "תוקן"
+    # Persisted across a fresh GET.
+    again = client.get(f"/api/transcripts/{transcript_id}").json()
+    assert again["segments"][0]["edited_text"] == "תוקן"
+    assert again["segments"][0]["speaker"] == "Maggid"
+
+
+def test_patch_bad_segment_index_is_404(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _, transcript_id = _make_transcript(client)
+    r = client.patch(f"/api/transcripts/{transcript_id}/segments/99", json={"edited_text": "x"})
+    assert r.status_code == 404
+
+
+def test_review_marks_transcript_reviewed(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _, transcript_id = _make_transcript(client)
+    r = client.post(f"/api/transcripts/{transcript_id}/review")
+    assert r.status_code == 200
+    assert r.json()["status"] == "reviewed"
+
+
+def test_audio_file_is_served(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    audio_id, _ = _make_transcript(client)
+    r = client.get(f"/api/audio/{audio_id}/file")
+    assert r.status_code == 200
+    assert client.get("/api/audio/nope/file").status_code == 404
 
 
 def test_audio_endpoints_require_auth_when_enabled(tmp_path: Path) -> None:

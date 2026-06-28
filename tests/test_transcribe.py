@@ -14,10 +14,13 @@ import pytest
 from maayan.audio.store import AudioStore
 from maayan.clock import FakeClock
 from maayan.config import Settings
+from maayan.lexicon.models import Term
 from maayan.transcribe.base import Transcriber
 from maayan.transcribe.factory import build_transcriber
 from maayan.transcribe.fake import FakeTranscriber
-from maayan.transcribe.models import Transcript
+from maayan.transcribe.models import Transcript, TranscriptSegment
+from maayan.transcribe.service import TranscriptionService
+from maayan.transcribe.store import TranscriptionStore
 
 
 def _make_wav(path: Path, rate: int = 8000, secs: float = 0.2) -> None:
@@ -118,3 +121,93 @@ def test_store_file_degrades_without_ffmpeg(
     assert Path(asset.path).exists()
     assert asset.path.endswith(".wav")
     assert asset.sample_rate == 8000  # untouched (would be 16000 if normalized)
+
+
+# -- review: lexicon suggestions, edit, mark reviewed (Prompt 27) -------------
+class _Terms:
+    """Minimal TermService stand-in: only list_terms() is used by suggestions."""
+
+    def __init__(self, terms: list[Term]) -> None:
+        self._terms = terms
+
+    def list_terms(self) -> list[Term]:
+        return self._terms
+
+
+def _ab_term() -> Term:
+    return Term(
+        id="ab", canonical='ע"ב (Ab)', surface_forms=['ע"ב', "עב"],
+        definition="the Ab expansion", author="R. G",
+    )
+
+
+def _review_svc(
+    tmp_path: Path, terms: object | None = None
+) -> tuple[TranscriptionService, TranscriptionStore]:
+    clock = FakeClock()
+    store = TranscriptionStore(":memory:")
+    svc = TranscriptionService(
+        FakeTranscriber(clock), AudioStore(":memory:", clock), store, clock,
+        audio_dir=str(tmp_path / "a"), terms=terms,  # type: ignore[arg-type]
+    )
+    return svc, store
+
+
+def _transcript() -> Transcript:
+    return Transcript(
+        id="t1", audio_id="a1", lang="he", backend="fake", model="fake",
+        created_at=FakeClock().now(),
+        segments=[
+            TranscriptSegment(idx=0, start_s=0.0, end_s=1.0, text="גילוי שם עב בעולם"),
+            TranscriptSegment(idx=1, start_s=1.0, end_s=2.0, text="אהבה רבה"),
+        ],
+    )
+
+
+def test_suggest_corrections_matches_surface_forms_without_overwriting(tmp_path: Path) -> None:
+    svc, _ = _review_svc(tmp_path, terms=_Terms([_ab_term()]))
+    enriched = svc.suggest_corrections(_transcript())
+
+    # The folded surface "עב" matches the registered term → suggest the canonical form.
+    s0 = enriched.segments[0]
+    assert [sg.surface for sg in s0.suggestions] == ["עב"]
+    assert s0.suggestions[0].canonical == 'ע"ב (Ab)'
+    # A segment with no registered term yields nothing.
+    assert enriched.segments[1].suggestions == []
+    # Text is NEVER overwritten — the human decides.
+    assert s0.text == "גילוי שם עב בעולם"
+    assert s0.edited_text is None
+
+
+def test_suggest_corrections_noop_without_lexicon(tmp_path: Path) -> None:
+    svc, _ = _review_svc(tmp_path, terms=None)
+    enriched = svc.suggest_corrections(_transcript())
+    assert all(s.suggestions == [] for s in enriched.segments)
+
+
+def test_update_segment_persists_edit_and_speaker(tmp_path: Path) -> None:
+    svc, store = _review_svc(tmp_path)
+    store.save_transcript(_transcript())
+    updated = svc.update_segment("t1", 0, edited_text='גילוי שם ע"ב בעולם', speaker="Maggid")
+    assert updated.segments[0].edited_text == 'גילוי שם ע"ב בעולם'
+    assert updated.segments[0].speaker == "Maggid"
+    # Persisted.
+    again = store.get_transcript("t1")
+    assert again is not None and again.segments[0].edited_text == 'גילוי שם ע"ב בעולם'
+
+
+def test_update_segment_validates_target(tmp_path: Path) -> None:
+    svc, store = _review_svc(tmp_path)
+    store.save_transcript(_transcript())
+    with pytest.raises(ValueError, match="out of range"):
+        svc.update_segment("t1", 9, edited_text="x")
+    with pytest.raises(ValueError, match="not found"):
+        svc.update_segment("missing", 0, edited_text="x")
+
+
+def test_mark_reviewed_flips_status(tmp_path: Path) -> None:
+    svc, store = _review_svc(tmp_path)
+    store.save_transcript(_transcript())
+    assert svc.mark_reviewed("t1").status == "reviewed"
+    again = store.get_transcript("t1")
+    assert again is not None and again.status == "reviewed"

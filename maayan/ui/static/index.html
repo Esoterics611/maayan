@@ -693,17 +693,76 @@
     }
     window.transcribeBlob = transcribeBlob;
 
+    let currentTr = null;   // the transcript under review (with lexicon suggestions)
+
     function renderTranscript(tr) {
       const box = $('shiurTranscript');
       if (!tr) { box.innerHTML = '<div class="hint refused">Transcription failed.</div>'; return; }
-      const rows = tr.segments.map(s => {
-        const t = (s.edited_text != null ? s.edited_text : s.text);
-        return `<div class="src"><div class="ref">${fmtTs(s.start_s)}–${fmtTs(s.end_s)}</div>`
-          + `<div dir="auto">${esc(t)}</div></div>`;
+      currentTr = tr;
+      const audio = tr.audio_id
+        ? `<audio id="shiurAudio" controls preload="none" src="/api/audio/${esc(tr.audio_id)}/file" style="width:100%; margin-bottom:8px"></audio>`
+        : '';
+      const reviewed = tr.status === 'reviewed';
+      const rows = tr.segments.map((s, i) => {
+        const text = (s.edited_text != null ? s.edited_text : s.text);
+        const chips = (s.suggestions || []).map((sg, k) =>
+          `<button class="ghost" title="Use the lexicon form" onclick="acceptSuggestion(${i},${k})">`
+          + `${esc(sg.surface)} → ${esc(sg.canonical)}</button>`).join(' ');
+        return `<div class="src">
+          <div class="ref">
+            <button class="ghost" onclick="seekAudio(${s.start_s})" title="Play from here">▶ ${fmtTs(s.start_s)}</button>
+            <span class="hint">–${fmtTs(s.end_s)}</span>
+          </div>
+          <textarea id="seg-${i}" rows="2" dir="auto" onchange="saveSegment(${i})">${esc(text)}</textarea>
+          <div class="row" style="margin-top:4px">
+            <input id="spk-${i}" placeholder="speaker (optional)" value="${esc(s.speaker || '')}" onchange="saveSegment(${i})" />
+            <button class="ghost" onclick="defineTermFromSegment()" title="Define selected text as a term">Define term</button>
+          </div>
+          ${chips ? `<div style="margin-top:4px">${chips}</div>` : ''}
+        </div>`;
       }).join('');
-      box.innerHTML = `<div class="hint">Transcript (${esc(tr.lang)} · ${esc(tr.backend)}) —`
-        + ` review &amp; approval arrive in the next update.</div>` + rows;
+      const footer = `<div class="actions" style="margin-top:8px">
+        <button onclick="markReviewed()" ${reviewed ? 'disabled' : ''}>${reviewed ? 'Reviewed ✓' : 'Mark reviewed'}</button>
+        <span class="hint">status: ${esc(tr.status)} · approval into the Knowledge base comes next update</span>
+      </div>`;
+      box.innerHTML = `<div class="hint">Transcript (${esc(tr.lang)} · ${esc(tr.backend)}) — edit text, accept lexicon fixes, then mark reviewed.</div>`
+        + audio + rows + footer;
     }
+
+    function seekAudio(t) { const a = $('shiurAudio'); if (a) { a.currentTime = t || 0; a.play().catch(() => {}); } }
+    async function saveSegment(idx, rerender) {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/segments/' + idx, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edited_text: $('seg-' + idx).value, speaker: $('spk-' + idx).value || null }) });
+      if (!r.ok) { toast('Could not save segment.'); return; }
+      currentTr = await j(r);
+      if (rerender) renderTranscript(currentTr);   // reflect revalidated suggestions
+    }
+    function acceptSuggestion(i, k) {
+      const seg = currentTr && currentTr.segments[i];
+      const sg = seg && seg.suggestions && seg.suggestions[k];
+      if (!sg) return;
+      const ta = $('seg-' + i);
+      ta.value = ta.value.replace(sg.surface, sg.canonical);
+      saveSegment(i, true);
+    }
+    function defineTermFromSegment() {
+      const sel = (window.getSelection && window.getSelection().toString().trim()) || '';
+      if (sel) { if (!$('termSurfaces').value) $('termSurfaces').value = sel;
+        if (!$('termCanonical').value) $('termCanonical').value = sel; }
+      $('termBox').classList.remove('hidden');
+      $('termBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    async function markReviewed() {
+      if (!currentTr) return;
+      const r = await fetch('/api/transcripts/' + currentTr.id + '/review', { method: 'POST' });
+      if (r.ok) { renderTranscript(await j(r)); toast('Marked reviewed ✓'); }
+      else toast('Could not mark reviewed.');
+    }
+    window.seekAudio = seekAudio; window.saveSegment = saveSegment;
+    window.acceptSuggestion = acceptSuggestion; window.defineTermFromSegment = defineTermFromSegment;
+    window.markReviewed = markReviewed;
 
     function shiurStatus(job) {
       const m = { queued: 'Queued…', running: 'Transcribing…', done: 'Done ✓',

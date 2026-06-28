@@ -19,8 +19,20 @@ TranscriptStatus = Literal["raw", "reviewed", "approved", "rejected"]
 JobStatus = Literal["queued", "running", "done", "error"]
 
 
+class TermSuggestion(BaseModel):
+    """A lexicon-driven correction the human may accept (never auto-applied)."""
+
+    surface: str  # the token as transcribed
+    canonical: str  # the lexicon's display form to use instead
+    term_id: str
+
+
 class TranscriptSegment(BaseModel):
-    """One timestamped span of speech."""
+    """One timestamped span of speech.
+
+    `suggestions` is computed on read from the lexicon (never persisted) and offered
+    to the reviewer — accepting one writes `edited_text`; it never overwrites `text`.
+    """
 
     idx: int
     start_s: float
@@ -28,6 +40,7 @@ class TranscriptSegment(BaseModel):
     speaker: str | None = None
     text: str
     edited_text: str | None = None
+    suggestions: list[TermSuggestion] = Field(default_factory=list)
 
     @property
     def display_text(self) -> str:

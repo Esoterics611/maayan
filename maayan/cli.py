@@ -1092,7 +1092,7 @@ def ui() -> None:
     retraction = build_retraction_service(settings, embedder=embedder)
     stats = build_stats_service(settings)
     compose_service = build_composition_service(settings, embedder=embedder)
-    transcription = build_transcription_service(settings)
+    transcription = build_transcription_service(settings, terms=terms)
     users = build_user_service(settings)
     if settings.auth_enabled:
         seeded = users.ensure_seed_admin()

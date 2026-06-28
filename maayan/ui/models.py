@@ -250,3 +250,10 @@ class MeResponse(BaseModel):
 
     auth_enabled: bool
     user: UserOut | None = None
+
+
+class UpdateSegmentRequest(BaseModel):
+    """Edit one transcript segment during review (Prompt 27). Both fields optional."""
+
+    edited_text: str | None = None
+    speaker: str | None = None

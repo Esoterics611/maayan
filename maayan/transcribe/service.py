@@ -10,13 +10,22 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from maayan.audio.models import AudioAsset
 from maayan.audio.store import AudioStore
 from maayan.clock import Clock
+from maayan.corpus.normalize import fold_surface
 from maayan.transcribe.base import Transcriber
-from maayan.transcribe.models import Transcript, TranscriptionJob
+from maayan.transcribe.models import TermSuggestion, Transcript, TranscriptionJob
 from maayan.transcribe.store import TranscriptionStore
+
+if TYPE_CHECKING:
+    from maayan.lexicon.service import TermService
+
+# Punctuation trimmed off a token before lexicon folding (keeps Hebrew letters/nikkud;
+# fold_surface itself drops nikkud + gershayim/quotes for matching).
+_PUNCT = " \t\r\n.,;:!?\"'()[]{}…—–-־׃׀"
 
 
 class TranscriptionService:
@@ -30,12 +39,14 @@ class TranscriptionService:
         clock: Clock,
         *,
         audio_dir: str,
+        terms: TermService | None = None,
     ) -> None:
         self._transcriber = transcriber
         self._audio = audio_store
         self._store = store
         self._clock = clock
         self._audio_dir = audio_dir
+        self._terms = terms
 
     # -- audio ---------------------------------------------------------------
     def store_audio(
@@ -91,3 +102,69 @@ class TranscriptionService:
                 job.model_copy(update={"status": "error", "error": str(exc),
                                        "updated_at": self._clock.now()})
             )
+
+    # -- review --------------------------------------------------------------
+    def suggest_corrections(self, transcript: Transcript) -> Transcript:
+        """Offer lexicon-based term fixes per segment (never overwrites text).
+
+        Reuses the lexicon's own folding (gershayim/quote/nikkud-insensitive) so a
+        registered surface form like ע"ב / עב is matched the same way it is elsewhere.
+        Pure read: suggestions are computed here, not persisted.
+        """
+        if self._terms is None:
+            return transcript
+        # folded surface form → (canonical display form, term id)
+        form_map: dict[str, tuple[str, str]] = {}
+        for term in self._terms.list_terms():
+            if getattr(term, "retracted", False):
+                continue
+            for surface in term.surface_forms:
+                folded = fold_surface(surface)
+                if folded:
+                    form_map.setdefault(folded, (term.canonical, term.id))
+        if not form_map:
+            return transcript
+
+        new_segments = []
+        for seg in transcript.segments:
+            suggestions: list[TermSuggestion] = []
+            seen: set[str] = set()
+            for raw in seg.text.split():
+                token = raw.strip(_PUNCT)
+                folded = fold_surface(token)
+                if not folded or folded in seen or folded not in form_map:
+                    continue
+                canonical, term_id = form_map[folded]
+                seen.add(folded)
+                if token != canonical:  # already canonical → nothing to suggest
+                    suggestions.append(
+                        TermSuggestion(surface=token, canonical=canonical, term_id=term_id)
+                    )
+            new_segments.append(seg.model_copy(update={"suggestions": suggestions}))
+        return transcript.model_copy(update={"segments": new_segments})
+
+    def update_segment(
+        self, transcript_id: str, idx: int, *,
+        edited_text: str | None = None, speaker: str | None = None,
+    ) -> Transcript:
+        """Set a segment's edited_text and/or speaker (the human's correction)."""
+        transcript = self._store.get_transcript(transcript_id)
+        if transcript is None:
+            raise ValueError("transcript not found")
+        if idx < 0 or idx >= len(transcript.segments):
+            raise ValueError("segment index out of range")
+        updates: dict[str, str] = {}
+        if edited_text is not None:
+            updates["edited_text"] = edited_text
+        if speaker is not None:
+            updates["speaker"] = speaker
+        segments = list(transcript.segments)
+        segments[idx] = segments[idx].model_copy(update=updates)
+        return self._store.save_transcript(transcript.model_copy(update={"segments": segments}))
+
+    def mark_reviewed(self, transcript_id: str) -> Transcript:
+        """Flip status to 'reviewed' (the human gate before corpus ingestion in Prompt 28)."""
+        transcript = self._store.get_transcript(transcript_id)
+        if transcript is None:
+            raise ValueError("transcript not found")
+        return self._store.save_transcript(transcript.model_copy(update={"status": "reviewed"}))

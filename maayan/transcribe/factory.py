@@ -45,18 +45,25 @@ def build_transcriber(settings: Settings, *, clock: Clock | None = None) -> Tran
 
 
 def build_transcription_service(
-    settings: Settings, *, clock: Clock | None = None
+    settings: Settings, *, clock: Clock | None = None, terms: object | None = None
 ) -> TranscriptionService:
-    """Assemble the TranscriptionService wired to the same DB + audio dir (DI at the edge)."""
+    """Assemble the TranscriptionService wired to the same DB + audio dir (DI at the edge).
+
+    `terms` (a TermService) powers lexicon-based review suggestions; if not passed it is
+    built so the service is self-contained.
+    """
     from maayan.audio.store import AudioStore
+    from maayan.lexicon.factory import build_term_service
     from maayan.transcribe.service import TranscriptionService
     from maayan.transcribe.store import TranscriptionStore
 
     clock = clock or SystemClock()
+    term_service = terms or build_term_service(settings)
     return TranscriptionService(
         build_transcriber(settings, clock=clock),
         AudioStore(settings.db_path, clock),
         TranscriptionStore(settings.db_path),
         clock,
         audio_dir=settings.audio_dir,
+        terms=term_service,  # type: ignore[arg-type]
     )

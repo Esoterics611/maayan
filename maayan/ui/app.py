@@ -70,6 +70,7 @@ from maayan.ui.models import (
     ThreadDetailResponse,
     ThreadOut,
     TurnOut,
+    UpdateSegmentRequest,
 )
 from maayan.users.models import User, UserOut
 from maayan.users.service import UserService
@@ -559,6 +560,13 @@ def create_app(
         background_tasks.add_task(svc.run_job, job.id)
         return job
 
+    @app.get("/api/audio/{audio_id}/file")
+    def get_audio_file(audio_id: str) -> FileResponse:
+        asset = _transcription().get_audio(audio_id)
+        if asset is None or not Path(asset.path).exists():
+            raise HTTPException(status_code=404, detail="audio not found")
+        return FileResponse(asset.path)  # lets "▶ play from here" seek the recording
+
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> TranscriptionJob:
         job = _transcription().get_job(job_id)
@@ -566,11 +574,35 @@ def create_app(
             raise HTTPException(status_code=404, detail="job not found")
         return job
 
+    # -- transcript review (the human gate; lexicon-assisted) ---------------
     @app.get("/api/transcripts/{transcript_id}")
     def get_transcript(transcript_id: str) -> Transcript:
-        transcript = _transcription().get_transcript(transcript_id)
+        svc = _transcription()
+        transcript = svc.get_transcript(transcript_id)
         if transcript is None:
             raise HTTPException(status_code=404, detail="transcript not found")
-        return transcript
+        return svc.suggest_corrections(transcript)  # enrich with lexicon suggestions
+
+    @app.patch("/api/transcripts/{transcript_id}/segments/{idx}")
+    def edit_segment(
+        transcript_id: str, idx: int, req: UpdateSegmentRequest
+    ) -> Transcript:
+        svc = _transcription()
+        try:
+            updated = svc.update_segment(
+                transcript_id, idx, edited_text=req.edited_text, speaker=req.speaker
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(updated)  # revalidate after the edit
+
+    @app.post("/api/transcripts/{transcript_id}/review")
+    def review_transcript(transcript_id: str) -> Transcript:
+        svc = _transcription()
+        try:
+            reviewed = svc.mark_reviewed(transcript_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return svc.suggest_corrections(reviewed)
 
     return app
