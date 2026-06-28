@@ -23,6 +23,7 @@ dependencies = [
 ml = [
     "FlagEmbedding>=1.2.10",
     "torch>=2.2",
+    "faster-whisper>=1.0",   # local shiur transcription (CTranslate2 Whisper); Prompt 25+
 ]
 ui = [
     "fastapi>=0.111",
@@ -61,7 +62,7 @@ plugins = ["pydantic.mypy"]
 # Third-party libs without type stubs, or heavy ml-extra deps not installed in the
 # light CI (torch/FlagEmbedding). CI syncs core+dev+ui, so these stay ignorable.
 [[tool.mypy.overrides]]
-module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*"]
+module = ["FlagEmbedding.*", "qdrant_client.*", "torch", "torch.*", "faster_whisper.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

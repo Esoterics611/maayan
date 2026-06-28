@@ -209,6 +209,24 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Transcription / shiur pipeline (Phase 6) ---------------------------
+    # Swappable like the generation backend: "whisper" (local, faster-whisper),
+    # "fake" (deterministic/offline; also via CLI --mock), "cloud" (documented swap).
+    transcribe_backend: str = Field(default="whisper")
+    whisper_model: str = Field(
+        default="large-v3",
+        description='faster-whisper model; "medium" trades Hebrew quality for speed.',
+    )
+    whisper_device: str = Field(default="auto", description='"auto" | "cpu" | "cuda".')
+    whisper_compute_type: str = Field(
+        default="float16", description='CTranslate2 compute type; CPU falls back to int8.'
+    )
+    transcribe_lang: str = Field(default="he", description="Default ASR language code.")
+    transcribe_diarize: bool = Field(
+        default=False, description="Label speakers (shiur Q&A); wired in a later prompt."
+    )
+    audio_dir: str = Field(default="data/audio", description="Where stored recordings live.")
+
     # ---- Storage / paths ----------------------------------------------------
     db_path: str = Field(default="data/maayan.sqlite3")
 

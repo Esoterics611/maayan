@@ -61,9 +61,19 @@ def _cfg() -> Settings:
     settings = get_settings()
     if _MOCK:
         settings = settings.model_copy(
-            update={"qdrant_url": _MOCK_QDRANT_PATH, "embed_backend": "hashing"}
+            update={
+                "qdrant_url": _MOCK_QDRANT_PATH,
+                "embed_backend": "hashing",
+                "transcribe_backend": "fake",
+            }
         )
     return settings
+
+
+def _fmt_ts(seconds: float) -> str:
+    """Seconds → MM:SS (for transcript segment timestamps)."""
+    total = int(seconds)
+    return f"{total // 60:02d}:{total % 60:02d}"
 
 
 def require_qdrant(settings: Settings) -> None:
@@ -1011,6 +1021,42 @@ def stats() -> None:
 
     snapshot = build_stats_service(_cfg()).collect()
     typer.echo(format_stats(snapshot))
+
+
+@app.command()
+def transcribe(
+    audio_path: str = typer.Argument(..., help="Path to an audio file (a shiur recording)."),
+    lang: str = typer.Option(None, "--lang", help="ASR language code (default from config)."),
+) -> None:
+    """Store + transcribe a recording into timestamped segments (the shiur pipeline spine).
+
+    Idempotent by content hash. The transcript is printed, not yet ingested — review
+    and approval into source="shiur" corpus come in later prompts. Use `--mock` (or
+    TRANSCRIBE_BACKEND=fake) to try the flow offline without downloading Whisper.
+    """
+    from pathlib import Path
+
+    from maayan.audio.store import AudioStore
+    from maayan.transcribe.factory import build_transcriber
+
+    settings = _cfg()
+    transcriber = build_transcriber(settings)
+    used_lang = lang or settings.transcribe_lang
+    typer.echo(f"Transcriber: {settings.transcribe_backend} (lang={used_lang})")
+
+    with AudioStore(settings.db_path) as store:
+        asset = store.store_file(audio_path, owner="cli", audio_dir=settings.audio_dir)
+    meta = f", {asset.duration_s:.1f}s @ {asset.sample_rate}Hz" if asset.duration_s else ""
+    typer.echo(f"Stored audio {asset.id} ({asset.filename}){meta}")
+
+    transcript = transcriber.transcribe(Path(asset.path), lang=lang)
+    transcript = transcript.model_copy(update={"audio_id": asset.id})
+    typer.echo(
+        f"\nTranscript {transcript.id} — {transcript.backend}/{transcript.model}, "
+        f"{transcript.lang}, {len(transcript.segments)} segment(s):\n"
+    )
+    for seg in transcript.segments:
+        typer.echo(f"  [{_fmt_ts(seg.start_s)}–{_fmt_ts(seg.end_s)}] {seg.display_text}")
 
 
 @app.command()
