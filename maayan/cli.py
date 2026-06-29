@@ -705,6 +705,193 @@ def terms() -> None:
         typer.echo(f"  {t.id}  · {t.canonical}  [{t.term_type}]{g}  by {t.author}")
 
 
+@app.command(name="lexicon-suggest")
+def lexicon_suggest(
+    seed: bool = typer.Option(
+        True, "--seed/--no-seed", help="Draft definitions for the curated seed pack."
+    ),
+    mine: bool = typer.Option(
+        False, "--mine/--no-mine", help="Also mine gershayim term candidates from the corpus."
+    ),
+    limit: int = typer.Option(20, "--limit", help="Max mined candidates to draft (cost control)."),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter Claude slug)."
+    ),
+    include_unsupported: bool = typer.Option(
+        False, "--include-unsupported", help="Also queue ungrounded drafts (flagged), for review."
+    ),
+) -> None:
+    """Auto-draft lexicon definitions (corpus-grounded, cited) into the review queue.
+
+    Nothing is indexed here: each draft lands as 'pending' for `lexicon-review` →
+    `lexicon-approve`. Makes real generation calls — set LEXICON_DRAFT_MODEL (or --model)
+    to the OpenRouter Claude slug to draft with Claude.
+    """
+    from maayan.corpus.store import ChunkStore
+    from maayan.lexicon.factory import build_lexicon_populator
+    from maayan.lexicon.populate import mine_term_candidates
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"lexicon_draft_model": model})
+    require_qdrant(settings)
+    populator = build_lexicon_populator(settings)
+
+    drafted = []
+    if seed:
+        typer.echo("Drafting seed-pack terms…")
+        drafted += populator.suggest_from_seed(persist_unsupported=include_unsupported)
+    if mine:
+        chunks = ChunkStore(settings.db_path).get_chunks()
+        cands = mine_term_candidates(
+            chunks, min_count=settings.lexicon_mine_min_count, top_n=settings.lexicon_mine_top_n
+        )[:limit]
+        typer.echo(f"Mined {len(cands)} candidate term(s); drafting…")
+        drafted += populator.suggest_from_candidates(cands, persist_unsupported=include_unsupported)
+
+    supported = sum(1 for s in drafted if s.supported)
+    typer.echo(
+        f"Drafted {len(drafted)} term(s): {supported} grounded & queued, "
+        f"{len(drafted) - supported} skipped (ungrounded)."
+    )
+    typer.echo("Review: `maayan lexicon-review`, then `maayan lexicon-approve <id> --author ...`.")
+
+
+@app.command(name="lexicon-review")
+def lexicon_review() -> None:
+    """List drafted lexicon terms awaiting expert approval (read-only; no models loaded)."""
+    from maayan.lexicon.suggestions import SuggestionStore
+
+    pending = SuggestionStore(_cfg().db_path).list(status="pending")
+    if not pending:
+        typer.echo("No pending suggestions. Run `maayan lexicon-suggest` first.")
+        return
+    typer.echo(f"{len(pending)} pending suggestion(s):")
+    for s in pending:
+        refs = ", ".join(s.source_refs) or "—"
+        typer.echo(f"  {s.id}  · {s.canonical} [{s.term_type}]  (drafted by {s.model})")
+        typer.echo(f"      {s.definition}")
+        typer.echo(f"      ↳ grounds: {refs}")
+
+
+@app.command(name="lexicon-approve")
+def lexicon_approve(
+    suggestion_id: str = typer.Argument(..., help="Pending suggestion id (from lexicon-review)."),
+    author: str = typer.Option(..., "--author", help="The expert approving it (becomes author)."),
+) -> None:
+    """Approve a drafted term → index it as retrievable knowledge (author = you, the approver)."""
+    from maayan.lexicon.factory import build_lexicon_populator
+
+    settings = _cfg()
+    require_qdrant(settings)
+    term = build_lexicon_populator(settings).approve(suggestion_id, author=author)
+    typer.echo(f"Approved → indexed term {term.id} — {term.canonical} by {term.author}.")
+    typer.echo("It will now surface in retrieval (search --source term).")
+
+
+@app.command(name="lexicon-reject")
+def lexicon_reject(
+    suggestion_id: str = typer.Argument(..., help="The pending suggestion id to reject."),
+) -> None:
+    """Reject a drafted term (read-only on models; just marks it rejected)."""
+    from maayan.lexicon.suggestions import SuggestionStore
+
+    SuggestionStore(_cfg().db_path).set_status(suggestion_id, "rejected")
+    typer.echo(f"Rejected suggestion {suggestion_id}.")
+
+
+@app.command(name="connectors-suggest")
+def connectors_suggest(
+    from_goldset: bool = typer.Option(
+        False, "--from-goldset", help="Use the cross-text gold set questions as probes."
+    ),
+    limit: int = typer.Option(20, "--limit", help="Max connection candidates to draft (cost)."),
+    k: int = typer.Option(8, "--k", help="Sources retrieved per probe to pair across books."),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter Claude slug)."
+    ),
+    include_unsupported: bool = typer.Option(
+        False, "--include-unsupported", help="Also queue ungrounded drafts (flagged), for review."
+    ),
+) -> None:
+    """Auto-draft cross-text connections (grounded in both ends, cited) into the review queue.
+
+    Nothing is indexed here: each draft lands as 'pending' for `connectors-review` →
+    `connectors-approve`. Makes real generation calls — set LEXICON_DRAFT_MODEL (or --model)
+    to the OpenRouter Claude slug to draft with Claude.
+    """
+    from maayan.capture.factory import build_connection_populator
+    from maayan.capture.populate import CONNECTION_PROBES, mine_connection_candidates
+    from maayan.embed.factory import build_embedder
+    from maayan.retrieve.factory import build_retriever
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"lexicon_draft_model": model})
+    require_qdrant(settings)
+
+    embedder = build_embedder(settings)
+    retriever = build_retriever(settings, embedder=embedder)
+    probes = list(CONNECTION_PROBES)
+    if from_goldset:
+        from maayan.eval.goldset import load_goldset
+
+        probes = [ex.question for ex in load_goldset(settings.eval_crosstext_goldset_path)]
+    candidates = mine_connection_candidates(retriever, probes, k=k)[:limit]
+    typer.echo(f"Mined {len(candidates)} cross-text candidate(s); drafting…")
+
+    populator = build_connection_populator(settings, embedder=embedder)
+    drafted = populator.suggest(candidates, persist_unsupported=include_unsupported)
+    supported = sum(1 for s in drafted if s.supported)
+    typer.echo(
+        f"Drafted {len(drafted)} connection(s): {supported} grounded & queued, "
+        f"{len(drafted) - supported} skipped (not cross-text / ungrounded)."
+    )
+    typer.echo("Review: `maayan connectors-review`, then `connectors-approve <id> --author ...`.")
+
+
+@app.command(name="connectors-review")
+def connectors_review() -> None:
+    """List drafted cross-text connections awaiting approval (read-only; no models loaded)."""
+    from maayan.capture.suggestions import ConnectionSuggestionStore
+
+    pending = ConnectionSuggestionStore(_cfg().db_path).list(status="pending")
+    if not pending:
+        typer.echo("No pending connections. Run `maayan connectors-suggest` first.")
+        return
+    typer.echo(f"{len(pending)} pending connection(s):")
+    for s in pending:
+        typer.echo(f"  {s.id}  · {' ↔ '.join(s.books)}  (drafted by {s.model})")
+        typer.echo(f"      {s.statement}")
+        typer.echo(f"      ↳ grounds: {', '.join(s.source_refs) or '—'}")
+
+
+@app.command(name="connectors-approve")
+def connectors_approve(
+    suggestion_id: str = typer.Argument(..., help="Pending connection id (connectors-review)."),
+    author: str = typer.Option(..., "--author", help="The expert approving it (becomes author)."),
+) -> None:
+    """Approve a drafted connection → index it as a retrievable cross-text connection."""
+    from maayan.capture.factory import build_connection_populator
+
+    settings = _cfg()
+    require_qdrant(settings)
+    ann = build_connection_populator(settings).approve(suggestion_id, author=author)
+    typer.echo(f"Approved → indexed connection {ann.id} by {ann.author}.")
+    typer.echo("It will now surface in retrieval alongside the sources it connects.")
+
+
+@app.command(name="connectors-reject")
+def connectors_reject(
+    suggestion_id: str = typer.Argument(..., help="The pending connection id to reject."),
+) -> None:
+    """Reject a drafted connection (read-only on models; just marks it rejected)."""
+    from maayan.capture.suggestions import ConnectionSuggestionStore
+
+    ConnectionSuggestionStore(_cfg().db_path).set_status(suggestion_id, "rejected")
+    typer.echo(f"Rejected connection {suggestion_id}.")
+
+
 @app.command()
 def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None:
     """Show one lexicon term."""
