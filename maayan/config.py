@@ -138,6 +138,34 @@ class Settings(BaseSettings):
         description="After answering, flag sentences not supported by their cited [S#] sources.",
     )
 
+    # ---- Lexicon auto-population (Phase 3) ----------------------------------
+    # Claude-as-builder: a strong model DRAFTS term definitions, but only from
+    # retrieved corpus sources, with citations, and every draft is queued for expert
+    # approval before it is indexed — nothing auto-trusted (mirrors the capture loop).
+    lexicon_draft_model: str = Field(
+        default="",
+        description=(
+            "Model id used to DRAFT lexicon/connector definitions. Blank → the generation "
+            "model (free Qwen). Set to the OpenRouter Claude slug (e.g. "
+            "'anthropic/claude-opus-4.8') to draft with Claude; drafts are still "
+            "corpus-grounded, cited, and expert-gated before indexing."
+        ),
+    )
+    lexicon_draft_top_k: int = Field(
+        default=6, description="Corpus sources retrieved to ground (and gate) one term draft."
+    )
+    lexicon_draft_verify: bool = Field(
+        default=True,
+        description="Run the faithfulness pass on each draft; flagged drafts are unsupported.",
+    )
+    lexicon_mine_min_count: int = Field(
+        default=3,
+        description="Min corpus occurrences for a gershayim token to be a term candidate.",
+    )
+    lexicon_mine_top_n: int = Field(
+        default=50, description="Cap on mined term candidates returned (ranked by frequency)."
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client
