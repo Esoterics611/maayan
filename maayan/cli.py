@@ -306,7 +306,7 @@ def search(
     settings = _cfg()
     require_qdrant(settings)
     retriever = build_retriever(settings)
-    results = retriever.search(query, k=k, book=book, source=source)
+    results = retriever.retrieve(query, k=k, book=book, source=source).results
 
     if not results:
         typer.echo("No results.")
@@ -820,6 +820,58 @@ def evaluate(
             retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
         )
         typer.echo(format_report(report))
+
+
+@app.command(name="eval-expand")
+def eval_expand(
+    goldset: str = typer.Option(
+        None, "--goldset", help="Gold set path (default: retrieval goldset, or cross-text)."
+    ),
+    crosstext: bool = typer.Option(
+        False, "--crosstext", help="Use the cross-text gold set (expansion helps most here)."
+    ),
+    k: int = typer.Option(10, "--k", help="The k to highlight in the comparison."),
+) -> None:
+    """Compare retrieval WITHOUT vs WITH query expansion — the recall@k / MRR lift."""
+    from dataclasses import replace
+
+    from maayan.embed.factory import build_embedder
+    from maayan.eval.goldset import load_goldset
+    from maayan.eval.harness import EvalReport, format_comparison, run_eval
+    from maayan.generate.base import GenerationBackend
+    from maayan.generate.factory import build_generation_backend
+    from maayan.retrieve.factory import build_retriever
+    from maayan.retrieve.retriever import Retrieving
+
+    settings = _cfg()
+    require_qdrant(settings)
+    path = goldset or (
+        settings.eval_crosstext_goldset_path if crosstext else settings.eval_goldset_path
+    )
+    examples = load_goldset(path)
+    typer.echo(f"Gold set: {path} ({len(examples)} questions)")
+
+    embedder = build_embedder(settings)  # shared across both variants
+    # Enable the LLM expander if a backend is configured; else compare lexicon-only.
+    backend: GenerationBackend | None = None
+    try:
+        backend = build_generation_backend(settings)
+    except ValueError:
+        typer.echo("(no generation backend configured — expansion is lexicon-only)")
+    mode = "lexicon+LLM" if backend else "lexicon-only"
+
+    base = build_retriever(settings, embedder=embedder, expand=False)
+    expanded = build_retriever(settings, embedder=embedder, expand=True, backend=backend)
+
+    def _scored(retriever: Retrieving, label: str) -> EvalReport:
+        report = run_eval(
+            retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
+        )
+        return replace(report, variant=label)
+
+    reports = [_scored(base, "no-expand"), _scored(expanded, f"expand ({mode})")]
+    typer.echo("")
+    typer.echo(format_comparison(reports, k=k))
 
 
 @app.command()

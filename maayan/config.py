@@ -100,6 +100,44 @@ class Settings(BaseSettings):
         description="Multiplier for source='shiur' chunks (approved transcribed recordings).",
     )
 
+    # ---- Query expansion (Prompt 31a) ---------------------------------------
+    # Off by default so existing behavior/eval baseline are unchanged. When on, the
+    # base hybrid retriever is wrapped in a MultiQueryRetriever: the query is expanded
+    # into several retrieval queries which are searched and RRF-fused. Additive only —
+    # the absolute relevance gate (default-deny) is unchanged.
+    query_expand_enabled: bool = Field(
+        default=False,
+        description="Expand the query into multiple retrieval queries and RRF-fuse the hits.",
+    )
+    query_expand_lexicon: bool = Field(
+        default=True,
+        description="Deterministic lexicon expansion (inject curated term vocabulary). No model.",
+    )
+    query_expand_hyde: bool = Field(
+        default=True,
+        description="Add a HyDE (hypothetical-source) passage as a query (needs a backend).",
+    )
+    query_expand_variants: int = Field(
+        default=3, description="How many LLM reformulations to request (needs a backend)."
+    )
+    query_expand_max_queries: int = Field(
+        default=6, description="Hard cap on total retrieval queries after dedupe (incl. original)."
+    )
+
+    # ---- Reasoning & synthesis (Prompt 31b) ---------------------------------
+    # Off by default. When on, `ask` runs a two-stage flow: ANALYZE the retrieved
+    # sources into a compact study map (claims + agreements/tensions), then SYNTHESIZE
+    # a single woven, cited answer from sources + study map. Default-deny is unchanged
+    # and still fires before any model call.
+    rag_reasoning_enabled: bool = Field(
+        default=False,
+        description="Two-stage analyze→synthesize answering instead of a single generation pass.",
+    )
+    answer_verify_enabled: bool = Field(
+        default=False,
+        description="After answering, flag sentences not supported by their cited [S#] sources.",
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client

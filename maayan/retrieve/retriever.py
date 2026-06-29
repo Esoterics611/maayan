@@ -14,6 +14,8 @@ from qdrant_client import models
 
 from maayan.embed.base import Embedder
 from maayan.index.qdrant import QdrantIndex
+from maayan.retrieve.expand import QueryExpander
+from maayan.retrieve.fuse import DEFAULT_RRF_K, rrf_fuse
 from maayan.retrieve.models import RetrievalResult, SearchResult
 from maayan.retrieve.reranker import Reranker
 
@@ -180,3 +182,59 @@ class Retriever:
             if boost != 1.0:
                 r.score *= boost
         return results
+
+
+class MultiQueryRetriever:
+    """Expand the query, retrieve each variant, RRF-fuse — a drop-in `Retrieving`.
+
+    Wraps a base `Retriever` and a `QueryExpander`. Because it satisfies the
+    `Retrieving` protocol, `RAGService` / `DevelopmentService` / threads use it with
+    no change. The default-deny gate stays honest: the fused `score` is RRF (rank-
+    based, not comparable to `score_threshold`), so `relevance` is carried separately
+    as the MAX absolute relevance across variants — "is anything actually relevant to
+    *some* phrasing of the question?".
+    """
+
+    def __init__(
+        self,
+        base: Retriever,
+        expander: QueryExpander,
+        *,
+        top_k: int = 8,
+        rrf_k: int = DEFAULT_RRF_K,
+    ) -> None:
+        self._base = base
+        self._expander = expander
+        self._top_k = top_k
+        self._rrf_k = rrf_k
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        k: int | None = None,
+        book: str | None = None,
+        source: str | None = None,
+        langs: Sequence[str] | None = None,
+    ) -> RetrievalResult:
+        queries = self._expander.expand(query).queries
+        result_lists: list[list[SearchResult]] = []
+        relevance = 0.0
+        for q in queries:
+            sub = self._base.retrieve(q, k=k, book=book, source=source, langs=langs)
+            result_lists.append(sub.results)
+            relevance = max(relevance, sub.relevance)
+        fused = rrf_fuse(result_lists, limit=k or self._top_k, rrf_k=self._rrf_k)
+        return RetrievalResult(results=fused, relevance=relevance)
+
+    def search(
+        self,
+        query: str,
+        *,
+        k: int | None = None,
+        book: str | None = None,
+        source: str | None = None,
+        langs: Sequence[str] | None = None,
+    ) -> list[SearchResult]:
+        """Convenience wrapper returning just the ranked results (used by the CLI)."""
+        return self.retrieve(query, k=k, book=book, source=source, langs=langs).results
