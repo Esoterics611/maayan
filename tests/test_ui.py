@@ -267,8 +267,29 @@ def test_voice_dictation_controls_present() -> None:
     # Web Speech happy path + graceful MediaRecorder fallback both exist.
     assert "webkitSpeechRecognition" in html
     assert "MediaRecorder" in html
+    # Regression: dictation must listen continuously and auto-restart through pauses,
+    # not stop after the first phrase (continuous=false captured only the first word).
+    assert "rec.continuous = true" in html
+    assert "rec.continuous = false" not in html
+    assert "rec.start()" in html  # the onend auto-restart keeps the session alive
     # The Prompt 26 server path is stubbed honestly, not half-wired.
     assert "server transcription" in html
+
+
+def test_beyond_typing_controls_present() -> None:
+    # Prompt 30 is browser-API UI (OCR upload, selection menu, inbox overlay); assert
+    # the affordances + wiring ship, not that real OCR/selection runs.
+    client, _, _ = _client()
+    html = client.get("/").text
+    # OCR camera buttons next to the seed + term capture fields, plus the reusable builder.
+    for el_id in ('id="ocrSeed"', 'id="ocrTerm"', 'id="inboxBtn"', 'id="selMenu"'):
+        assert el_id in html, el_id
+    assert "/api/ocr" in html and "mkOcr" in html
+    # Highlight-to-act wires the EXISTING flows via a selection menu.
+    for act in ('data-act="connect"', 'data-act="term"', 'data-act="seed"'):
+        assert act in html, act
+    # Quick-capture inbox talks to the inbox API and offers move-to-thread.
+    assert "/api/inbox" in html and "openInbox" in html and "moveThread" in html
 
 
 def test_reading_experience_controls_present() -> None:

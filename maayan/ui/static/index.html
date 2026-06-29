@@ -91,6 +91,18 @@
     .field.with-mic { display:flex; justify-content:space-between; align-items:center; }
     #voiceLang { min-width:34px; text-align:center; }
 
+    /* --- highlight-to-act selection menu (Prompt 30) --- */
+    .sel-menu { position:fixed; z-index:90; display:flex; gap:2px; padding:3px;
+                background:var(--ink); border-radius:9px; box-shadow:0 6px 22px rgba(0,0,0,.3);
+                transform:translate(-50%, -100%); }
+    .sel-menu.hidden { display:none; }
+    .sel-menu button { background:transparent; color:#fff; border:0; padding:7px 10px;
+                       font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; }
+    .sel-menu button:hover { background:rgba(255,255,255,.16); }
+    /* --- inbox quick-capture (Prompt 30) --- */
+    .inbox-item { border:1px solid var(--line); border-radius:9px; padding:9px 11px; margin-bottom:8px; }
+    .inbox-item .meta { display:flex; gap:8px; align-items:center; margin-top:7px; }
+    .inbox-item select { flex:1; min-width:0; }
     /* --- reader / library overlays + reading modes (Prompt 29) --- */
     .srcref { cursor:pointer; } .srcref:hover { text-decoration:underline; }
     .overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:70; display:flex; }
@@ -135,6 +147,7 @@
   <header>
     <button class="menu-btn" id="menuBtn" aria-label="Topics & lexicon">☰</button>
     <h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1>
+    <button class="menu-btn" id="inboxBtn" aria-label="Quick-capture inbox" title="Quick-capture inbox" style="margin-inline-start:auto">📥</button>
   </header>
   <div class="layout">
     <aside>
@@ -179,7 +192,8 @@
             <div><label class="field">Kind</label><select id="kind"></select></div>
           </div>
           <label class="field with-mic"><span>Seed knowledge (often from outside the corpus)</span>
-            <button id="micSeed" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button></label>
+            <button id="micSeed" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
+            <button id="ocrSeed" type="button" class="mic" title="Photograph a page (OCR → review)" aria-label="Photograph page">📷</button></label>
           <textarea id="seedBody" rows="2" dir="auto" placeholder="e.g. אהבה בתענוגים היא גילוי שם ע&quot;ב…"></textarea>
           <label class="field">Directive — what should the model develop? <span class="hint">(kept out of the embedded text)</span></label>
           <input id="directive" dir="auto" placeholder="e.g. find where this is hinted at in Tanya" />
@@ -206,7 +220,8 @@
           <label class="field">Canonical (display form)</label>
           <input id="termCanonical" dir="auto" placeholder='e.g. ע"ב (Name of 72 / Ab)' />
           <label class="field with-mic"><span>Definition <span class="hint">(the knowledge — what gets embedded)</span></span>
-            <button id="micTerm" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button></label>
+            <button id="micTerm" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
+            <button id="ocrTerm" type="button" class="mic" title="Photograph a page (OCR → review)" aria-label="Photograph page">📷</button></label>
           <textarea id="termDef" rows="2" dir="auto" placeholder='e.g. the Ab expansion of Havayah, gematria 72'></textarea>
           <div class="row">
             <div><label class="field">Related terms <span class="hint">(comma-separated)</span></label><input id="termRelated" dir="auto" placeholder='ס"ג, מ"ה, ב"ן' /></div>
@@ -252,6 +267,12 @@
 
   <div class="scrim" id="scrim"></div>
   <div class="toast" id="toast"></div>
+  <!-- highlight-to-act: appears over a text selection in a source/answer -->
+  <div class="sel-menu hidden" id="selMenu">
+    <button type="button" data-act="connect" title="Tick this source to connect">Connect</button>
+    <button type="button" data-act="term" title="Define the selection as a term / Holy Name">Define term</button>
+    <button type="button" data-act="seed" title="Quote the selection into a seed">Quote → seed</button>
+  </div>
   <nav class="tabbar" id="tabbar">
     <button data-tab="ask">Ask</button>
     <button data-tab="threads">Threads</button>
@@ -384,8 +405,8 @@
         <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}${connect}</div>`;
       const ca = $('connectAuthor');
       if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
-      const cb = $('connectBody');                       // dictation on the connection insight
-      if (cb) cb.insertAdjacentElement('afterend', mkMic(cb));
+      const cb = $('connectBody');                       // dictation + OCR on the connection insight
+      if (cb) { cb.insertAdjacentElement('afterend', mkOcr(cb)); cb.insertAdjacentElement('afterend', mkMic(cb)); }
     }
 
     async function connectSelected() {
@@ -626,19 +647,36 @@
     function setupMic(btn, target) {
       if (!btn || !target) return;
       if (SpeechRec) {
-        let rec = null, listening = false;
-        btn.onclick = () => {
-          if (listening) { if (rec) rec.stop(); return; }
+        // continuous + auto-restart: keep dictating through pauses until the user taps
+        // the mic again. Web Speech (Chrome esp.) ends a session on the first silence,
+        // which is why the old continuous=false captured only the first phrase. onend
+        // restarts the session; finalized text is committed so a restart never loses it.
+        let rec = null, listening = false, stopping = false, committed = '';
+        const startSession = () => {
           rec = new SpeechRec();
-          rec.lang = voiceLang(); rec.interimResults = true; rec.continuous = false;
-          const base = target.value ? target.value + ' ' : '';
+          rec.lang = voiceLang(); rec.interimResults = true; rec.continuous = true;
           rec.onresult = (e) => {
-            let txt = ''; for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-            target.value = base + txt;
+            let interim = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+              const r = e.results[i];
+              if (r.isFinal) committed += r[0].transcript; else interim += r[0].transcript;
+            }
+            target.value = committed + interim;
           };
-          rec.onerror = () => { listening = false; btn.classList.remove('recording'); };
-          rec.onend = () => { listening = false; btn.classList.remove('recording'); target.focus(); };
-          listening = true; btn.classList.add('recording'); rec.start();
+          rec.onerror = (ev) => {  // permission errors are fatal; silence ('no-speech') is not
+            if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') stopping = true;
+          };
+          rec.onend = () => {
+            if (listening && !stopping) { try { rec.start(); return; } catch (_) { /* fall through */ } }
+            listening = false; stopping = false; btn.classList.remove('recording'); target.focus();
+          };
+          rec.start();
+        };
+        btn.onclick = () => {
+          if (listening) { stopping = true; if (rec) rec.stop(); return; }  // tap again = stop
+          committed = target.value ? target.value + ' ' : '';
+          listening = true; stopping = false; btn.classList.add('recording');
+          startSession();
         };
       } else {
         setupServerMic(btn, target);  // graceful fallback (no Web Speech, e.g. iOS Safari)
@@ -935,6 +973,157 @@
     }
     window.openReader = openReader; window.openLibrary = openLibrary; window.openBook = openBook;
     window.cycleReadMode = cycleReadMode; window.bumpReadScale = bumpReadScale; window.closeOverlay = closeOverlay;
+
+    // == Prompt 30: beyond typing — OCR + highlight-to-act + quick-capture inbox ==
+
+    // -- OCR capture: photograph a page → text → review field (never auto-ingested) --
+    async function ocrToField(file, target) {
+      if (!file || !target) return;
+      toast('Reading page…');
+      let r;
+      const fd = new FormData(); fd.append('file', file, file.name || 'page.jpg');
+      try { r = await fetch('/api/ocr', { method: 'POST', body: fd }); }
+      catch (e) { toast('OCR request failed.'); return; }
+      if (!r.ok) { toast(r.status === 503 ? 'OCR is off — set OCR_BACKEND to enable it.' : 'OCR failed.'); return; }
+      const text = ((await j(r)).text || '').trim();
+      if (!text) { toast('No text found in the image.'); return; }
+      target.value = (target.value ? target.value.trimEnd() + '\n' : '') + text;
+      target.focus();
+      toast('OCR text added — review before saving.');
+    }
+    function setupOcr(btn, target) {
+      if (!btn || !target) return;
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'image/*'; input.setAttribute('capture', 'environment');
+      input.style.display = 'none';
+      input.addEventListener('change', () => {
+        const f = input.files && input.files[0]; if (f) ocrToField(f, target); input.value = '';
+      });
+      document.body.appendChild(input);
+      btn.addEventListener('click', () => input.click());
+    }
+    function mkOcr(target) {  // build + wire an OCR button for a dynamically-rendered field
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'mic'; b.textContent = '📷';
+      b.title = 'Photograph a page (OCR → review)'; b.setAttribute('aria-label', 'Photograph page');
+      setupOcr(b, target); return b;
+    }
+    window.mkOcr = mkOcr;
+    setupOcr($('ocrSeed'), $('seedBody'));
+    setupOcr($('ocrTerm'), $('termDef'));
+
+    // -- Highlight-to-act: select text in a source/answer → Connect / Define / Seed --
+    // Wires the EXISTING flows (tick-to-connect, term prefill, seed body); no new endpoints.
+    const selMenu = $('selMenu');
+    let selInfo = null;  // { text, srcEl } captured when the menu is shown (survives selection loss)
+    function hideSelMenu() { if (selMenu) selMenu.classList.add('hidden'); selInfo = null; }
+    function actionableSelection() {
+      const sel = window.getSelection && window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+      const text = sel.toString().trim();
+      if (text.length < 2) return null;
+      const node = sel.anchorNode;
+      const host = node && (node.nodeType === 1 ? node : node.parentElement);
+      // Only over a source/answer or the reader body — not our own inputs or this menu.
+      if (!host || !host.closest || !host.closest('#answerSources, .reader-body')) return null;
+      return { text, rect: sel.getRangeAt(0).getBoundingClientRect(), srcEl: host.closest('.src') };
+    }
+    function maybeShowSelMenu() {
+      if (!selMenu) return;
+      const info = actionableSelection();
+      if (!info) { hideSelMenu(); return; }
+      selInfo = info;
+      selMenu.style.left = Math.round(info.rect.left + info.rect.width / 2) + 'px';
+      selMenu.style.top = Math.round(info.rect.top - 8) + 'px';
+      selMenu.classList.remove('hidden');
+    }
+    document.addEventListener('mouseup', () => setTimeout(maybeShowSelMenu, 0));
+    document.addEventListener('touchend', () => setTimeout(maybeShowSelMenu, 0));
+    document.addEventListener('scroll', hideSelMenu, true);
+    if (selMenu) [...selMenu.querySelectorAll('button')].forEach(b => b.addEventListener('click', () => {
+      const act = b.dataset.act, info = selInfo;
+      if (!info) return;
+      if (act === 'term') {                       // → existing Term flow (POST /terms)
+        if (!$('termSurfaces').value) $('termSurfaces').value = info.text;
+        if (!$('termCanonical').value) $('termCanonical').value = info.text;
+        $('termBox').classList.remove('hidden');
+        $('termBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else if (act === 'seed') {                // → existing Seed flow (POST /threads/{id}/seed)
+        const t = $('seedBody'); t.value = (t.value ? t.value.trimEnd() + '\n' : '') + info.text;
+        $('seedBox').classList.remove('hidden');
+        $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' }); t.focus();
+      } else if (act === 'connect') {             // → existing Connect flow (POST /annotate)
+        if (info.srcEl) { const cb = info.srcEl.querySelector('.srcpick'); if (cb) cb.checked = true; }
+        const body = $('connectBody');
+        if (body) { body.scrollIntoView({ block: 'center', behavior: 'smooth' }); body.focus();
+          toast('Source ticked — tick one more and write the insight, then Connect.'); }
+        else { toast('Ask a question first to connect its sources.'); }
+      }
+      hideSelMenu();
+      if (window.getSelection) window.getSelection().removeAllRanges();
+    }));
+
+    // -- Quick-capture inbox: park a thought → triage into a thread later -----------
+    async function openInbox() {
+      document.body.classList.remove('drawer-open');
+      let items = [];
+      try { items = await j(await fetch('/api/inbox')); } catch (e) { /* 503 when off */ }
+      let threadOpts = '';
+      try {
+        const ts = await j(await fetch('/threads'));
+        threadOpts = (ts || []).map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
+      } catch (e) { /* threads optional */ }
+      const author = localStorage.getItem(AUTHOR_KEY) || '';
+      const list = (items || []).map(it => `
+        <div class="inbox-item" data-id="${esc(it.id)}">
+          <div dir="auto">${esc(it.text)}</div>
+          <div class="meta">
+            <span class="hint">${esc(it.author)}</span>
+            <select class="moveThread"><option value="">move to thread…</option>${threadOpts}</select>
+            <button class="ghost" data-move="${esc(it.id)}">Move →</button>
+          </div>
+        </div>`).join('') || '<div class="hint">Inbox empty — capture a thought above.</div>';
+      mkOverlay(`<div class="reader-head"><span class="title">📥 Quick-capture inbox</span>
+           <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+         <div class="reader-body">
+           <div class="inbox-item">
+             <label class="field with-mic"><span>Capture a thought</span>
+               <button id="micInbox" type="button" class="mic" title="Dictate">🎤</button></label>
+             <textarea id="inboxText" rows="2" dir="auto" placeholder="A fleeting idea — triage into a thread later…"></textarea>
+             <div class="meta">
+               <input id="inboxAuthor" placeholder="Your name (required)" value="${esc(author)}" />
+               <button id="inboxSaveBtn">Capture</button><span id="inboxStatus" class="hint"></span>
+             </div>
+           </div>
+           ${list}
+         </div>`);
+      setupMic($('micInbox'), $('inboxText'));   // dictation on the capture field too
+      $('inboxSaveBtn').onclick = captureThought;
+      [...document.querySelectorAll('[data-move]')].forEach(btn => btn.onclick = () => {
+        const item = btn.closest('.inbox-item');
+        moveInbox(btn.dataset.move, item.querySelector('.moveThread').value);
+      });
+    }
+    async function captureThought() {
+      const text = $('inboxText').value.trim(), authorEl = $('inboxAuthor');
+      const author = authorEl.value.trim();
+      if (!author) { $('inboxStatus').textContent = 'Author is required.'; authorEl.focus(); return; }
+      if (!text) { $('inboxStatus').textContent = 'Write a thought first.'; return; }
+      localStorage.setItem(AUTHOR_KEY, author);
+      const r = await fetch('/api/inbox', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, author }) });
+      if (r.ok) { openInbox(); }                  // re-render with the new item parked
+      else { const e = await j(r); $('inboxStatus').textContent = 'Error: ' + ((e && e.detail) || r.status); }
+    }
+    async function moveInbox(itemId, threadId) {
+      if (!threadId) { toast('Pick a thread to move into.'); return; }
+      const r = await fetch('/api/inbox/' + itemId + '/move', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread_id: threadId }) });
+      if (r.ok) { toast('Moved to thread as a seed — develop it there.'); openInbox(); }
+      else { const e = await j(r); toast('Could not move: ' + ((e && e.detail) || r.status)); }
+    }
+    window.openInbox = openInbox;
+    if ($('inboxBtn')) $('inboxBtn').onclick = openInbox;
   </script>
   <script>
   // --- auth chrome: only active when the server has AUTH_ENABLED=true ---------

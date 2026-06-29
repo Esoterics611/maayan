@@ -1,5 +1,5 @@
-.PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui eval sync \
-	prod-up prod-down prod-logs prod-build
+.PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui eval \
+	eval-expand sync prod-up prod-down prod-logs prod-build
 
 # Allow `make search Q='...'` / `make ask Q='...'`
 Q ?=
@@ -20,6 +20,8 @@ help:
 	@echo "  ui         Run the local FastAPI chat + capture UI. (Prompt 6)"
 	@echo "  eval       Score retrieval vs gold set (hit@k/MRR). (Prompt 7)"
 	@echo "             Add ARGS='--compare' for a variant table."
+	@echo "  eval-expand  Compare retrieval with/without query expansion. (Prompt 31)"
+	@echo "               Add ARGS='--crosstext' for the cross-text gold set."
 	@echo "  prod-up    Build + start the production stack (docker-compose.prod.yml)."
 	@echo "  prod-down  Stop the production stack (volumes persist)."
 	@echo "  prod-logs  Tail production app + qdrant logs."
@@ -69,6 +71,9 @@ ui:
 
 eval:
 	uv run maayan eval $(ARGS)
+
+eval-expand:
+	uv run maayan eval-expand $(ARGS)
 
 # --- production (cloud) -----------------------------------------------------
 prod-up:

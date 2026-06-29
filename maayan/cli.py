@@ -306,7 +306,7 @@ def search(
     settings = _cfg()
     require_qdrant(settings)
     retriever = build_retriever(settings)
-    results = retriever.search(query, k=k, book=book, source=source)
+    results = retriever.retrieve(query, k=k, book=book, source=source).results
 
     if not results:
         typer.echo("No results.")
@@ -331,6 +331,21 @@ def ask(
     topic: str = typer.Option(
         None, "--topic", help="Start a new topic thread with this title, then ask within it."
     ),
+    reason: bool = typer.Option(
+        None, "--reason/--no-reason",
+        help="Two-stage analyze→synthesize answering (overrides RAG_REASONING_ENABLED).",
+    ),
+    expand: bool = typer.Option(
+        None, "--expand/--no-expand",
+        help="Multi-query expansion + RRF fusion (overrides QUERY_EXPAND_ENABLED).",
+    ),
+    verify: bool = typer.Option(
+        None, "--verify/--no-verify",
+        help="Flag answer claims not supported by their cited sources.",
+    ),
+    show_reasoning: bool = typer.Option(
+        False, "--show-reasoning", help="Print the study map produced in reasoning mode."
+    ),
 ) -> None:
     """Answer grounded ONLY in retrieved sources, with citations (refuses if unsupported)."""
     from maayan.capture.factory import build_capture_service
@@ -342,9 +357,18 @@ def ask(
     settings = _cfg()
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared with capture
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
-    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    use_expand = settings.query_expand_enabled if expand is None else expand
+    use_reasoning = settings.rag_reasoning_enabled if reason is None else reason
+    use_verify = settings.answer_verify_enabled if verify is None else verify
+    retriever = build_retriever(
+        settings, embedder=embedder, expand=use_expand,
+        backend=backend if use_expand else None,
+    )
+    rag = RAGService(
+        retriever, backend, score_threshold=settings.score_threshold,
+        reasoning=use_reasoning, verify=use_verify,
+    )
 
     # Within a thread, prior turns are passed as NON-citable context; retrieval and
     # default-deny are unchanged. Outside a thread, this is a plain one-shot ask.
@@ -379,6 +403,8 @@ def ask(
             typer.echo(f"Thread:  {active_thread}  (turn appended)")
         return
 
+    if show_reasoning and answer.reasoning:
+        typer.echo(f"\nStudy map:\n{answer.reasoning}")
     typer.echo(f"\n{answer.text}\n")
     typer.echo("Sources:")
     cited = set(answer.cited_refs)
@@ -387,6 +413,10 @@ def ask(
         typer.echo(f"  [{mark}] {s.ref}")
     if answer.cited_refs:
         typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
+    if answer.unsupported_claims:
+        typer.echo("\n⚠ Claims not clearly supported by their cited sources:")
+        for claim in answer.unsupported_claims:
+            typer.echo(f"  - {claim}")
     typer.echo(f"\nSession: {session.id}")
     if active_thread:
         typer.echo(f"Thread:  {active_thread}  (ask turn appended; "
@@ -822,6 +852,58 @@ def evaluate(
         typer.echo(format_report(report))
 
 
+@app.command(name="eval-expand")
+def eval_expand(
+    goldset: str = typer.Option(
+        None, "--goldset", help="Gold set path (default: retrieval goldset, or cross-text)."
+    ),
+    crosstext: bool = typer.Option(
+        False, "--crosstext", help="Use the cross-text gold set (expansion helps most here)."
+    ),
+    k: int = typer.Option(10, "--k", help="The k to highlight in the comparison."),
+) -> None:
+    """Compare retrieval WITHOUT vs WITH query expansion — the recall@k / MRR lift."""
+    from dataclasses import replace
+
+    from maayan.embed.factory import build_embedder
+    from maayan.eval.goldset import load_goldset
+    from maayan.eval.harness import EvalReport, format_comparison, run_eval
+    from maayan.generate.base import GenerationBackend
+    from maayan.generate.factory import build_generation_backend
+    from maayan.retrieve.factory import build_retriever
+    from maayan.retrieve.retriever import Retrieving
+
+    settings = _cfg()
+    require_qdrant(settings)
+    path = goldset or (
+        settings.eval_crosstext_goldset_path if crosstext else settings.eval_goldset_path
+    )
+    examples = load_goldset(path)
+    typer.echo(f"Gold set: {path} ({len(examples)} questions)")
+
+    embedder = build_embedder(settings)  # shared across both variants
+    # Enable the LLM expander if a backend is configured; else compare lexicon-only.
+    backend: GenerationBackend | None = None
+    try:
+        backend = build_generation_backend(settings)
+    except ValueError:
+        typer.echo("(no generation backend configured — expansion is lexicon-only)")
+    mode = "lexicon+LLM" if backend else "lexicon-only"
+
+    base = build_retriever(settings, embedder=embedder, expand=False)
+    expanded = build_retriever(settings, embedder=embedder, expand=True, backend=backend)
+
+    def _scored(retriever: Retrieving, label: str) -> EvalReport:
+        report = run_eval(
+            retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
+        )
+        return replace(report, variant=label)
+
+    reports = [_scored(base, "no-expand"), _scored(expanded, f"expand ({mode})")]
+    typer.echo("")
+    typer.echo(format_comparison(reports, k=k))
+
+
 @app.command()
 def compose(
     title: str = typer.Option(..., "--title", help="The piece's title."),
@@ -1071,7 +1153,9 @@ def ui() -> None:
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
     from maayan.generate.rag import RAGService
+    from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
+    from maayan.ocr.factory import build_ocrer
     from maayan.retract.factory import build_retraction_service
     from maayan.retrieve.factory import build_retriever
     from maayan.stats.factory import build_stats_service
@@ -1083,9 +1167,15 @@ def ui() -> None:
     settings = _cfg()
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared across services
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
-    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    retriever = build_retriever(
+        settings, embedder=embedder, expand=settings.query_expand_enabled,
+        backend=backend if settings.query_expand_enabled else None,
+    )
+    rag = RAGService(
+        retriever, backend, score_threshold=settings.score_threshold,
+        reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+    )
     capture = build_capture_service(settings, embedder=embedder)
     threads = build_thread_service(settings)
     develop = build_development_service(settings, embedder=embedder)
@@ -1095,6 +1185,8 @@ def ui() -> None:
     compose_service = build_composition_service(settings, embedder=embedder)
     transcription = build_transcription_service(settings, terms=terms, embedder=embedder)
     chunks_store = ChunkStore(settings.db_path)  # read-only reader/library browsing
+    ocr = build_ocrer(settings)  # None unless OCR_BACKEND set (additive capture surface)
+    inbox = build_inbox_service(settings)
     users = build_user_service(settings)
     if settings.auth_enabled:
         seeded = users.ensure_seed_admin()
@@ -1106,6 +1198,9 @@ def ui() -> None:
         users=users,
         transcription=transcription,
         chunks=chunks_store,
+        ocr=ocr,
+        inbox=inbox,
+        ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
         auth_enabled=settings.auth_enabled,
         session_cookie_name=settings.session_cookie_name,
