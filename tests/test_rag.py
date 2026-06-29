@@ -31,6 +31,22 @@ class RecordingBackend:
         return self.reply
 
 
+class SequencedBackend:
+    """Returns queued replies in order (one per generate call); records every call."""
+
+    def __init__(self, replies: list[str]) -> None:
+        self._replies = list(replies)
+        self.calls: list[tuple[str, list[Message]]] = []
+
+    @property
+    def systems(self) -> list[str]:
+        return [system for system, _ in self.calls]
+
+    def generate(self, system: str, messages: Sequence[Message]) -> str:
+        self.calls.append((system, list(messages)))
+        return self._replies.pop(0)
+
+
 def _result(ref: str, text: str, score: float = 0.5, source: str = "sefaria") -> SearchResult:
     return SearchResult(
         ref=ref, text=text, score=score, lang="he", source=source, payload={"ref": ref}
@@ -133,3 +149,79 @@ def test_build_context_numbers_sources() -> None:
     ctx = build_context([_result("Ref A", "alpha"), _result("Ref B", "beta")])
     assert "[S1] (Ref A) alpha" in ctx
     assert "[S2] (Ref B) beta" in ctx
+
+
+# -- reasoning & synthesis (Prompt 31b) --------------------------------------
+
+def test_reasoning_runs_analyze_then_synthesize() -> None:
+    backend = SequencedBackend(["[S1] — core claim; agrees with [S2].", "Woven answer [S1][S2]."])
+    results = [_result("Tanya 1:1", "א"), _result("Tanya 1:2", "ב")]
+    rag = RAGService(
+        FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4, reasoning=True
+    )
+    answer = rag.ask("שאלה")
+
+    assert len(backend.systems) == 2  # analyze, then synthesize
+    assert "STUDY MAP" in backend.systems[0]  # stage 1 is the analyze prompt
+    assert answer.reasoning == "[S1] — core claim; agrees with [S2]."
+    assert answer.text == "Woven answer [S1][S2]."
+    assert answer.cited_refs == ["Tanya 1:1", "Tanya 1:2"]
+
+
+def test_synthesis_prompt_carries_study_map_and_sources() -> None:
+    backend = SequencedBackend(["MAP: [S1] says X.", "answer [S1]."])
+    results = [_result("Tanya 1:1", "טקסט")]
+    rag = RAGService(
+        FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4, reasoning=True
+    )
+    rag.ask("מה השאלה")
+    # The second (synthesis) call sees the study map, the numbered sources, the question.
+    _system, messages = backend.calls[1]
+    synth_user = messages[0].content
+    assert "STUDY MAP" in synth_user
+    assert "MAP: [S1] says X." in synth_user  # the stage-1 output is threaded in
+    assert "[S1] (Tanya 1:1) טקסט" in synth_user
+    assert "מה השאלה" in synth_user
+
+
+def test_single_pass_unchanged_when_reasoning_off() -> None:
+    # Default (reasoning off) => exactly one model call, no study map.
+    backend = RecordingBackend(reply="plain answer [S1].")
+    results = [_result("Tanya 1:1", "א")]
+    rag = RAGService(FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4)
+    answer = rag.ask("שאלה")
+    assert len(backend.calls) == 1
+    assert answer.reasoning is None
+    assert answer.unsupported_claims == []
+
+
+def test_reasoning_default_deny_makes_no_calls() -> None:
+    backend = SequencedBackend(["should not be used", "nor this"])
+    rag = RAGService(
+        FakeRetriever([], relevance=0.0), backend, score_threshold=0.4, reasoning=True, verify=True
+    )
+    answer = rag.ask("שאלה")
+    assert answer.grounded is False
+    assert backend.systems == []  # default-deny fires before any stage
+
+
+def test_verify_flags_unsupported_sentences() -> None:
+    # reasoning off + verify on => 2 calls (answer, then verify).
+    backend = SequencedBackend(["claim one [S1]. claim two [S1].", "claim two [S1]."])
+    results = [_result("Tanya 1:1", "א")]
+    rag = RAGService(
+        FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4, verify=True
+    )
+    answer = rag.ask("שאלה")
+    assert len(backend.systems) == 2
+    assert answer.unsupported_claims == ["claim two [S1]."]
+
+
+def test_verify_ok_yields_no_flags() -> None:
+    backend = SequencedBackend(["supported [S1].", "OK"])
+    results = [_result("Tanya 1:1", "א")]
+    rag = RAGService(
+        FakeRetriever(results, relevance=0.7), backend, score_threshold=0.4, verify=True
+    )
+    answer = rag.ask("שאלה")
+    assert answer.unsupported_claims == []

@@ -331,6 +331,21 @@ def ask(
     topic: str = typer.Option(
         None, "--topic", help="Start a new topic thread with this title, then ask within it."
     ),
+    reason: bool = typer.Option(
+        None, "--reason/--no-reason",
+        help="Two-stage analyze→synthesize answering (overrides RAG_REASONING_ENABLED).",
+    ),
+    expand: bool = typer.Option(
+        None, "--expand/--no-expand",
+        help="Multi-query expansion + RRF fusion (overrides QUERY_EXPAND_ENABLED).",
+    ),
+    verify: bool = typer.Option(
+        None, "--verify/--no-verify",
+        help="Flag answer claims not supported by their cited sources.",
+    ),
+    show_reasoning: bool = typer.Option(
+        False, "--show-reasoning", help="Print the study map produced in reasoning mode."
+    ),
 ) -> None:
     """Answer grounded ONLY in retrieved sources, with citations (refuses if unsupported)."""
     from maayan.capture.factory import build_capture_service
@@ -342,9 +357,18 @@ def ask(
     settings = _cfg()
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared with capture
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
-    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    use_expand = settings.query_expand_enabled if expand is None else expand
+    use_reasoning = settings.rag_reasoning_enabled if reason is None else reason
+    use_verify = settings.answer_verify_enabled if verify is None else verify
+    retriever = build_retriever(
+        settings, embedder=embedder, expand=use_expand,
+        backend=backend if use_expand else None,
+    )
+    rag = RAGService(
+        retriever, backend, score_threshold=settings.score_threshold,
+        reasoning=use_reasoning, verify=use_verify,
+    )
 
     # Within a thread, prior turns are passed as NON-citable context; retrieval and
     # default-deny are unchanged. Outside a thread, this is a plain one-shot ask.
@@ -379,6 +403,8 @@ def ask(
             typer.echo(f"Thread:  {active_thread}  (turn appended)")
         return
 
+    if show_reasoning and answer.reasoning:
+        typer.echo(f"\nStudy map:\n{answer.reasoning}")
     typer.echo(f"\n{answer.text}\n")
     typer.echo("Sources:")
     cited = set(answer.cited_refs)
@@ -387,6 +413,10 @@ def ask(
         typer.echo(f"  [{mark}] {s.ref}")
     if answer.cited_refs:
         typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
+    if answer.unsupported_claims:
+        typer.echo("\n⚠ Claims not clearly supported by their cited sources:")
+        for claim in answer.unsupported_claims:
+            typer.echo(f"  - {claim}")
     typer.echo(f"\nSession: {session.id}")
     if active_thread:
         typer.echo(f"Thread:  {active_thread}  (ask turn appended; "
@@ -1137,9 +1167,15 @@ def ui() -> None:
     settings = _cfg()
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared across services
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
-    rag = RAGService(retriever, backend, score_threshold=settings.score_threshold)
+    retriever = build_retriever(
+        settings, embedder=embedder, expand=settings.query_expand_enabled,
+        backend=backend if settings.query_expand_enabled else None,
+    )
+    rag = RAGService(
+        retriever, backend, score_threshold=settings.score_threshold,
+        reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+    )
     capture = build_capture_service(settings, embedder=embedder)
     threads = build_thread_service(settings)
     develop = build_development_service(settings, embedder=embedder)

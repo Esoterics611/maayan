@@ -114,6 +114,8 @@ def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
         grounded=answer.grounded,
         cited_refs=answer.cited_refs,
         sources=[_source_out(s, cited=s.ref in cited) for s in answer.sources],
+        reasoning=answer.reasoning,
+        unsupported_claims=answer.unsupported_claims,
     )
 
 

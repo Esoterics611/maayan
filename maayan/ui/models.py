@@ -31,6 +31,10 @@ class AskResponse(BaseModel):
     grounded: bool
     cited_refs: list[str]
     sources: list[SourceOut]
+    # Reasoning mode (RAG_REASONING_ENABLED): the study map behind the answer (or None).
+    reasoning: str | None = None
+    # Verify mode (ANSWER_VERIFY_ENABLED): answer sentences not supported by their sources.
+    unsupported_claims: list[str] = Field(default_factory=list)
 
 
 class AnnotateRequest(BaseModel):
