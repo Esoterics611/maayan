@@ -784,9 +784,13 @@ def evaluate(
     crosstext: bool = typer.Option(
         False, "--crosstext", help="Score CROSS-TEXT co-retrieval (book-diversity@k) instead."
     ),
+    answer: bool = typer.Option(
+        False, "--answer",
+        help="Score ANSWER quality (citations + faithfulness via an LLM judge) instead.",
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
-    """Score retrieval (hit@k, recall@k, MRR), or the develop step / cross-text co-retrieval."""
+    """Score retrieval (hit@k, recall@k, MRR), or the develop / cross-text / answer step."""
     settings = _cfg()
     require_qdrant(settings)
 
@@ -800,6 +804,40 @@ def evaluate(
         typer.echo(f"Cross-text gold set: {ct_path} ({len(ct_examples)} questions)\n")
         ct_report = run_crosstext_eval(build_retriever(settings), ct_examples, k=k)
         typer.echo(format_crosstext_report(ct_report))
+        return
+
+    if answer:
+        from maayan.embed.factory import build_embedder
+        from maayan.eval.answer_harness import format_answer_report, run_answer_eval
+        from maayan.eval.goldset import load_goldset
+        from maayan.eval.judge import build_answer_judge
+        from maayan.generate.factory import build_generation_backend
+        from maayan.generate.rag import RAGService
+        from maayan.retrieve.factory import build_retriever
+
+        a_path = goldset or settings.eval_answer_goldset_path
+        a_examples = load_goldset(a_path)
+        typer.echo(f"Answer gold set: {a_path} ({len(a_examples)} questions)")
+        typer.echo(f"Default-deny gate threshold: {settings.score_threshold}")
+        judge_model = settings.eval_judge_model or settings.generation_model
+        typer.echo(
+            f"Pipeline: expand={settings.query_expand_enabled} "
+            f"reason={settings.rag_reasoning_enabled} verify={settings.answer_verify_enabled} "
+            f"· judge={judge_model}\n"
+        )
+        # Evaluate the REAL configured pipeline (expansion/reasoning/verify per .env).
+        embedder = build_embedder(settings)
+        backend = build_generation_backend(settings)
+        retriever = build_retriever(
+            settings, embedder=embedder, expand=settings.query_expand_enabled,
+            backend=backend if settings.query_expand_enabled else None,
+        )
+        rag = RAGService(
+            retriever, backend, score_threshold=settings.score_threshold,
+            reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+        )
+        a_report = run_answer_eval(rag, build_answer_judge(settings), a_examples)
+        typer.echo(format_answer_report(a_report))
         return
 
     if develop:

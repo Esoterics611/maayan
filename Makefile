@@ -1,5 +1,5 @@
 .PHONY: help up down logs test typecheck lint fmt ingest index search ask annotate ui eval \
-	eval-expand sync prod-up prod-down prod-logs prod-build
+	eval-expand eval-answer sync prod-up prod-down prod-logs prod-build
 
 # Allow `make search Q='...'` / `make ask Q='...'`
 Q ?=
@@ -22,6 +22,7 @@ help:
 	@echo "             Add ARGS='--compare' for a variant table."
 	@echo "  eval-expand  Compare retrieval with/without query expansion. (Prompt 31)"
 	@echo "               Add ARGS='--crosstext' for the cross-text gold set."
+	@echo "  eval-answer  Score answer quality: citations + faithfulness (LLM judge). (Prompt 32)"
 	@echo "  prod-up    Build + start the production stack (docker-compose.prod.yml)."
 	@echo "  prod-down  Stop the production stack (volumes persist)."
 	@echo "  prod-logs  Tail production app + qdrant logs."
@@ -74,6 +75,9 @@ eval:
 
 eval-expand:
 	uv run maayan eval-expand $(ARGS)
+
+eval-answer:
+	uv run maayan eval --answer $(ARGS)
 
 # --- production (cloud) -----------------------------------------------------
 prod-up:

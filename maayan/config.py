@@ -304,6 +304,22 @@ class Settings(BaseSettings):
     )
     eval_ks: list[int] = Field(default=[1, 3, 5, 10])
 
+    # ---- Answer-quality eval (Prompt 32) ------------------------------------
+    eval_answer_goldset_path: str = Field(
+        default="eval/goldset.yaml",
+        description=(
+            "Gold set for the answer-quality eval (`eval --answer`). Reuses the retrieval "
+            "gold set by default; point at a synthesis-focused set to stress reasoning."
+        ),
+    )
+    eval_judge_model: str = Field(
+        default="",
+        description=(
+            "Model id for the faithfulness judge. Blank → use the generation model. Prefer a "
+            "strong model, ideally NOT the one under test (avoids self-grading bias)."
+        ),
+    )
+
     # ---- UI -----------------------------------------------------------------
     ui_host: str = Field(default="127.0.0.1")
     ui_port: int = Field(default=8000)
