@@ -28,10 +28,13 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const dealId = String(form.get("InternalDealNumber") ?? form.get("DealNumber") ?? "");
   const recurringId = String(form.get("AccountId") ?? form.get("RecurringId") ?? "");
+  // We set ReturnValue=membership.id at checkout (see lib/cardcom.ts), so this is
+  // the reliable correlation key even before a stable recurringId exists.
+  const membershipId = String(form.get("ReturnValue") ?? "");
   const responseCode = String(form.get("ResponseCode") ?? "");
   const operation = String(form.get("Operation") ?? ""); // charge | cancel | fail
 
-  if (!dealId && !recurringId) {
+  if (!dealId && !recurringId && !membershipId) {
     return NextResponse.json({ ok: false, error: "missing_ids" }, { status: 400 });
   }
 
@@ -53,7 +56,11 @@ export async function POST(req: NextRequest) {
     });
 
     const success = responseCode === "0";
-    const membership = await tx.membership.findFirst({ where: { recurringId } });
+    // Correlate on membershipId (ReturnValue) first; fall back to recurringId for
+    // renewal events where ReturnValue isn't echoed back.
+    const membership = membershipId
+      ? await tx.membership.findUnique({ where: { id: membershipId } })
+      : await tx.membership.findFirst({ where: { recurringId } });
     if (!membership) return;
 
     if (success && operation !== "cancel") {
@@ -61,6 +68,8 @@ export async function POST(req: NextRequest) {
         where: { id: membership.id },
         data: {
           status: "active",
+          // On first charge, persist the real recurring handle for future renewals.
+          recurringId: recurringId || membership.recurringId,
           // extend one billing period from the later of now / current expiry
           currentPeriodEnd: addMonth(maxDate(new Date(), membership.currentPeriodEnd)),
         },

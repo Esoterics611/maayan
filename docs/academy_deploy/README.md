@@ -18,6 +18,8 @@
 | [config/Caddyfile](config/Caddyfile) | Auto-HTTPS reverse proxy for both subdomains. |
 | [config/init-databases.sql](config/init-databases.sql) | Creates the second app DB on first Postgres init. |
 | [config/.env.example](config/.env.example) | All required secrets/vars. |
+| [config/db.ts](config/db.ts) | Prisma client singleton (the `@/lib/db` import everything shares). |
+| [config/cardcom.ts](config/cardcom.ts) | **Outbound** Cardcom checkout: starts a recurring membership (ILS, installments) → returns redirect URL. |
 | [config/auth.ts](config/auth.ts) | Auth.js (NextAuth v5) Credentials + role/locale JWT claims + `requireUser`/`requireRole` helpers. |
 | [config/middleware.ts](config/middleware.ts) | Route guard: `/admin` (ADMIN) and `/dashboard` (members). |
 | [config/seed.ts](config/seed.ts) | Idempotent seed: ADMIN user, sample course/class (cap 20), ₪99 monthly plan. |
