@@ -1,0 +1,97 @@
+# Academy (Maavar + Maayan) — single Oracle Always Free VPS (2 OCPU / 12 GB).
+# Long-term, host-agnostic stack: two Next.js apps + Postgres + Caddy (auto-HTTPS).
+#
+# NOTE: This is the ACADEMY infra, not the Python `maayan` RAG. Do not run from the
+# repo root (that docker-compose.yml is Qdrant). Copy this folder to the VPS.
+#
+#   cp .env.example .env   # then fill in secrets
+#   docker compose up -d
+#
+# Two apps share one Postgres instance, isolated by separate databases
+# (maavar / maayan). Same image is reused with a different build target / env.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Creates the default DB; the second DB is created by init script below.
+      POSTGRES_DB: maavar
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not exposed to the host — only reachable on the compose network.
+    expose:
+      - "5432"
+
+  maavar:
+    image: ${MAAVAR_IMAGE:-academy/maavar:latest}
+    build:
+      context: ../../maavar          # path to the Next.js app (adjust to your monorepo)
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/maavar?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: https://maavar.${ROOT_DOMAIN}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      CARDCOM_TERMINAL: ${CARDCOM_TERMINAL}
+      CARDCOM_API_NAME: ${CARDCOM_API_NAME}
+      CARDCOM_API_PASSWORD: ${CARDCOM_API_PASSWORD}
+      CARDCOM_WEBHOOK_SECRET: ${CARDCOM_WEBHOOK_SECRET}
+      NODE_ENV: production
+    expose:
+      - "3000"
+
+  maayan:
+    image: ${MAAYAN_IMAGE:-academy/maayan:latest}
+    build:
+      context: ../../maayan-academy   # the Next.js academy site (NOT the Python RAG)
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/maayan?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: https://maayan.${ROOT_DOMAIN}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      CARDCOM_TERMINAL: ${CARDCOM_TERMINAL}
+      CARDCOM_API_NAME: ${CARDCOM_API_NAME}
+      CARDCOM_API_PASSWORD: ${CARDCOM_API_PASSWORD}
+      CARDCOM_WEBHOOK_SECRET: ${CARDCOM_WEBHOOK_SECRET}
+      NODE_ENV: production
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - maavar
+      - maayan
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      ROOT_DOMAIN: ${ROOT_DOMAIN}
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,29 @@
+# Caddy reverse proxy — automatic HTTPS via Let's Encrypt for both apps.
+# Point maavar.<domain> and maayan.<domain> A-records at the VPS public IP first.
+# {$ROOT_DOMAIN} is injected from the environment (see docker-compose.yml).
+
+maavar.{$ROOT_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy maavar:3000
+	# Forward real client IP/proto so Auth.js + booking rate-limits see the truth.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+}
+
+maayan.{$ROOT_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy maayan:3000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+}
+
+# Optional: redirect the apex to the main marketing site.
+{$ROOT_DOMAIN} {
+	redir https://maavar.{$ROOT_DOMAIN}{uri}
+}
