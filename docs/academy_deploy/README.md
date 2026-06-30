@@ -18,6 +18,10 @@
 | [config/Caddyfile](config/Caddyfile) | Auto-HTTPS reverse proxy for both subdomains. |
 | [config/init-databases.sql](config/init-databases.sql) | Creates the second app DB on first Postgres init. |
 | [config/.env.example](config/.env.example) | All required secrets/vars. |
+| [config/auth.ts](config/auth.ts) | Auth.js (NextAuth v5) Credentials + role/locale JWT claims + `requireUser`/`requireRole` helpers. |
+| [config/middleware.ts](config/middleware.ts) | Route guard: `/admin` (ADMIN) and `/dashboard` (members). |
+| [config/seed.ts](config/seed.ts) | Idempotent seed: ADMIN user, sample course/class (cap 20), ₪99 monthly plan. |
+| [config/book.ts](config/book.ts) | Booking **server action**: capacity-safe transaction + retry + waitlist fallback (Hebrew messages). |
 | [config/cardcom-webhook.ts](config/cardcom-webhook.ts) | Cardcom recurring-membership webhook handler (Next.js route). |
 
 ## TL;DR recommendation
