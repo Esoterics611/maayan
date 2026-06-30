@@ -1,0 +1,209 @@
+// Academy data layer — shared by Maavar + Maayan (each app gets its own DATABASE,
+// same schema). Reference schema for the Next.js membership academy; NOT the
+// Python `maayan` RAG.
+//
+// Auth strategy: Auth.js Credentials provider with the JWT session strategy, so
+// passwords live as `passwordHash` on User. The Account/Session/VerificationToken
+// models below are the standard Auth.js Prisma-adapter tables — keep them if you
+// later add OAuth or database sessions; they're harmless if unused under JWT.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled at runtime (see PRISMA_DB.md)
+  directUrl = env("DIRECT_URL")   // unpooled, for `prisma migrate`
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum Locale {
+  he
+  en
+}
+
+enum MembershipStatus {
+  trialing
+  active
+  past_due
+  canceled
+}
+
+enum BookingStatus {
+  booked
+  waitlisted
+  canceled
+  attended
+}
+
+// ---------------------------------------------------------------------------
+// Auth + people
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String? // null for OAuth-only users; set for credentials login
+  name          String?
+  image         String?
+  role          Role      @default(STUDENT)
+  locale        Locale    @default(he)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // relations
+  accounts        Account[]
+  sessions        Session[]
+  bookings        Booking[]
+  memberships     Membership[]
+  taughtClasses   Class[]      @relation("InstructorClasses")
+
+  @@index([role])
+}
+
+// Standard Auth.js adapter models (optional under JWT strategy) -------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog + booking
+// ---------------------------------------------------------------------------
+
+model Course {
+  id          String   @id @default(cuid())
+  slug        String   @unique // keep nikkud out of slugs (SEO note in research)
+  title       String // Hebrew title
+  titleEn     String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  classes Class[]
+}
+
+model Class {
+  id           String   @id @default(cuid())
+  courseId     String
+  title        String
+  titleEn      String?
+  capacity     Int // enforced by the booking transaction (see PRISMA_DB.md)
+  startsAt     DateTime
+  endsAt       DateTime
+  location     String? // physical or meeting URL
+  instructorId String?
+  createdAt    DateTime @default(now())
+
+  course     Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  instructor User?     @relation("InstructorClasses", fields: [instructorId], references: [id])
+  bookings   Booking[]
+
+  @@index([courseId])
+  @@index([startsAt])
+}
+
+model Booking {
+  id        String        @id @default(cuid())
+  classId   String
+  userId    String
+  status    BookingStatus @default(booked)
+  createdAt DateTime      @default(now())
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // A user can't double-book the same class; also stops races under retry.
+  @@unique([classId, userId])
+  @@index([classId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Memberships + payments (Cardcom recurring)
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id            String       @id @default(cuid())
+  slug          String       @unique
+  name          String
+  priceAgorot   Int // price in agorot (ILS minor units) — integer money, no floats
+  intervalDays  Int          @default(30)
+  active        Boolean      @default(true)
+  memberships   Membership[]
+}
+
+model Membership {
+  id               String           @id @default(cuid())
+  userId           String
+  planId           String
+  status           MembershipStatus @default(trialing)
+  // Cardcom recurring account/charge id — links webhook events to this membership.
+  recurringId      String?          @unique
+  currentPeriodEnd DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// Idempotency ledger for webhook delivery — unique dealId means Cardcom retries
+// never double-apply a charge (see config/cardcom-webhook.ts).
+model PaymentEvent {
+  id           String   @id @default(cuid())
+  dealId       String   @unique
+  recurringId  String?
+  operation    String // charge | cancel | fail
+  responseCode String
+  receivedAt   DateTime @default(now())
+
+  @@index([recurringId])
+}
