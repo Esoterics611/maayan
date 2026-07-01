@@ -186,6 +186,23 @@ class Settings(BaseSettings):
         default=50, description="Cap on mined term candidates returned (ranked by frequency)."
     )
 
+    # ---- Populate drip (`maayan populate`) ----------------------------------
+    # Free generation endpoints rate-limit hard, so populate runs as a paced drip
+    # with backoff (Clock-injected, so tests never wait). Each draft persists as it
+    # happens → a run that dies mid-way resumes cleanly.
+    populate_pace_seconds: float = Field(
+        default=20.0, description="Seconds between drafts in a populate run."
+    )
+    populate_backoff_seconds: float = Field(
+        default=30.0, description="Base linear backoff after a retryable draft error (× attempt)."
+    )
+    populate_max_retries: int = Field(
+        default=5, description="Max attempts per item before skipping it (it resumes next run)."
+    )
+    populate_connector_k: int = Field(
+        default=8, description="Sources retrieved per probe when mining connection candidates."
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client

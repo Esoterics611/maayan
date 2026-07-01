@@ -9,11 +9,13 @@ library code. No business logic lives here.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 
 from maayan import __version__
+from maayan.clock import Clock, SystemClock
 from maayan.config import Settings, get_settings
 from maayan.corpus.ingest import IngestResult
 from maayan.corpus.models import Lang
@@ -890,6 +892,198 @@ def connectors_reject(
 
     ConnectionSuggestionStore(_cfg().db_path).set_status(suggestion_id, "rejected")
     typer.echo(f"Rejected connection {suggestion_id}.")
+
+
+@app.command()
+def populate(
+    what: str = typer.Option("all", "--what", help="What to populate: lexicon | connectors | all."),
+    seed: bool = typer.Option(True, "--seed/--no-seed", help="Draft the curated seed pack."),
+    mine: bool = typer.Option(True, "--mine/--no-mine", help="Mine candidates from the corpus."),
+    limit: int = typer.Option(20, "--limit", help="Max mined candidates per kind (cost control)."),
+    approve: bool = typer.Option(
+        False, "--approve", help="Auto-approve supported drafts (index them). Needs --author."
+    ),
+    author: str = typer.Option("", "--author", help="Approver name (required with --approve)."),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter slug)."
+    ),
+    pace: float = typer.Option(
+        None, "--pace", help="Seconds between drafts (default: config populate_pace_seconds)."
+    ),
+    include_unsupported: bool = typer.Option(
+        False, "--include-unsupported", help="Also queue ungrounded drafts (flagged), for review."
+    ),
+) -> None:
+    """Paced, resumable populate drip for lexicon terms and/or cross-text connections.
+
+    Each draft is grounded in retrieved sources, cited, and faithfulness-checked; nothing
+    is indexed unless you pass --approve (which still refuses unsupported drafts in code).
+    Spacing + backoff let heavily rate-limited free models drip through 429s, and every
+    draft persists as it happens — so a run that dies mid-way resumes cleanly on re-run.
+    """
+    if what not in ("lexicon", "connectors", "all"):
+        raise typer.BadParameter("--what must be one of: lexicon | connectors | all")
+    if approve and not author.strip():
+        raise typer.BadParameter("--approve requires --author")
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"lexicon_draft_model": model})
+    require_qdrant(settings)
+    clock = SystemClock()
+    pace_s = settings.populate_pace_seconds if pace is None else pace
+
+    if what in ("lexicon", "all"):
+        _populate_lexicon(
+            settings, clock, pace_s, seed=seed, mine=mine, limit=limit,
+            approve=approve, author=author, include_unsupported=include_unsupported,
+        )
+    if what in ("connectors", "all"):
+        _populate_connectors(
+            settings, clock, pace_s, mine=mine, limit=limit,
+            approve=approve, author=author, include_unsupported=include_unsupported,
+        )
+
+
+def _populate_lexicon(
+    settings: Settings,
+    clock: Clock,
+    pace: float,
+    *,
+    seed: bool,
+    mine: bool,
+    limit: int,
+    approve: bool,
+    author: str,
+    include_unsupported: bool,
+) -> None:
+    from maayan.corpus.store import ChunkStore
+    from maayan.lexicon.factory import build_lexicon_populator
+    from maayan.lexicon.populate import SEED_TERMS, mine_term_candidates
+    from maayan.lexicon.suggestions import SuggestionStore
+    from maayan.populate.drip import run_drip
+
+    populator = build_lexicon_populator(settings)
+    queued: set[str] = set()
+    for sug in SuggestionStore(settings.db_path).list():
+        queued.add(sug.canonical)
+        queued.update(sug.surface_forms)
+
+    seeds = (
+        [s for s in SEED_TERMS
+         if not (s.canonical in queued or any(f in queued for f in s.surface_forms))]
+        if seed
+        else []
+    )
+    mined: list[Any] = []
+    if mine:
+        chunks = ChunkStore(settings.db_path).get_chunks()
+        candidates = mine_term_candidates(
+            chunks, min_count=settings.lexicon_mine_min_count, top_n=settings.lexicon_mine_top_n
+        )
+        mined = [c for c in candidates[:limit] if c.surface not in queued]
+
+    work: list[tuple[str, Any]] = [("seed", s) for s in seeds] + [("mined", c) for c in mined]
+    total = len(work)
+    typer.echo(f"[lexicon] {total} to draft (seed={len(seeds)} mined={len(mined)}), pace={pace}s")
+
+    def draft_one(item: tuple[str, Any]) -> Sequence[Any]:
+        kind, obj = item
+        if kind == "seed":
+            return populator.suggest_from_seed([obj], persist_unsupported=include_unsupported)
+        return populator.suggest_from_candidates([obj], persist_unsupported=include_unsupported)
+
+    def on_result(idx: int, item: tuple[str, Any], drafts: Sequence[Any]) -> None:
+        name = getattr(item[1], "canonical", None) or getattr(item[1], "surface", "?")
+        for draft in drafts:
+            typer.echo(f"  [{idx}/{total}] {name} supported={draft.supported}")
+
+    def on_error(idx: int, item: tuple[str, Any], exc: Exception, attempt: int) -> None:
+        typer.echo(f"  ! [{idx}/{total}] {type(exc).__name__} (attempt {attempt}) — backing off")
+
+    stats = asyncio.run(
+        run_drip(
+            work, draft_one, clock=clock, pace=pace,
+            max_retries=settings.populate_max_retries, backoff=settings.populate_backoff_seconds,
+            on_result=on_result, on_error=on_error,
+        )
+    )
+    typer.echo(
+        f"[lexicon] drafted={stats.drafted} supported={stats.supported} failed={stats.failed}"
+    )
+    if approve:
+        indexed = 0
+        for pending in populator.list_pending():
+            if pending.supported:
+                populator.approve(pending.id, author=author)
+                indexed += 1
+        typer.echo(f"[lexicon] approved & indexed {indexed} term(s) as {author!r}.")
+
+
+def _populate_connectors(
+    settings: Settings,
+    clock: Clock,
+    pace: float,
+    *,
+    mine: bool,
+    limit: int,
+    approve: bool,
+    author: str,
+    include_unsupported: bool,
+) -> None:
+    from maayan.capture.factory import build_connection_populator
+    from maayan.capture.populate import CONNECTION_PROBES, mine_connection_candidates
+    from maayan.capture.suggestions import ConnectionSuggestionStore
+    from maayan.embed.factory import build_embedder
+    from maayan.eval.goldset import load_goldset
+    from maayan.populate.drip import run_drip
+    from maayan.retrieve.factory import build_retriever
+
+    if not mine:
+        typer.echo("[connectors] nothing to do (--no-mine).")
+        return
+
+    embedder = build_embedder(settings)
+    retriever = build_retriever(settings, embedder=embedder)
+    goldset_qs = [ex.question for ex in load_goldset(settings.eval_crosstext_goldset_path)]
+    probes = list(dict.fromkeys([*CONNECTION_PROBES, *goldset_qs]))
+
+    done = {frozenset(s.refs) for s in ConnectionSuggestionStore(settings.db_path).list()}
+    mined = mine_connection_candidates(retriever, probes, k=settings.populate_connector_k)
+    candidates = [c for c in mined[:limit] if frozenset(e.ref for e in c.ends) not in done]
+
+    populator = build_connection_populator(settings, embedder=embedder)
+    total = len(candidates)
+    typer.echo(f"[connectors] {total} to draft (probes={len(probes)}), pace={pace}s")
+
+    def draft_one(cand: Any) -> Sequence[Any]:
+        return populator.suggest([cand], persist_unsupported=include_unsupported)
+
+    def on_result(idx: int, cand: Any, drafts: Sequence[Any]) -> None:
+        ends = " ↔ ".join(e.ref for e in cand.ends)
+        for draft in drafts:
+            typer.echo(f"  [{idx}/{total}] {ends} supported={draft.supported}")
+
+    def on_error(idx: int, cand: Any, exc: Exception, attempt: int) -> None:
+        typer.echo(f"  ! [{idx}/{total}] {type(exc).__name__} (attempt {attempt}) — backing off")
+
+    stats = asyncio.run(
+        run_drip(
+            candidates, draft_one, clock=clock, pace=pace,
+            max_retries=settings.populate_max_retries, backoff=settings.populate_backoff_seconds,
+            on_result=on_result, on_error=on_error,
+        )
+    )
+    typer.echo(
+        f"[connectors] drafted={stats.drafted} supported={stats.supported} failed={stats.failed}"
+    )
+    if approve:
+        indexed = 0
+        for pending in populator.list_pending():
+            if pending.supported:
+                populator.approve(pending.id, author=author)
+                indexed += 1
+        typer.echo(f"[connectors] approved & indexed {indexed} connection(s) as {author!r}.")
 
 
 @app.command()
