@@ -43,6 +43,26 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
 
+    generation_max_tokens: int = Field(
+        default=4096,
+        description=(
+            "Cap on output tokens per generation call. Without it OpenRouter reserves the "
+            "model's full context, which 402s on low balances and some free endpoints reject "
+            "outright; 4096 is generous for grounded answers and per-section fills."
+        ),
+    )
+    generation_timeout: float = Field(
+        default=120.0,
+        description="Per-request timeout (s) for cloud generation; free endpoints can be slow.",
+    )
+    generation_max_retries: int = Field(
+        default=5,
+        description=(
+            "Client-side retries for transient 429/5xx (the SDK honors Retry-After). Free "
+            "OpenRouter models are heavily contended, so retries keep a drip run alive."
+        ),
+    )
+
     @property
     def generation_model(self) -> str:
         """The model id of the selected generation backend (for provenance/logging)."""
