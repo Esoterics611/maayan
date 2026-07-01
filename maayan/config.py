@@ -43,6 +43,26 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
 
+    generation_max_tokens: int = Field(
+        default=4096,
+        description=(
+            "Cap on output tokens per generation call. Without it OpenRouter reserves the "
+            "model's full context, which 402s on low balances and some free endpoints reject "
+            "outright; 4096 is generous for grounded answers and per-section fills."
+        ),
+    )
+    generation_timeout: float = Field(
+        default=120.0,
+        description="Per-request timeout (s) for cloud generation; free endpoints can be slow.",
+    )
+    generation_max_retries: int = Field(
+        default=5,
+        description=(
+            "Client-side retries for transient 429/5xx (the SDK honors Retry-After). Free "
+            "OpenRouter models are heavily contended, so retries keep a drip run alive."
+        ),
+    )
+
     @property
     def generation_model(self) -> str:
         """The model id of the selected generation backend (for provenance/logging)."""
@@ -164,6 +184,23 @@ class Settings(BaseSettings):
     )
     lexicon_mine_top_n: int = Field(
         default=50, description="Cap on mined term candidates returned (ranked by frequency)."
+    )
+
+    # ---- Populate drip (`maayan populate`) ----------------------------------
+    # Free generation endpoints rate-limit hard, so populate runs as a paced drip
+    # with backoff (Clock-injected, so tests never wait). Each draft persists as it
+    # happens → a run that dies mid-way resumes cleanly.
+    populate_pace_seconds: float = Field(
+        default=20.0, description="Seconds between drafts in a populate run."
+    )
+    populate_backoff_seconds: float = Field(
+        default=30.0, description="Base linear backoff after a retryable draft error (× attempt)."
+    )
+    populate_max_retries: int = Field(
+        default=5, description="Max attempts per item before skipping it (it resumes next run)."
+    )
+    populate_connector_k: int = Field(
+        default=8, description="Sources retrieved per probe when mining connection candidates."
     )
 
     # ---- Corpus -------------------------------------------------------------
@@ -346,6 +383,26 @@ class Settings(BaseSettings):
             "Model id for the faithfulness judge. Blank → use the generation model. Prefer a "
             "strong model, ideally NOT the one under test (avoids self-grading bias)."
         ),
+    )
+
+    # ---- Benchmark (head-to-head: grounded maayan vs frontier closed-book) ---
+    bench_goldset_path: str = Field(
+        default="eval/benchmark_goldset.yaml",
+        description="Expert gold set for the head-to-head benchmark (adds `answer` + `stratum`).",
+    )
+    bench_closed_book_model: str = Field(
+        default="",
+        description="Arm B: the frontier model answering closed-book. Blank → generation model.",
+    )
+    bench_judge_model: str = Field(
+        default="",
+        description=(
+            "Blinded pairwise grader model. Blank → eval_judge_model, else the generation model. "
+            "Prefer a strong model that is NEITHER arm under test."
+        ),
+    )
+    bench_seed: int = Field(
+        default=0, description="RNG seed for blinding (answer-order randomization) — reproducible."
     )
 
     # ---- UI -----------------------------------------------------------------
