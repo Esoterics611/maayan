@@ -385,6 +385,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Benchmark (head-to-head: grounded maayan vs frontier closed-book) ---
+    bench_goldset_path: str = Field(
+        default="eval/benchmark_goldset.yaml",
+        description="Expert gold set for the head-to-head benchmark (adds `answer` + `stratum`).",
+    )
+    bench_closed_book_model: str = Field(
+        default="",
+        description="Arm B: the frontier model answering closed-book. Blank → generation model.",
+    )
+    bench_judge_model: str = Field(
+        default="",
+        description=(
+            "Blinded pairwise grader model. Blank → eval_judge_model, else the generation model. "
+            "Prefer a strong model that is NEITHER arm under test."
+        ),
+    )
+    bench_seed: int = Field(
+        default=0, description="RNG seed for blinding (answer-order randomization) — reproducible."
+    )
+
     # ---- UI -----------------------------------------------------------------
     ui_host: str = Field(default="127.0.0.1")
     ui_port: int = Field(default=8000)

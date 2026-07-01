@@ -1,0 +1,37 @@
+# Benchmark gold set — TEMPLATE. Expand to ~60 questions per docs/BENCHMARK_PLAN.md §4.
+#
+# This drives the blinded head-to-head (`maayan bench`): grounded maayan vs a frontier
+# model answering closed-book, graded against YOUR gold `answer` by a blinded judge.
+#
+# Fields per example:
+#   question       the question, as a learner would ask it
+#   stratum        torah_ohr | tanya_control | cross_text | negative  (buckets the results)
+#   expected_refs  chapter/os-level refs that should ground it (retrieval check)
+#   answer         YOUR gold answer — a few sentences WITH the mekoros. REPLACE every TODO.
+#   should_refuse  true for negatives (corpus can't answer); leave expected_refs/answer empty
+#   note           optional grader hint
+#
+# Stratify ~ 30 torah_ohr · 15 tanya_control · 10 cross_text · 5 negative.
+# Write only for texts we have (Tanya + Torah Ohr); hold Likutei Torah until ingested.
+
+examples:
+  - question: "מהי עבודת הבירורים לפי תורה אור פרשת מקץ?"
+    stratum: torah_ohr
+    expected_refs: ["Torah Ohr, Miketz 5:11"]
+    answer: "TODO: expert gold answer, with mekoros."
+
+  - question: "מהן שתי הנפשות של האדם לפי התניא?"
+    stratum: tanya_control
+    expected_refs: ["Tanya, Part I; Likkutei Amarim 1", "Tanya, Part I; Likkutei Amarim 2"]
+    answer: "TODO: expert gold answer, with mekoros."
+
+  - question: "כיצד מתקשר עניין הצמצום בתורה אור לתפיסת הנפש האלוקית בתניא?"
+    stratum: cross_text
+    expected_refs: ["Torah Ohr, Vayera 1:15", "Tanya, Part I; Likkutei Amarim 2"]
+    answer: "TODO: expert gold answer that draws on BOTH texts, with mekoros."
+
+  - question: "מה דעת בעל התניא על הלכות עירובין מעשיות?"
+    stratum: negative
+    should_refuse: true
+    expected_refs: []
+    note: "Outside the corpus — the correct behavior is to refuse."

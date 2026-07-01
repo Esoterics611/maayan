@@ -1087,6 +1087,68 @@ def _populate_connectors(
 
 
 @app.command()
+def bench(
+    goldset: str = typer.Option(None, "--goldset", help="Benchmark gold set (default: config)."),
+    no_ablation: bool = typer.Option(
+        False, "--no-ablation", help="Skip the Arm-A text-only vs +synthetic ablation."
+    ),
+    limit: int = typer.Option(0, "--limit", help="Only run the first N questions (0 = all)."),
+) -> None:
+    """Blinded head-to-head: grounded maayan (Arm A) vs frontier closed-book (Arm B).
+
+    Grades both answers against the expert gold answer with a blinded frontier judge,
+    and (unless --no-ablation) runs Arm A text-only vs +synthetic to isolate what the
+    populated layer adds. Needs a gold set with `answer` + `stratum` fields.
+    """
+    from maayan.embed.factory import build_embedder
+    from maayan.eval.benchmark import (
+        build_closed_book,
+        build_pairwise_judge,
+        format_benchmark_report,
+        run_benchmark,
+    )
+    from maayan.eval.goldset import load_goldset
+    from maayan.generate.factory import build_generation_backend
+    from maayan.generate.rag import RAGService
+    from maayan.retrieve.factory import build_retriever
+
+    settings = _cfg()
+    require_qdrant(settings)
+    path = goldset or settings.bench_goldset_path
+    examples = load_goldset(path)
+    if limit > 0:
+        examples = examples[:limit]
+    gradable = sum(1 for ex in examples if ex.answer is not None and not ex.should_refuse)
+    closed_model = settings.bench_closed_book_model or settings.generation_model
+    judge_model = (
+        settings.bench_judge_model or settings.eval_judge_model or settings.generation_model
+    )
+    typer.echo(f"Benchmark gold set: {path} ({len(examples)} questions, {gradable} gradable)")
+    typer.echo(f"Arm A maayan: {settings.generation_model} · Arm B closed-book: {closed_model}")
+    typer.echo(
+        f"Blinded grader: {judge_model} · seed={settings.bench_seed} · ablation={not no_ablation}\n"
+    )
+    if judge_model in (settings.generation_model, closed_model):
+        typer.echo("⚠  grader shares a model with an arm under test — set bench_judge_model.\n")
+
+    embedder = build_embedder(settings)
+    backend = build_generation_backend(settings)
+    retriever = build_retriever(
+        settings, embedder=embedder, expand=settings.query_expand_enabled,
+        backend=backend if settings.query_expand_enabled else None,
+    )
+    rag = RAGService(
+        retriever, backend, score_threshold=settings.score_threshold,
+        reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+    )
+    report = run_benchmark(
+        rag, build_closed_book(settings), build_pairwise_judge(settings), examples,
+        seed=settings.bench_seed, ablation=not no_ablation,
+    )
+    typer.echo(format_benchmark_report(report))
+
+
+@app.command()
 def term(term_id: str = typer.Argument(..., help="Term id to display.")) -> None:
     """Show one lexicon term."""
     from maayan.lexicon.factory import build_term_service
