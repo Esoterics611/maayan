@@ -1876,6 +1876,78 @@ def graph_backfill() -> None:
     )
 
 
+@graph_app.command("ingest-links")
+def graph_ingest_links(
+    book: str | None = typer.Option(
+        None, "--book", help="Only refs of this book (name or base-ref prefix)."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", "-n", help="Fetch links for at most N (unfetched) refs."
+    ),
+    join: bool = typer.Option(
+        True, "--join/--no-join", help="Run the deterministic pasuk join afterwards."
+    ),
+) -> None:
+    """Ingest Sefaria's curated links as edges — no model, no spend. Resumable."""
+    import httpx as _httpx
+
+    from maayan.corpus.store import ChunkStore
+    from maayan.graph.links import LinksCursorStore, SefariaLinksClient, ingest_links
+
+    settings = _cfg()
+    if not settings.graph_links_enabled:
+        typer.echo("graph link ingestion is disabled (GRAPH_LINKS_ENABLED=false)")
+        raise typer.Exit(1)
+    clock = SystemClock()
+
+    async def _run() -> None:
+        async with _httpx.AsyncClient(timeout=30.0) as http:
+            client = SefariaLinksClient(
+                http,
+                clock,
+                base_url=settings.sefaria_base_url,
+                rate_limit_seconds=settings.sefaria_rate_limit_seconds,
+            )
+            result = await ingest_links(
+                ChunkStore(settings.db_path),
+                _graph_store_cli(),
+                LinksCursorStore(settings.db_path),
+                client,
+                clock,
+                settings,
+                book=book,
+                limit=limit,
+            )
+        typer.echo(
+            f"refs: {result.refs_seen} seen, {result.refs_fetched} fetched, "
+            f"{result.refs_skipped} already done, {result.refs_failed} failed (will retry)"
+        )
+        typer.echo(
+            f"links: {result.links_seen} seen, {result.links_kept} kept → "
+            f"{result.relations_created} new edges ({result.relations_existing} existing)"
+        )
+
+    asyncio.run(_run())
+    if join:
+        _run_pasuk_join()
+
+
+def _run_pasuk_join() -> None:
+    from maayan.graph.links import pasuk_join
+
+    result = pasuk_join(_graph_store_cli(), SystemClock())
+    typer.echo(
+        f"pasuk join: {result.pasukim} shared pesukim, {result.pairs} pairs → "
+        f"{result.relations_created} new parallels ({result.relations_existing} existing)"
+    )
+
+
+@graph_app.command("pasuk-join")
+def graph_pasuk_join() -> None:
+    """Create deterministic 'parallels' edges between refs sharing a pasuk anchor."""
+    _run_pasuk_join()
+
+
 @graph_app.command("stats")
 def graph_stats() -> None:
     """Graph tallies by type / evidence / status."""
