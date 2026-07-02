@@ -22,6 +22,11 @@ class GoldExample(BaseModel):
     expected_refs: list[str] = Field(default_factory=list)
     should_refuse: bool = False
     note: str | None = None
+    # Benchmark-only (optional; ignored by retrieval eval). `answer` is the expert's
+    # gold answer used to grade Arm A vs Arm B; `stratum` buckets results (e.g.
+    # torah_ohr / tanya_control / cross_text / negative).
+    answer: str | None = None
+    stratum: str | None = None
 
 
 def load_goldset(path: str) -> list[GoldExample]:

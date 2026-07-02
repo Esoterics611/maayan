@@ -19,6 +19,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Claude Code — personal/local settings (project settings.json IS committed)
+.claude/settings.local.json
+
 # Local data (corpus DB, exports, qdrant snapshots)
 data/
 *.sqlite3

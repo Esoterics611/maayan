@@ -23,12 +23,17 @@ class OpenRouterBackend:
         model: str = "qwen/qwen-2.5-72b-instruct",
         temperature: float = 0.2,
         timeout: float = 60.0,
+        max_tokens: int | None = None,
+        max_retries: int = 2,
     ) -> None:
         from openai import OpenAI
 
-        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        self._client = OpenAI(
+            api_key=api_key, base_url=base_url, timeout=timeout, max_retries=max_retries
+        )
         self._model = model
         self._temperature = temperature
+        self._max_tokens = max_tokens
 
     def generate(self, system: str, messages: Sequence[Message]) -> str:
         chat: list[dict[str, str]] = [{"role": "system", "content": system}]
@@ -37,5 +42,6 @@ class OpenRouterBackend:
             model=self._model,
             messages=chat,  # type: ignore[arg-type]
             temperature=self._temperature,
+            max_tokens=self._max_tokens,
         )
         return response.choices[0].message.content or ""

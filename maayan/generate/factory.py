@@ -24,6 +24,9 @@ def build_generation_backend(settings: Settings) -> GenerationBackend:
             api_key,
             base_url=settings.openrouter_base_url,
             model=settings.openrouter_model,
+            max_tokens=settings.generation_max_tokens,
+            timeout=settings.generation_timeout,
+            max_retries=settings.generation_max_retries,
         )
     if backend == "ollama":
         from maayan.generate.ollama import OllamaBackend
