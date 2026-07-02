@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff check *)",
+      "Bash(uv run mypy *)",
+      "Bash(make test)",
+      "Bash(make lint)",
+      "Bash(make typecheck)",
+      "Bash(make eval)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.sh\"",
+            "timeout": 300,
+            "statusMessage": "Verifying lint + typecheck before stop…"
+          }
+        ]
+      }
+    ]
+  }
+}
