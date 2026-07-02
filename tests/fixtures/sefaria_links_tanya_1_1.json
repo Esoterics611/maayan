@@ -1,0 +1,82 @@
+[
+  {
+    "_id": "6395c3346553a316d26d70ed",
+    "ref": "Legends of the Jews 1:6:2",
+    "anchorRef": "Tanya, Part I; Likkutei Amarim 1:1",
+    "anchorVerse": 1,
+    "category": "Midrash",
+    "type": "",
+    "sourceRef": "Legends of the Jews 1:6:2",
+    "sourceHeRef": "אגדות היהודים א׳:ו׳:ב׳",
+    "index_title": "Legends of the Jews",
+    "collectiveTitle": {
+      "en": "Legends of the Jews",
+      "he": "אגדות היהודים"
+    },
+    "sourceHasEn": true
+  },
+  {
+    "_id": "63968b1759c5c13b6bf71dab",
+    "ref": "Niddah 30b:25",
+    "anchorRef": "Tanya, Part I; Likkutei Amarim 1:1",
+    "anchorVerse": 1,
+    "category": "Talmud",
+    "type": "reference",
+    "sourceRef": "Niddah 30b:25",
+    "sourceHeRef": "נדה ל׳ ב:כ״ה",
+    "index_title": "Niddah",
+    "collectiveTitle": {
+      "en": "Niddah",
+      "he": "נדה"
+    },
+    "sourceHasEn": true
+  },
+  {
+    "_id": "63968e793799de58d5604986",
+    "ref": "Pirkei Avot 2:13",
+    "anchorRef": "Tanya, Part I; Likkutei Amarim 1:1",
+    "anchorVerse": 1,
+    "category": "Mishnah",
+    "type": "quotation",
+    "sourceRef": "Pirkei Avot 2:13",
+    "sourceHeRef": "משנה אבות ב׳:י״ג",
+    "index_title": "Pirkei Avot",
+    "collectiveTitle": {
+      "en": "Pirkei Avot",
+      "he": "משנה אבות"
+    },
+    "sourceHasEn": true
+  },
+  {
+    "_id": "6962a1fbbffdac10af6055a9",
+    "ref": "Mishnah Niddah 3",
+    "anchorRef": "Tanya, Part I; Likkutei Amarim 1:1",
+    "anchorVerse": 1,
+    "category": "Mishnah",
+    "type": "",
+    "sourceRef": "Mishnah Niddah 3",
+    "sourceHeRef": "משנה נדה ג׳",
+    "index_title": "Mishnah Niddah",
+    "collectiveTitle": {
+      "en": "Mishnah Niddah",
+      "he": "משנה נדה"
+    },
+    "sourceHasEn": true
+  },
+  {
+    "_id": "6962f378a7116e3077999804",
+    "ref": "One People? Tradition, Modernity, and Jewish Unity, Chapter 4; Orthodoxy and Jewish Peoplehood 28",
+    "anchorRef": "Tanya, Part I; Likkutei Amarim 1:1",
+    "anchorVerse": 1,
+    "category": "Jewish Thought",
+    "type": "",
+    "sourceRef": "One People? Tradition, Modernity, and Jewish Unity, Chapter 4; Orthodoxy and Jewish Peoplehood 28",
+    "sourceHeRef": "עם אחד? מסורת, מודרניות ואחדות יהודית, פרק ד; אורתודוקסיה ועם ישראל כ״ח",
+    "index_title": "One People? Tradition, Modernity, and Jewish Unity",
+    "collectiveTitle": {
+      "en": "One People? Tradition, Modernity, and Jewish Unity",
+      "he": "עם אחד? מסורת, מודרניות ואחדות יהודית"
+    },
+    "sourceHasEn": true
+  }
+]

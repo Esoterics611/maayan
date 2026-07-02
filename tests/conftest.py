@@ -29,3 +29,15 @@ def chapter1_json() -> Any:
 @pytest.fixture
 def chapter2_json() -> Any:
     return load_fixture("sefaria_likkutei_amarim_ch2.json")
+
+
+@pytest.fixture
+def links_tanya_18_1_json() -> Any:
+    """Real /api/links payload for Tanya 18:1 (one Tanakh link), trimmed."""
+    return load_fixture("sefaria_links_tanya_18_1.json")
+
+
+@pytest.fixture
+def links_tanya_1_1_json() -> Any:
+    """Real /api/links payload for Tanya 1:1 (mixed categories), trimmed."""
+    return load_fixture("sefaria_links_tanya_1_1.json")

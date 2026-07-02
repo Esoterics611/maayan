@@ -280,3 +280,25 @@ class BackfillResult(BaseModel):
     relations_created: int = 0
     relations_existing: int = 0
     skipped_chunks: int = 0
+
+
+class LinksIngestResult(BaseModel):
+    """Outcome of `maayan graph ingest-links` (resumable: rerun skips fetched refs)."""
+
+    refs_seen: int = 0
+    refs_fetched: int = 0
+    refs_skipped: int = 0  # already in the cursor from a previous run
+    refs_failed: int = 0  # fetch errors; NOT cursored, so the next run retries them
+    links_seen: int = 0
+    links_kept: int = 0  # in a kept category (config: sefaria_link_categories)
+    relations_created: int = 0
+    relations_existing: int = 0
+
+
+class PasukJoinResult(BaseModel):
+    """Outcome of the deterministic pasuk join (idempotent)."""
+
+    pasukim: int = 0  # distinct quotes_pasuk targets shared by ≥2 corpus refs
+    pairs: int = 0
+    relations_created: int = 0
+    relations_existing: int = 0

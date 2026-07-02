@@ -216,6 +216,23 @@ class Settings(BaseSettings):
             "and the inquiry queue can rank them for re-review."
         ),
     )
+    graph_links_enabled: bool = Field(
+        default=True,
+        description=(
+            "Allow `maayan graph ingest-links` (curated Sefaria links → edges). Pacing "
+            "reuses sefaria_rate_limit_seconds, mirroring the corpus ingester."
+        ),
+    )
+    sefaria_link_categories: list[str] = Field(
+        default=["Tanakh", "Talmud", "Mishnah", "Midrash", "Kabbalah"],
+        description=(
+            "Sefaria link categories kept as citation edges. Verified against the live "
+            "/api/links payload (2026-07-02): 'Tanakh' targets become quotes_pasuk (the "
+            "pasuk-join key), the rest become quotes. 'Commentary' (e.g. 'Sources and "
+            "References on Torah Ohr') and 'Jewish Thought' are meta-material, not "
+            "citations, and are deliberately not kept."
+        ),
+    )
 
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
