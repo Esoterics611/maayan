@@ -18,6 +18,8 @@ from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.store import DevelopmentStore
 from maayan.embed.fake import HashingEmbedder
+from maayan.graph.models import RefEndpoint, Relation
+from maayan.graph.store import GraphStore
 from maayan.index.pipeline import index_chunks
 from maayan.index.qdrant import QdrantIndex
 from maayan.lexicon.models import Term
@@ -38,6 +40,7 @@ class Setup(NamedTuple):
     developments: DevelopmentStore
     terms: TermStore
     retractions: RetractionStore
+    graph: GraphStore
 
 
 def _setup() -> Setup:
@@ -45,10 +48,11 @@ def _setup() -> Setup:
     retractions = RetractionStore(":memory:")
     developments = DevelopmentStore(":memory:")
     terms = TermStore(":memory:")
+    graph = GraphStore(":memory:")
     embedder = HashingEmbedder(dim=DIM)
     index = QdrantIndex(QdrantClient(location=":memory:"), "t", DIM)
-    svc = RetractionService(chunks, retractions, index, FakeClock(), developments, terms)
-    return Setup(svc, chunks, index, embedder, developments, terms, retractions)
+    svc = RetractionService(chunks, retractions, index, FakeClock(), developments, terms, graph)
+    return Setup(svc, chunks, index, embedder, developments, terms, retractions, graph)
 
 
 def _seed_indexed(s: Setup, chunk: Chunk) -> Chunk:
@@ -188,6 +192,67 @@ def test_retracting_term_chunk_marks_the_term_retracted() -> None:
 
     marked = s.terms.get_term("term-1")
     assert marked is not None and marked.retracted is True
+
+
+# -- graph relations: audited retraction + cascade (Prompt 33) ----------------
+
+def _seed_relation(s: Setup, *, source_chunk_id: str | None = None) -> Relation:
+    relation = Relation.make(
+        subject=RefEndpoint(ref="Tanya, Part I; Likkutei Amarim 18"),
+        object=RefEndpoint(ref="Torah Ohr, Vayera 14a"),
+        rel_type="connects", evidence="expert", confidence=1.0, status="approved",
+        author="R. Ginsburgh", source_chunk_id=source_chunk_id,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    return s.graph.save_relation(relation)
+
+
+def test_retract_relation_is_audited_and_tombstoned() -> None:
+    s = _setup()
+    relation = _seed_relation(s)
+
+    r = s.svc.retract_relation(relation.id, author="R. Editor", reason="wrong pair")
+
+    assert r.chunk_id == relation.id
+    assert r.source == "relation"
+    assert "connects" in r.ref and "Tanya" in r.ref and "Torah Ohr" in r.ref
+    assert r.author == "R. Editor" and r.reason == "wrong pair"
+    stored = s.graph.get_relation(relation.id)
+    assert stored is not None and stored.status == "retracted"  # tombstoned, not deleted
+    assert s.retractions.count() == 1
+
+
+def test_retract_relation_rejects_blank_author_and_unknown_id() -> None:
+    s = _setup()
+    relation = _seed_relation(s)
+    with pytest.raises(ValueError, match="author"):
+        s.svc.retract_relation(relation.id, author="  ", reason="x")
+    live = s.graph.get_relation(relation.id)
+    assert live is not None and live.status == "approved"  # rejected before mutation
+    with pytest.raises(ValueError, match="No relation"):
+        s.svc.retract_relation("nope", author="Editor", reason="x")
+    relation2 = s.svc.retract_relation(relation.id, author="Editor", reason="x")
+    with pytest.raises(ValueError, match="already retracted"):
+        s.svc.retract_relation(relation2.chunk_id, author="Editor", reason="again")
+
+
+def test_retracting_connection_chunk_cascades_to_lifted_relations() -> None:
+    s = _setup()
+    chunk = _seed_indexed(s, _expert_chunk())
+    lifted = _seed_relation(s, source_chunk_id=chunk.id)
+    unrelated = Relation.make(
+        subject=RefEndpoint(ref="Tanya 3"), object=RefEndpoint(ref="Tanya 4"),
+        rel_type="parallels", evidence="expert", confidence=1.0, status="approved",
+        author="R. Ginsburgh", created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    s.graph.save_relation(unrelated)
+
+    s.svc.retract(chunk.ref, author="Editor", reason="superseded")
+
+    cascaded = s.graph.get_relation(lifted.id)
+    assert cascaded is not None and cascaded.status == "retracted"
+    kept = s.graph.get_relation(unrelated.id)
+    assert kept is not None and kept.status == "approved"
 
 
 # -- UI route happy-path + rejection path ------------------------------------

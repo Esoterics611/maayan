@@ -21,6 +21,8 @@ from maayan.corpus.ingest import IngestResult
 from maayan.corpus.models import Lang
 
 if TYPE_CHECKING:
+    from maayan.graph.models import ConceptEndpoint, RefEndpoint, Relation
+    from maayan.graph.store import GraphStore
     from maayan.users.models import Role, UserOut
     from maayan.users.service import UserService
 
@@ -1693,6 +1695,200 @@ def ui() -> None:
     typer.echo("maayan UI → " + "  or  ".join(urls) + suffix)
     typer.echo("  (open one of those in your browser; not the 0.0.0.0 bind address)")
     uvicorn.run(application, host=settings.ui_host, port=settings.ui_port)
+
+
+# --- knowledge graph (Phase 7, Prompt 33) -----------------------------------
+# Typed, provenanced, gated relations between refs and concepts. Construction at
+# the edge as always: the commands build the stores and inject them.
+graph_app = typer.Typer(
+    help="Typed knowledge-graph edges: add, approve, list, show, backfill.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(graph_app, name="graph")
+
+
+def _graph_store_cli() -> GraphStore:
+    from maayan.graph.store import GraphStore
+
+    return GraphStore(_cfg().db_path)
+
+
+def _parse_endpoint(
+    ref: str | None, concept_id: str | None, side: str
+) -> RefEndpoint | ConceptEndpoint:
+    from maayan.graph.models import ConceptEndpoint, RefEndpoint
+
+    if (ref is None) == (concept_id is None):
+        typer.echo(f"error: give exactly one of --{side} (a ref) or --{side}-concept")
+        raise typer.Exit(1)
+    if ref is not None:
+        return RefEndpoint(ref=ref)
+    assert concept_id is not None  # the exactly-one check above guarantees it
+    return ConceptEndpoint(concept_id=concept_id)
+
+
+def _relation_line(relation: Relation, *, perspective: str | None = None) -> str:
+    """One human line per edge: badge, endpoints, author, status."""
+    from maayan.graph.models import EVIDENCE_GLYPH, endpoint_str
+
+    glyph = EVIDENCE_GLYPH.get(relation.evidence, "?")
+    subject, obj = endpoint_str(relation.subject), endpoint_str(relation.object)
+    if perspective is not None and subject == perspective:
+        arrow = f"—{relation.rel_type}→ {obj}"
+    elif perspective is not None and obj == perspective:
+        arrow = f"←{relation.rel_type}— {subject}"
+    else:
+        arrow = f"{subject} —{relation.rel_type}→ {obj}"
+    status = "" if relation.status == "approved" else f"  [{relation.status}]"
+    return f"{glyph} {arrow}   ({relation.author}, {relation.evidence}){status}"
+
+
+@graph_app.command("add")
+def graph_add(
+    rel_type: str = typer.Option(..., "--type", "-t", help="Relation type (e.g. connects)."),
+    author: str = typer.Option(..., "--author", "-a", help="Who asserts this edge."),
+    subject: str | None = typer.Option(None, "--subject", "-s", help="Subject ref."),
+    subject_concept: str | None = typer.Option(None, "--subject-concept"),
+    object_ref: str | None = typer.Option(None, "--object", "-o", help="Object ref."),
+    object_concept: str | None = typer.Option(None, "--object-concept"),
+    note: str | None = typer.Option(None, "--note", help="Optional free-form note."),
+    confidence: float | None = typer.Option(
+        None, "--confidence", help="0–1; defaults to graph_default_confidence."
+    ),
+) -> None:
+    """Propose a typed relation (evidence 'expert'). Approval is a separate, gated step."""
+    from typing import get_args
+
+    from maayan.graph.models import Relation, RelationType
+
+    if rel_type not in get_args(RelationType):
+        known = ", ".join(get_args(RelationType))
+        typer.echo(f"error: unknown --type {rel_type!r}; one of: {known}")
+        raise typer.Exit(1)
+    settings = _cfg()
+    relation = Relation.make(
+        subject=_parse_endpoint(subject, subject_concept, "subject"),
+        object=_parse_endpoint(object_ref, object_concept, "object"),
+        rel_type=cast("RelationType", rel_type),
+        evidence="expert",
+        confidence=confidence if confidence is not None else settings.graph_default_confidence,
+        author=author,
+        note=note,
+        created_at=SystemClock().now(),
+    )
+    stored = _graph_store_cli().save_relation(relation)
+    typer.echo(_relation_line(stored))
+    typer.echo(f"id: {stored.id}")
+    if stored.status == "proposed":
+        typer.echo(f"proposed — approve with: maayan graph approve {stored.id} --author <you>")
+
+
+@graph_app.command("approve")
+def graph_approve(
+    relation_id: str = typer.Argument(..., help="Relation id to approve."),
+    author: str = typer.Option(..., "--author", "-a", help="The approving human."),
+) -> None:
+    """Approve one proposed relation (the only path to 'approved')."""
+    try:
+        relation = _graph_store_cli().approve(relation_id, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"approved: {_relation_line(relation)}")
+
+
+@graph_app.command("retract")
+def graph_retract(
+    relation_id: str = typer.Argument(..., help="Relation id to retract."),
+    author: str = typer.Option(..., "--author", "-a", help="Who retracts it."),
+    reason: str = typer.Option(..., "--reason", "-r", help="Why (audited)."),
+) -> None:
+    """Retract one relation — audited (who/when/why), never a silent delete."""
+    from maayan.retract.factory import build_retraction_service
+
+    try:
+        retraction = build_retraction_service(_cfg()).retract_relation(
+            relation_id, author=author, reason=reason
+        )
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"retracted: {retraction.ref}  (by {retraction.author}: {retraction.reason})")
+
+
+@graph_app.command("list")
+def graph_list(
+    status: str | None = typer.Option(None, "--status", help="proposed|approved|retracted"),
+    rel_type: str | None = typer.Option(None, "--type", "-t"),
+    evidence: str | None = typer.Option(None, "--evidence", "-e"),
+    limit: int = typer.Option(50, "--limit", "-n"),
+) -> None:
+    """List relations, optionally filtered."""
+    rows = _graph_store_cli().list_relations(
+        status=status, rel_type=rel_type, evidence=evidence, limit=limit
+    )
+    if not rows:
+        typer.echo("(no relations match)")
+        return
+    for relation in rows:
+        typer.echo(_relation_line(relation))
+        typer.echo(f"    id: {relation.id}")
+
+
+@graph_app.command("show")
+def graph_show(
+    ref: str = typer.Option(..., "--ref", help="Canonical ref to show the edges of."),
+) -> None:
+    """Show every relation touching a ref, grouped by type (the margins, in text)."""
+    from maayan.graph.models import RefEndpoint
+
+    relations = _graph_store_cli().relations_for(RefEndpoint(ref=ref))
+    if not relations:
+        typer.echo(f"(no relations touch {ref!r})")
+        return
+    typer.echo(f"{ref} — {len(relations)} relation(s)")
+    current: str | None = None
+    for relation in relations:  # relations_for orders by rel_type
+        if relation.rel_type != current:
+            current = relation.rel_type
+            typer.echo(f"  {current}:")
+        typer.echo(f"    {_relation_line(relation, perspective=ref)}")
+
+
+@graph_app.command("backfill")
+def graph_backfill() -> None:
+    """Lift existing expert connection chunks into typed relations (idempotent)."""
+    from maayan.corpus.store import ChunkStore
+    from maayan.graph.backfill import backfill_relations
+
+    settings = _cfg()
+    result = backfill_relations(
+        ChunkStore(settings.db_path), _graph_store_cli(), SystemClock(), settings
+    )
+    typer.echo(
+        f"expert chunks seen: {result.chunks_seen}  "
+        f"(connections: {result.connection_chunks}, skipped: {result.skipped_chunks})"
+    )
+    typer.echo(
+        f"relations created: {result.relations_created}  "
+        f"already present: {result.relations_existing}"
+    )
+
+
+@graph_app.command("stats")
+def graph_stats() -> None:
+    """Graph tallies by type / evidence / status."""
+    counts = _graph_store_cli().counts()
+    typer.echo(f"concepts: {counts.concepts}   relations: {counts.relations}")
+    for label, tally in (
+        ("by type", counts.by_rel_type),
+        ("by evidence", counts.by_evidence),
+        ("by status", counts.by_status),
+    ):
+        if tally:
+            parts = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
+            typer.echo(f"  {label}: {parts}")
 
 
 # --- user management (auth / multi-user) ------------------------------------

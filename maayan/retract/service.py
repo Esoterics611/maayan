@@ -7,8 +7,13 @@ Removing knowledge is a provenanced operation, not a silent delete. `retract`:
   3. deletes the point from Qdrant (gone from retrieval),
   4. tombstones the corpus chunk so `index --rebuild` never re-embeds it,
   5. cascades: a `derived` chunk's Development → status "retracted"; a `term`
-     chunk's Term → marked retracted,
+     chunk's Term → marked retracted; graph relations lifted from the chunk
+     (source_chunk_id) → status "retracted",
   6. records an attributed, timestamped `Retraction` audit row.
+
+`retract_relation` extends the same audited semantics to graph edges (Prompt 33):
+a relation is tombstoned in the GraphStore (never deleted) and the removal gets
+the same attributed audit row, with source "relation".
 
 Correction is retract + re-add: ids are content-derived/idempotent, so there is no
 in-place edit — you retract the wrong chunk (reason: superseded) and add the right
@@ -25,6 +30,8 @@ from maayan.clock import Clock
 from maayan.corpus.models import Chunk
 from maayan.corpus.store import ChunkStore
 from maayan.develop.store import DevelopmentStore
+from maayan.graph.models import endpoint_str
+from maayan.graph.store import GraphStore
 from maayan.index.qdrant import QdrantIndex
 from maayan.lexicon.store import TermStore
 from maayan.retract.models import Retraction
@@ -55,6 +62,7 @@ class RetractionService:
         clock: Clock,
         development_store: DevelopmentStore,
         term_store: TermStore,
+        graph_store: GraphStore,
     ) -> None:
         self._chunks = chunk_store
         self._retractions = retraction_store
@@ -62,6 +70,7 @@ class RetractionService:
         self._clock = clock
         self._developments = development_store
         self._terms = term_store
+        self._graph = graph_store
 
     def retract(self, target: str, *, author: str, reason: str) -> Retraction:
         """Retract the chunk identified by `target` (a stable chunk id OR a ref).
@@ -102,7 +111,40 @@ class RetractionService:
             self._retract_development(chunk.metadata.get("development_id"))
         elif chunk.source == "term":
             self._retract_term(chunk.metadata.get("term_id"))
+        # Edges lifted from this chunk are views of the same knowledge — they go too.
+        for relation in self._graph.relations_from_chunk(chunk.id):
+            if relation.status != "retracted":
+                self._graph.mark_retracted(relation.id)
 
+        return self._retractions.save_retraction(retraction)
+
+    def retract_relation(self, relation_id: str, *, author: str, reason: str) -> Retraction:
+        """Retract one graph relation — audited exactly like a chunk retraction.
+
+        The relation row stays in the store with status "retracted" (provenance is
+        never deleted); it disappears from `neighbors()` and every approved-only
+        read. Raises ValueError if the relation is unknown or already retracted.
+        """
+        relation = self._graph.get_relation(relation_id)
+        if relation is None:
+            raise ValueError(f"No relation with id {relation_id!r}.")
+        if relation.status == "retracted":
+            raise ValueError(f"Relation {relation_id!r} is already retracted.")
+
+        # Build (and validate: blank author rejected) BEFORE any mutation.
+        retraction = Retraction(
+            id=str(uuid.uuid4()),
+            chunk_id=relation.id,
+            ref=(
+                f"{endpoint_str(relation.subject)} —{relation.rel_type}→ "
+                f"{endpoint_str(relation.object)}"
+            ),
+            source="relation",
+            author=author,
+            reason=reason,
+            timestamp=self._clock.now(),
+        )
+        self._graph.mark_retracted(relation.id)
         return self._retractions.save_retraction(retraction)
 
     def list_retractions(self) -> list[Retraction]:

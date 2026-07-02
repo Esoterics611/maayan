@@ -7,7 +7,7 @@ from maayan.config import Settings
 from maayan.corpus.store import ChunkStore
 from maayan.develop.store import DevelopmentStore
 from maayan.embed.base import Embedder
-from maayan.embed.factory import build_embedder
+from maayan.graph.store import GraphStore
 from maayan.index.qdrant import QdrantIndex, build_qdrant_client
 from maayan.lexicon.store import TermStore
 from maayan.retract.service import RetractionService
@@ -19,13 +19,12 @@ def build_retraction_service(
 ) -> RetractionService:
     """Assemble a RetractionService wired to the same stores + collection as the rest.
 
-    The embedder is only used to size the Qdrant collection handle (deletion needs no
-    vectors); it is shared when one is passed so `maayan ui` builds it once.
+    Deletion needs no vectors, so no embedder is built here: the Qdrant handle is
+    sized from `settings.embed_dim` (what every embedder is constructed with). A
+    shared embedder may still be passed (`maayan ui` does) and its dim wins.
     """
-    embedder = embedder or build_embedder(settings)
-    index = QdrantIndex(
-        build_qdrant_client(settings), settings.collection_name, embedder.dim
-    )
+    dim = embedder.dim if embedder is not None else settings.embed_dim
+    index = QdrantIndex(build_qdrant_client(settings), settings.collection_name, dim)
     return RetractionService(
         ChunkStore(settings.db_path),
         RetractionStore(settings.db_path),
@@ -33,4 +32,5 @@ def build_retraction_service(
         SystemClock(),
         DevelopmentStore(settings.db_path),
         TermStore(settings.db_path),
+        GraphStore(settings.db_path),
     )
