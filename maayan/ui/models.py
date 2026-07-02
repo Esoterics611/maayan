@@ -12,6 +12,16 @@ class AskRequest(BaseModel):
     k: int | None = None
 
 
+class ViaOut(BaseModel):
+    """Graph-expansion provenance for one source (the via-line, Prompt 35)."""
+
+    rel_type: str
+    evidence: str
+    author: str
+    seed_ref: str
+    note: str | None = None
+
+
 class SourceOut(BaseModel):
     ref: str
     text: str
@@ -22,6 +32,8 @@ class SourceOut(BaseModel):
     # For source="shiur": lets a cited source play from its moment in the recording.
     audio_id: str | None = None
     start_s: float | None = None
+    # Graph-expanded hits only: the relation that brought this source (None on seeds).
+    via: ViaOut | None = None
 
 
 class AskResponse(BaseModel):

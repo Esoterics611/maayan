@@ -303,13 +303,18 @@ def search(
     source: str = typer.Option(
         None, "--source", help="Restrict to a source (sefaria/expert/derived/term)."
     ),
+    graph: bool = typer.Option(
+        None, "--graph/--no-graph",
+        help="Widen supported hits one hop along approved edges (overrides "
+        "GRAPH_EXPAND_ENABLED).",
+    ),
 ) -> None:
     """Hybrid (dense + sparse) retrieval over the indexed corpus."""
     from maayan.retrieve.factory import build_retriever
 
     settings = _cfg()
     require_qdrant(settings)
-    retriever = build_retriever(settings)
+    retriever = build_retriever(settings, graph=graph)
     results = retriever.retrieve(query, k=k, book=book, source=source).results
 
     if not results:
@@ -319,9 +324,9 @@ def search(
     for i, r in enumerate(results, 1):
         typer.echo(f"{i:>2}. [{r.score:.4f}] {r.ref}  ({r.lang}/{r.source})")
         typer.echo(f"      {r.first_line(100)}")
-        prov = _provenance_line(r)
-        if prov:
-            typer.echo(prov)
+        for line in (_via_line(r), _provenance_line(r)):
+            if line:
+                typer.echo(line)
 
 
 @app.command()
@@ -347,6 +352,11 @@ def ask(
         None, "--verify/--no-verify",
         help="Flag answer claims not supported by their cited sources.",
     ),
+    graph: bool = typer.Option(
+        None, "--graph/--no-graph",
+        help="Graph expansion: widen supported grounding one hop along approved edges "
+        "(overrides GRAPH_EXPAND_ENABLED).",
+    ),
     show_reasoning: bool = typer.Option(
         False, "--show-reasoning", help="Print the study map produced in reasoning mode."
     ),
@@ -366,7 +376,7 @@ def ask(
     use_reasoning = settings.rag_reasoning_enabled if reason is None else reason
     use_verify = settings.answer_verify_enabled if verify is None else verify
     retriever = build_retriever(
-        settings, embedder=embedder, expand=use_expand,
+        settings, embedder=embedder, expand=use_expand, graph=graph,
         backend=backend if use_expand else None,
     )
     rag = RAGService(
@@ -415,6 +425,9 @@ def ask(
     for s in answer.sources:
         mark = "*" if s.ref in cited else " "
         typer.echo(f"  [{mark}] {s.ref}")
+        via = _via_line(s, indent="       ")
+        if via:
+            typer.echo(via)
     if answer.cited_refs:
         typer.echo(f"\nCited: {', '.join(answer.cited_refs)}")
     if answer.unsupported_claims:
@@ -452,6 +465,21 @@ def _provenance_line(result: object) -> str:
         return (f"      ↳ term [{meta.get('term_type', '?')}] by {meta.get('author', '?')}"
                 + (f"; surfaces: {surfaces}" if surfaces else ""))
     return ""
+
+
+def _via_line(result: object, *, indent: str = "      ") -> str:
+    """The provenance thread for a graph-expanded hit: WHY this source appeared.
+
+    Empty for seed hits — the absence is the design (unmarked = found by search,
+    marked = brought by knowledge).
+    """
+    via = getattr(result, "via", None)
+    if via is None:
+        return ""
+    from maayan.graph.models import EVIDENCE_GLYPH
+
+    glyph = EVIDENCE_GLYPH.get(via.evidence, "?")
+    return f"{indent}↳ via {via.rel_type} {glyph} ({via.author}) from {via.seed_ref}"
 
 
 def _parse_refs(ref: list[str], refs: str) -> list[str]:
@@ -1094,6 +1122,11 @@ def bench(
     no_ablation: bool = typer.Option(
         False, "--no-ablation", help="Skip the Arm-A text-only vs +synthetic ablation."
     ),
+    graph: bool = typer.Option(
+        False, "--graph",
+        help="Run Arm A as the A-graph condition (text + synthetic + graph expansion). "
+        "BENCHMARK_PLAN rung 2 compares runs with this off vs on.",
+    ),
     limit: int = typer.Option(0, "--limit", help="Only run the first N questions (0 = all)."),
 ) -> None:
     """Blinded head-to-head: grounded maayan (Arm A) vs frontier closed-book (Arm B).
@@ -1125,8 +1158,10 @@ def bench(
     judge_model = (
         settings.bench_judge_model or settings.eval_judge_model or settings.generation_model
     )
+    condition = "A-graph (text + synthetic + graph)" if graph else "A-synth (text + synthetic)"
     typer.echo(f"Benchmark gold set: {path} ({len(examples)} questions, {gradable} gradable)")
-    typer.echo(f"Arm A maayan: {settings.generation_model} · Arm B closed-book: {closed_model}")
+    typer.echo(f"Arm A maayan [{condition}]: {settings.generation_model} · "
+               f"Arm B closed-book: {closed_model}")
     typer.echo(
         f"Blinded grader: {judge_model} · seed={settings.bench_seed} · ablation={not no_ablation}\n"
     )
@@ -1136,7 +1171,7 @@ def bench(
     embedder = build_embedder(settings)
     backend = build_generation_backend(settings)
     retriever = build_retriever(
-        settings, embedder=embedder, expand=settings.query_expand_enabled,
+        settings, embedder=embedder, expand=settings.query_expand_enabled, graph=graph,
         backend=backend if settings.query_expand_enabled else None,
     )
     rag = RAGService(
@@ -1233,6 +1268,11 @@ def evaluate(
         False, "--answer",
         help="Score ANSWER quality (citations + faithfulness via an LLM judge) instead.",
     ),
+    graph: bool = typer.Option(
+        False, "--graph",
+        help="With --crosstext: also run with graph expansion ON and report both "
+        "(what does structure buy?).",
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
     """Score retrieval (hit@k, recall@k, MRR), or the develop / cross-text / answer step."""
@@ -1247,6 +1287,18 @@ def evaluate(
         ct_path = goldset or settings.eval_crosstext_goldset_path
         ct_examples = load_goldset(ct_path)
         typer.echo(f"Cross-text gold set: {ct_path} ({len(ct_examples)} questions)\n")
+        if graph:
+            off = run_crosstext_eval(build_retriever(settings, graph=False), ct_examples, k=k)
+            on = run_crosstext_eval(build_retriever(settings, graph=True), ct_examples, k=k)
+            typer.echo("— graph expansion OFF —")
+            typer.echo(format_crosstext_report(off))
+            typer.echo("\n— graph expansion ON —")
+            typer.echo(format_crosstext_report(on))
+            typer.echo(
+                f"\nΔ coverage: {on.mean_coverage - off.mean_coverage:+.3f}   "
+                f"Δ ≥2-book rate: {on.multi_book_rate - off.multi_book_rate:+.3f}"
+            )
+            return
         ct_report = run_crosstext_eval(build_retriever(settings), ct_examples, k=k)
         typer.echo(format_crosstext_report(ct_report))
         return
