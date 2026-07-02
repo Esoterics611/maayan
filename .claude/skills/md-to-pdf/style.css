@@ -1,0 +1,55 @@
+/* Reusable print stylesheet for Markdown -> PDF (md-to-pdf / any HTML+CSS engine).
+   Tuned from a real session converting a Hebrew+English curriculum. Key learnings:
+   - Force a WHITE page + dark text, or a dark-mode viewer shows blue-on-black.
+   - Page breaks ride on (non-empty) headings; an EMPTY break <div> renders as its
+     own blank page in Chromium. Break before h1 by default.
+   - Override the injected highlight.js theme (md-to-pdf's default is pale/low-contrast). */
+
+@page { size: A4; margin: 22mm 20mm 20mm 20mm; }
+html { background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  /* FreeSerif & Noto carry full Hebrew + nikkud; the browser/UBA handles bidi. */
+  font-family: "FreeSerif", "Noto Serif Hebrew", "Noto Serif", "DejaVu Serif", Georgia, serif;
+  font-size: 11.5pt; line-height: 1.5;
+  background: #ffffff; color: #15323b;
+  max-width: 46rem; margin: 0 auto; padding: 1rem;
+}
+
+h1, h2, h3, h4 { line-height: 1.25; break-after: avoid; }
+h1 { color: #0b3b46; font-size: 24pt; break-before: page; page-break-before: always; }
+h2 { color: #0f766e; font-size: 17pt; border-bottom: 2px solid #0f766e; padding-bottom: .15em; }
+h3 { color: #0b3b46; font-size: 13.5pt; }
+h4 { color: #5b6b70; font-size: 12pt; }
+a  { color: #0f766e; text-decoration: none; }
+p, li { orphans: 2; widows: 2; }
+
+blockquote {
+  border-left: 3px solid #b45309; background: #fbf6ee;
+  margin: 1em 0; padding: .5em 1em; color: #3a3a3a; break-inside: avoid;
+}
+blockquote h3, blockquote h4 { color: #b45309; margin-top: .2em; }
+
+code {
+  font-family: "DejaVu Sans Mono", "Courier New", monospace; font-size: 9.5pt;
+  background: #eef4f3; color: #143230; padding: .08em .3em; border-radius: 3px;
+}
+pre {
+  background: #f4f7f7; border: 1px solid #d8e3e1; border-radius: 5px;
+  padding: .7em .9em; white-space: pre-wrap; overflow-wrap: break-word;
+  break-inside: avoid; font-size: 9.5pt;
+}
+pre code { background: none; padding: 0; color: #1b2b2b; }
+
+/* Beat the injected highlight theme (pale by default) with a dark, readable palette. */
+pre code, pre code.hljs, .hljs { color: #1b2b2b !important; background: transparent !important; }
+.hljs-comment, .hljs-quote { color: #5c6770 !important; font-style: italic; }
+.hljs-string, .hljs-attr, .hljs-addition { color: #0a6b3a !important; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in,
+.hljs-type, .hljs-deletion { color: #a3192e !important; }
+.hljs-number, .hljs-meta, .hljs-link, .hljs-symbol { color: #0b4f9e !important; }
+.hljs-title, .hljs-section, .hljs-name, .hljs-function, .hljs-variable { color: #5a2ca0 !important; }
+
+table { border-collapse: collapse; width: 100%; font-size: 10.5pt; break-inside: avoid; }
+th, td { border: 1px solid #cdd9d7; padding: .35em .55em; text-align: left; vertical-align: top; }
+th { background: #e8f1ef; color: #0b3b46; }
+hr { border: none; border-top: 1px solid #d8e3e1; margin: 1.4em 0; }
