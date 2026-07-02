@@ -203,6 +203,20 @@ class Settings(BaseSettings):
         default=8, description="Sources retrieved per probe when mining connection candidates."
     )
 
+    # ---- Knowledge graph (Phase 7, Prompt 33) --------------------------------
+    graph_default_confidence: float = Field(
+        default=1.0,
+        description="Confidence assigned to human-asserted edges (expert adds, backfill).",
+    )
+    graph_bootstrap_confidence: float = Field(
+        default=0.6,
+        description=(
+            "Confidence for edges lifted from bootstrap-drafted connections: they passed "
+            "the faithfulness gate but no human review, so they start below expert edges "
+            "and the inquiry queue can rank them for re-review."
+        ),
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client
