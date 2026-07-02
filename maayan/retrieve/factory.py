@@ -34,15 +34,18 @@ def build_retriever(
     rerank: bool | None = None,
     top_k: int | None = None,
     expand: bool | None = None,
+    graph: bool | None = None,
     backend: GenerationBackend | None = None,
     term_store: TermSource | None = None,
 ) -> Retrieving:
     """Construct a retriever wired to Qdrant, the embedder, (optionally) a reranker,
-    and (optionally) query expansion.
+    (optionally) query expansion, and (optionally) graph expansion.
 
-    The `hybrid`/`rerank`/`top_k`/`expand` overrides exist for the eval harness and
-    CLI to compare variants; when None they fall back to config. `backend` enables the
-    LLM expander (reformulations + HyDE); without it expansion is lexicon-only.
+    The `hybrid`/`rerank`/`top_k`/`expand`/`graph` overrides exist for the eval
+    harness and CLI to compare variants; when None they fall back to config.
+    `backend` enables the LLM expander (reformulations + HyDE); without it expansion
+    is lexicon-only. Graph expansion wraps the OUTERMOST retriever so its gate sees
+    exactly the relevance the RAG gate will see.
     """
     embedder = embedder or build_embedder(settings)
     index = QdrantIndex(
@@ -68,23 +71,40 @@ def build_retriever(
         hybrid=True if hybrid is None else hybrid,
     )
 
+    retriever: Retrieving = base
     use_expand = settings.query_expand_enabled if expand is None else expand
-    if not use_expand:
-        return base
-
-    expanders: list[QueryExpander] = []
-    if settings.query_expand_lexicon:
-        terms = term_store or TermStore(settings.db_path)
-        expanders.append(LexiconExpander(terms))
-    if backend is not None:
-        expanders.append(
-            LLMQueryExpander(
-                backend,
-                variants=settings.query_expand_variants,
-                hyde=settings.query_expand_hyde,
+    if use_expand:
+        expanders: list[QueryExpander] = []
+        if settings.query_expand_lexicon:
+            terms = term_store or TermStore(settings.db_path)
+            expanders.append(LexiconExpander(terms))
+        if backend is not None:
+            expanders.append(
+                LLMQueryExpander(
+                    backend,
+                    variants=settings.query_expand_variants,
+                    hyde=settings.query_expand_hyde,
+                )
             )
+        if expanders:  # expansion on but nothing to expand with → plain retriever
+            composite = CompositeExpander(
+                expanders, max_queries=settings.query_expand_max_queries
+            )
+            retriever = MultiQueryRetriever(base, composite, top_k=resolved_top_k)
+
+    use_graph = settings.graph_expand_enabled if graph is None else graph
+    if use_graph:
+        from maayan.corpus.store import ChunkStore
+        from maayan.graph.store import GraphStore
+        from maayan.retrieve.graph_expand import GraphExpandingRetriever
+
+        retriever = GraphExpandingRetriever(
+            retriever,
+            GraphStore(settings.db_path),
+            ChunkStore(settings.db_path),
+            score_threshold=settings.score_threshold,
+            seeds=settings.graph_expand_seeds,
+            limit=settings.graph_expand_limit,
+            reranker=reranker,
         )
-    if not expanders:
-        return base  # expansion on but nothing to expand with → plain retriever
-    composite = CompositeExpander(expanders, max_queries=settings.query_expand_max_queries)
-    return MultiQueryRetriever(base, composite, top_k=resolved_top_k)
+    return retriever

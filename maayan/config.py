@@ -216,6 +216,20 @@ class Settings(BaseSettings):
             "and the inquiry queue can rank them for re-review."
         ),
     )
+    graph_expand_enabled: bool = Field(
+        default=False,
+        description=(
+            "Widen supported retrievals one hop along approved graph edges. The "
+            "default-deny gate is decided on the seed retrieval alone — expansion can "
+            "enrich a supported answer, never rescue a refusal."
+        ),
+    )
+    graph_expand_seeds: int = Field(
+        default=3, description="How many top seed hits to expand from (one hop each)."
+    )
+    graph_expand_limit: int = Field(
+        default=4, description="Hard cap on chunks added by graph expansion per query."
+    )
     graph_links_enabled: bool = Field(
         default=True,
         description=(

@@ -59,6 +59,9 @@
     .src.expert { border-color:var(--expert); } .src.derived { border-color:var(--derived); }
     .src.term { border-color:var(--term); } .src.shiur { border-color:var(--shiur); }
     .src .ref { font-weight:600; } .src .ref .cited { color:var(--cited); }
+    /* The via-line: expansion provenance, visually subordinate to the source it explains. */
+    .vialine { font-size:.85em; color:#7a6f5c; margin:2px 0 4px 1.4em; }
+    .vialine .ev-derived_bootstrap { color:#b8860b; } /* the one deliberate emotional cue */
     .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
     .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
     .actions { margin-top:8px; display:flex; gap:8px; }
@@ -385,10 +388,18 @@
         const retract = ['expert', 'derived', 'term', 'shiur'].includes(s.source)
           ? `<button class="ghost" style="color:#a33;margin-left:auto"
                 title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
+        // The via-line (graph expansion provenance): WHY this source appeared.
+        // Seed hits have no via — the absence is the design.
+        const viaGlyph = {expert:'●', curated:'◆', deterministic:'⚙',
+                          derived_approved:'◐', derived_bootstrap:'◌'};
+        const via = s.via ? `<div class="vialine" dir="auto">↳ via ${esc(s.via.rel_type)}
+            <span class="ev-${esc(s.via.evidence)}">${viaGlyph[s.via.evidence] || '?'}</span>
+            (${esc(s.via.author)}) from <span class="srcref"
+            onclick='openReader(${attr(s.via.seed_ref)}, ${attr(s.lang)})'>${esc(s.via.seed_ref)}</span></div>` : '';
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
             <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
-          <div dir="auto">${esc(s.text)}</div></div>`;
+          ${via}<div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
       const connect = sources.length >= 2 ? `

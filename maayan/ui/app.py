@@ -88,6 +88,7 @@ from maayan.ui.models import (
     ThreadOut,
     TurnOut,
     UpdateSegmentRequest,
+    ViaOut,
 )
 from maayan.users.models import User, UserOut
 from maayan.users.service import UserService
@@ -98,10 +99,19 @@ _STATIC = Path(__file__).parent / "static"
 def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
     meta = s.payload.get("metadata") or {} if isinstance(s.payload, dict) else {}
     is_shiur = s.source == "shiur"
+    via = (
+        ViaOut(
+            rel_type=s.via.rel_type, evidence=s.via.evidence, author=s.via.author,
+            seed_ref=s.via.seed_ref, note=s.via.note,
+        )
+        if s.via is not None
+        else None
+    )
     return SourceOut(
         ref=s.ref, text=s.text, lang=s.lang, source=s.source, score=s.score, cited=cited,
         audio_id=meta.get("audio_id") if is_shiur else None,
         start_s=meta.get("start_s") if is_shiur else None,
+        via=via,
     )
 
 
