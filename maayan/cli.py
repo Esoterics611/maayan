@@ -1796,14 +1796,24 @@ def ui() -> None:
 
     # Inquiry queue wiring (Prompt 37): telemetry + the שאלות לרב panel.
     from maayan.eval.captured import build_captured_recorder
+    from maayan.graph.apparatus import ApparatusService
     from maayan.graph.store import GraphStore
     from maayan.inquiry.log import AskLog
     from maayan.inquiry.store import InquiryStore
+    from maayan.lexicon.store import TermStore
     from maayan.lexicon.suggestions import SuggestionStore
 
     clock = SystemClock()
     ask_log = AskLog(settings.db_path, clock) if settings.ask_log_enabled else None
     recorder = build_captured_recorder(settings, clock=clock)
+    graph_store = GraphStore(settings.db_path)
+    # The margins (Prompt 36): read-only composition over the same stores.
+    from maayan.develop.store import DevelopmentStore
+
+    apparatus = ApparatusService(
+        chunks_store, graph_store, TermStore(settings.db_path),
+        DevelopmentStore(settings.db_path),
+    )
 
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
@@ -1814,8 +1824,9 @@ def ui() -> None:
         inbox=inbox,
         ask_log=ask_log,
         inquiries=InquiryStore(settings.db_path, clock, recorder=recorder),
-        graph=GraphStore(settings.db_path),
+        graph=graph_store,
         suggestions=SuggestionStore(settings.db_path),
+        apparatus=apparatus,
         settings=settings,
         ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
@@ -2095,6 +2106,48 @@ def graph_stats() -> None:
         if tally:
             parts = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
             typer.echo(f"  {label}: {parts}")
+
+
+# --- the margins: a daf apparatus per ref (Phase 7, Prompt 36) ----------------
+@app.command()
+def apparatus(
+    ref: str = typer.Argument(..., help="Canonical ref to show the margins of."),
+) -> None:
+    """Everything the beis medrash knows about one ref — the daf's margins, in text."""
+    from maayan.develop.store import DevelopmentStore
+    from maayan.graph.apparatus import ApparatusService
+    from maayan.graph.models import EVIDENCE_GLYPH
+    from maayan.lexicon.store import TermStore
+
+    settings = _cfg()
+    from maayan.corpus.store import ChunkStore
+
+    service = ApparatusService(
+        ChunkStore(settings.db_path), _graph_store_cli(),
+        TermStore(settings.db_path), DevelopmentStore(settings.db_path),
+    )
+    result = service.assemble(ref)
+    corpus_note = "" if result.in_corpus else "  (outside the corpus)"
+    typer.echo(f"{result.ref} — גליון · {result.total}{corpus_note}")
+    if result.total == 0:
+        typer.echo("  הגליון עדיין ריק")  # an empty apparatus is a statement, not an error
+        return
+    for group in result.relation_groups:
+        typer.echo(f"  {group.rel_type}:")
+        for item in group.items:
+            glyph = EVIDENCE_GLYPH.get(item.relation.evidence, "?")
+            outside = "" if item.in_corpus else "  [outside the corpus]"
+            typer.echo(f"    {glyph} {item.far_label}   ({item.relation.author}){outside}")
+            if item.far_snippet:
+                typer.echo(f"       {item.far_snippet}")
+    if result.terms:
+        names = " · ".join(t.canonical for t in result.terms)
+        typer.echo(f"  מונחים: {names}")
+    for layer in result.expert_layer:
+        who = f" ({layer.author}, {layer.kind})" if layer.author else ""
+        typer.echo(f"  ● [{layer.source}]{who} {layer.snippet}")
+    for dev in result.developments:
+        typer.echo(f"  ◐ [derived] ({dev.author}) {dev.snippet}")
 
 
 # --- inquiry queue: שאלות לרב (Phase 7, Prompt 37) ---------------------------

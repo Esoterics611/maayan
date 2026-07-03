@@ -31,6 +31,7 @@ from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.generate.rag import Answer, RAGService
+from maayan.graph.apparatus import Apparatus, ApparatusService
 from maayan.graph.store import GraphStore
 from maayan.inbox.models import InboxItem
 from maayan.inbox.service import InboxService
@@ -221,6 +222,7 @@ def create_app(
     inquiries: InquiryStore | None = None,
     graph: GraphStore | None = None,
     suggestions: SuggestionSource | None = None,
+    apparatus: ApparatusService | None = None,
     settings: Settings | None = None,
     ocr_lang: str = "heb",
     context_turns: int = 6,
@@ -567,6 +569,13 @@ def create_app(
     @app.get("/stats")
     def get_stats() -> Stats:
         return stats.collect()
+
+    # -- the margins: a daf apparatus per ref (Prompt 36) ---------------------
+    @app.get("/api/apparatus")
+    def get_apparatus(ref: str) -> Apparatus:
+        if apparatus is None:  # apparatus wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="apparatus not configured")
+        return apparatus.assemble(ref)
 
     # -- the inquiry queue: שאלות לרב (Prompt 37) ----------------------------
     def _inquiry_store() -> InquiryStore:
