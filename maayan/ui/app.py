@@ -20,6 +20,9 @@ from typing import cast
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from maayan.agent.models import StudyTrace
+from maayan.agent.service import AgentService
+from maayan.agent.store import TraceStore
 from maayan.audio.models import AudioAsset
 from maayan.capture.convert import detect_lang
 from maayan.capture.models import Annotation
@@ -135,7 +138,9 @@ def _inquiry_out(item: InquiryItem) -> InquiryOut:
     )
 
 
-def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
+def _answer_to_response(
+    answer: Answer, session_id: str, *, trace_id: str | None = None
+) -> AskResponse:
     cited = set(answer.cited_refs)
     return AskResponse(
         session_id=session_id,
@@ -146,6 +151,7 @@ def _answer_to_response(answer: Answer, session_id: str) -> AskResponse:
         sources=[_source_out(s, cited=s.ref in cited) for s in answer.sources],
         reasoning=answer.reasoning,
         unsupported_claims=answer.unsupported_claims,
+        trace_id=trace_id,
     )
 
 
@@ -223,6 +229,8 @@ def create_app(
     graph: GraphStore | None = None,
     suggestions: SuggestionSource | None = None,
     apparatus: ApparatusService | None = None,
+    traces: TraceStore | None = None,
+    agent: AgentService | None = None,
     settings: Settings | None = None,
     ocr_lang: str = "heb",
     context_turns: int = 6,
@@ -408,6 +416,18 @@ def create_app(
 
     @app.post("/ask")
     def ask(req: AskRequest, request: Request) -> AskResponse:
+        # Chavrusa mode: the bounded multi-hop study loop. The refusal gate is
+        # unchanged — a refused seed never reaches the model and persists no trace.
+        if req.agent:
+            if agent is None:  # AGENT wiring absent — route is inert, never a fake answer
+                raise HTTPException(status_code=503, detail="agent not configured")
+            trace = agent.study(req.question, k=req.k)
+            answer = trace.answer
+            session = capture.start_session(answer)  # the answer is still annotatable
+            _log_ask(request, answer, session.id)
+            # A refusal studied nothing (no persisted trace) — offer no trace link.
+            trace_id = trace.id if answer.grounded else None
+            return _answer_to_response(answer, session.id, trace_id=trace_id)
         answer = rag.ask(req.question, k=req.k)
         session = capture.start_session(answer)  # so the answer can be annotated
         _log_ask(request, answer, session.id)
@@ -569,6 +589,16 @@ def create_app(
     @app.get("/stats")
     def get_stats() -> Stats:
         return stats.collect()
+
+    # -- study traces: the chavrusa's notebook (Prompt 39) ---------------------
+    @app.get("/api/traces/{trace_id}")
+    def get_trace(trace_id: str) -> StudyTrace:
+        if traces is None:  # trace wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="traces not configured")
+        trace = traces.get(trace_id)
+        if trace is None:
+            raise HTTPException(status_code=404, detail="Trace not found")
+        return trace
 
     # -- the margins: a daf apparatus per ref (Prompt 36) ---------------------
     @app.get("/api/apparatus")

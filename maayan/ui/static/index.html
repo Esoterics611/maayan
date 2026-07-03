@@ -35,6 +35,7 @@
     button { font:inherit; cursor:pointer; padding:9px 15px; border:none; border-radius:8px;
              background:var(--accent); color:#fff; font-weight:600; flex:0 0 auto; }
     button.secondary { background:#efe9dd; color:var(--ink); }
+    button.secondary.active { background:var(--accent); color:#fff; }  /* an engaged mode toggle (e.g. חברותא) */
     button.ghost { background:transparent; color:var(--accent); padding:4px 8px; font-size:13px; }
     button:disabled { opacity:.5; cursor:default; }
     .hint { color:var(--muted); font-size:13px; }
@@ -212,6 +213,7 @@
           <button id="micQ" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
           <button id="voiceLang" type="button" class="ghost" title="Voice language (tap to switch)">עב</button>
           <button id="askBtn">Ask</button>
+          <button id="chavrusaToggle" class="secondary" title="חברותא — study this question over several hops (search → open → follow a connection → conclude). Same refusal gate.">חברותא ○</button>
           <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
           <button id="termToggle" class="secondary" title="Define a term / Holy Name">Term ▾</button>
           <button id="composeToggle" class="secondary" title="Compose a grounded document">Compose ▾</button>
@@ -318,6 +320,7 @@
     const AUTHOR_KEY = 'maayan.author';
     let active = null;      // active thread id
     let lastAnswer = null;  // last answer (sources + session_id) for "Connect these sources"
+    let chavrusaOn = false; // חברותא mode: route Ask through the bounded study loop (Prompt 39)
 
     const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
     const j = (r) => r.json();
@@ -413,10 +416,32 @@
           + `<div>${bySrc}</div>`
           + `<div>devs: ${(dev.approved||0)} approved · ${(dev.proposed||0)} proposed`
           + ` · ${(dev.retracted||0)} retracted</div>`
-          + `<div>${s.retractions} retraction(s) · ${s.threads} thread(s) · ${s.terms} term(s)</div>`;
+          + `<div><span class="srcref" title="What left the corpus, and why"
+               onclick="openRetractions()">${s.retractions} retraction(s)</span>`
+          + ` · ${s.threads} thread(s) · ${s.terms} term(s)</div>`;
       } catch (e) { $('statsPanel').innerHTML = '<div class="hint">stats unavailable</div>'; }
     }
     window.loadStats = loadStats;
+
+    // -- the retraction ledger: the audit trail of what left the corpus, and why.
+    // Read-only (no write path); an empty ledger is a statement, not an error.
+    async function openRetractions() {
+      let rows;
+      try { rows = await j(await fetch('/retractions')); }
+      catch (e) { toast('Ledger unavailable.'); return; }
+      const body = (rows && rows.length)
+        ? rows.map(r => `<div class="margin-item">
+             <div class="ref"><span class="srcref" onclick='openReader(${attr(r.ref)})'>${esc(r.ref)}</span>
+               <span class="badge ${esc(r.source)}">${esc(r.source)}</span></div>
+             <div class="hint" dir="auto">${esc(r.author)}${r.reason ? ' — ' + esc(r.reason) : ''}</div>
+           </div>`).join('')
+        : '<div class="hint">שום דבר לא נמחק — the corpus is whole.</div>';
+      mkOverlay(`<div class="reader-head">
+          <span class="title">מה נמחק · Retraction ledger</span>
+          <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+        <div class="reader-body" dir="rtl">${body}</div>`);
+    }
+    window.openRetractions = openRetractions;
 
     async function newTopic(title) {
       const t = await j(await fetch('/threads', { method:'POST', headers:{'Content-Type':'application/json'},
@@ -497,8 +522,13 @@
           </div>
           <span id="connectStatus" class="hint"></span>
         </div>` : '';
-      $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer</div>
-        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${srcs}${connect}</div>`;
+      // Chavrusa answers (Prompt 39) carry a link to the study trace — the stepper that
+      // shows how the sugya was worked. A refusal has no trace (nothing was studied).
+      const traceLink = data.trace_id
+        ? `<div class="actions"><button class="ghost" onclick="openTrace('${esc(data.trace_id)}')"
+             title="How the chavrusa studied this — search, open, follow, conclude">כיצד נלמד? ▸</button></div>` : '';
+      $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer${data.trace_id ? ' · חברותא' : ''}</div>
+        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${traceLink}${srcs}${connect}</div>`;
       const ca = $('connectAuthor');
       if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
       const cb = $('connectBody');                       // dictation + OCR on the connection insight
@@ -545,9 +575,19 @@
 
     async function ask() {
       const q = $('q').value.trim(); if (!q) return;
-      if (!active) await newTopic(q.slice(0, 48));
       $('askBtn').disabled = true; $('askBtn').textContent = '…';
       try {
+        if (chavrusaOn) {
+          // חברותא: a bounded study loop, outside any thread (the agent takes no thread
+          // context, mirroring `ask --agent`). The answer renders with a "כיצד נלמד?" link.
+          const data = await j(await fetch('/ask',
+            { method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ question: q, agent: true }) }));
+          $('q').value = '';
+          renderAnswerSources(data);
+          return;
+        }
+        if (!active) await newTopic(q.slice(0, 48));
         const data = await j(await fetch('/threads/' + active + '/ask',
           { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question: q }) }));
         $('q').value = '';
@@ -683,6 +723,13 @@
     window.composeExport = composeExport; window.composePromote = composePromote;
 
     $('askBtn').onclick = ask;
+    $('chavrusaToggle').onclick = () => {
+      chavrusaOn = !chavrusaOn;
+      const b = $('chavrusaToggle');
+      b.textContent = 'חברותא ' + (chavrusaOn ? '●' : '○');
+      b.classList.toggle('active', chavrusaOn);
+      if (chavrusaOn) toast('חברותא: the next Ask studies over several hops. Same refusal gate.');
+    };
     $('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
     $('newBtn').onclick = () => { const t = $('newTitle').value.trim(); if (t) { $('newTitle').value=''; newTopic(t); } };
     $('seedToggle').onclick = () => $('seedBox').classList.toggle('hidden');
@@ -1090,6 +1137,43 @@
     }
     function closeMargins() { const el = $('marginsSheet'); if (el) el.remove(); }
     window.openMargins = openMargins; window.closeMargins = closeMargins;
+
+    // -- the study trace (Prompt 39): the chavrusa's notebook -------------------
+    // Rendered as a vertical stepper — a shiur transcript, not a debug log.
+    // Shareable: open the PWA with #trace=<id>.
+    const TRACE_VERB = {search:'🔍 חיפש', open_section:'📖 פתח', walk_graph:'🕸 הלך בגרף',
+                        lookup_term:'📚 בדק מונח', conclude:'✔ סיכם'};
+    async function openTrace(id) {
+      let t;
+      try {
+        const r = await fetch('/api/traces/' + encodeURIComponent(id));
+        if (!r.ok) { toast('Trace not found.'); return; }
+        t = await r.json();
+      } catch (e) { toast('Trace unavailable.'); return; }
+      const steps = (t.steps || []).map((s, i) => {
+        const a = s.action || {};
+        const target = a.query || a.ref || a.term || '';
+        const hits = (s.digest.hits || []).length
+          ? `<div class="hint">→ ${s.digest.hits.length} sources (top: ${esc(s.digest.hits[0].ref)})</div>` : '';
+        const edges = (s.digest.edges || []).map(e =>
+          `<div class="hint">→ ${EV_GLYPH[e.evidence] || '?'} ${esc(e.rel_type)} (${esc(e.author)}) → ${esc(e.far)}</div>`).join('');
+        const note = s.digest.note ? `<div class="hint">→ ${esc(s.digest.note)}</div>` : '';
+        const term = s.digest.term ? `<div class="hint">→ ${esc(s.digest.term)}</div>` : '';
+        return `<div class="margin-item">${i + 1}. ${TRACE_VERB[a.verb] || esc(a.verb)}
+          ${target ? `<b dir="auto">"${esc(target)}"</b>` : ''}${hits}${edges}${term}${note}</div>`;
+      }).join('');
+      const b = t.budgets || {};
+      const forced = t.forced
+        ? `<div class="hint">⏸ הגיע לגבול (${esc(b.exhausted || 'malformed')}) — סיכם עם מה שנאסף</div>` : '';
+      mkOverlay(`<div class="reader-head">
+          <span class="title" dir="auto">כיצד נלמד? — ${esc(t.question)}</span>
+          <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+        <div class="reader-body" dir="rtl">${steps}${forced}
+          <div class="hint">budgets: hops ${b.hops_used}/${b.hops_max} · chunks ${b.chunks_used}/${b.chunks_max} · calls ${b.calls_used}/${b.calls_max}</div>
+        </div>`);
+    }
+    window.openTrace = openTrace;
+    if (location.hash.startsWith('#trace=')) openTrace(location.hash.slice(7));
 
     async function openLibrary() {
       document.body.classList.remove('drawer-open');

@@ -64,6 +64,17 @@ VERIFY_SYSTEM_PROMPT = (
 _TAG = re.compile(r"\[S(\d+)\]")
 
 
+def gate_refuses(
+    retrieval_results: Sequence[SearchResult], relevance: float, threshold: float
+) -> bool:
+    """THE default-deny decision, in one place.
+
+    True → refuse without calling any model. `RAGService.ask` and the chavrusa
+    agent (Prompt 39) both call this — the gate is never reimplemented.
+    """
+    return not retrieval_results or relevance < threshold
+
+
 class ContextTurn(BaseModel):
     """A prior conversation turn passed to `ask` for interpretation only.
 
@@ -200,7 +211,7 @@ class RAGService:
 
         # DEFAULT-DENY: refuse without calling the model when nothing supports an answer.
         # Enforced before any prompt is built, so context can never trigger a model call.
-        if not sources or retrieval.relevance < self._score_threshold:
+        if gate_refuses(sources, retrieval.relevance, self._score_threshold):
             return Answer(
                 question=question,
                 text=self._refusal_text,
@@ -210,6 +221,30 @@ class RAGService:
                 relevance=retrieval.relevance,
             )
 
+        return self.synthesize(
+            question, sources, context_turns=context_turns, relevance=retrieval.relevance
+        )
+
+    @property
+    def synthesis_calls(self) -> int:
+        """Model calls one `synthesize` makes (the agent's budget accounting)."""
+        return 1 + int(self._reasoning) + int(self._verify)
+
+    def synthesize(
+        self,
+        question: str,
+        sources: list[SearchResult],
+        *,
+        context_turns: Sequence[ContextTurn] = (),
+        relevance: float = 0.0,
+    ) -> Answer:
+        """Generate the grounded, cited answer over a GIVEN source set.
+
+        This is stages 2+3 of `ask` (analyze→synthesize when reasoning is on,
+        plus the optional verify pass), factored out so the chavrusa agent's
+        conclude step (Prompt 39) runs the EXACT same path over its working set.
+        Callers are responsible for having applied the gate first.
+        """
         # Two-stage when reasoning is on: first ANALYZE the sources into a study map,
         # then SYNTHESIZE the answer from sources + map. Single pass otherwise.
         reasoning_text: str | None = None
@@ -244,7 +279,7 @@ class RAGService:
             sources=sources,
             reasoning=reasoning_text,
             unsupported_claims=unsupported,
-            relevance=retrieval.relevance,
+            relevance=relevance,
         )
 
     # -- prompt assembly -----------------------------------------------------

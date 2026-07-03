@@ -36,3 +36,6 @@ models/
 .idea/
 .vscode/
 docs/CURRICULUM_FULL.pdf
+
+# background subagent worktrees
+.claude/worktrees/
