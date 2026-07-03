@@ -357,6 +357,14 @@ def ask(
         help="Graph expansion: widen supported grounding one hop along approved edges "
         "(overrides GRAPH_EXPAND_ENABLED).",
     ),
+    agent: bool = typer.Option(
+        None, "--agent/--no-agent",
+        help="Chavrusa mode: a bounded multi-hop study loop (overrides AGENT_ENABLED). "
+        "The refusal gate is unchanged.",
+    ),
+    show_trace: bool = typer.Option(
+        False, "--show-trace", help="With --agent: print the study trace (the stepper)."
+    ),
     show_reasoning: bool = typer.Option(
         False, "--show-reasoning", help="Print the study map produced in reasoning mode."
     ),
@@ -375,6 +383,7 @@ def ask(
     use_expand = settings.query_expand_enabled if expand is None else expand
     use_reasoning = settings.rag_reasoning_enabled if reason is None else reason
     use_verify = settings.answer_verify_enabled if verify is None else verify
+    use_agent = settings.agent_enabled if agent is None else agent
     retriever = build_retriever(
         settings, embedder=embedder, expand=use_expand, graph=graph,
         backend=backend if use_expand else None,
@@ -384,10 +393,20 @@ def ask(
         reasoning=use_reasoning, verify=use_verify,
     )
 
+    if use_agent and (thread_id or topic):
+        typer.echo("error: --agent does not run inside threads yet; drop --thread/--topic.")
+        raise typer.Exit(1)
+
     # Within a thread, prior turns are passed as NON-citable context; retrieval and
     # default-deny are unchanged. Outside a thread, this is a plain one-shot ask.
     active_thread: str | None = None
-    if thread_id or topic:
+    trace = None
+    if use_agent:
+        from maayan.agent.factory import build_agent_service
+
+        trace = build_agent_service(settings, retriever, rag, backend).study(question, k=k)
+        answer = trace.answer
+    elif thread_id or topic:
         from maayan.threads.factory import build_thread_service
         from maayan.threads.flow import ask_in_thread
 
@@ -443,6 +462,11 @@ def ask(
         typer.echo("\n⚠ Claims not clearly supported by their cited sources:")
         for claim in answer.unsupported_claims:
             typer.echo(f"  - {claim}")
+    if trace is not None:
+        if show_trace:
+            typer.echo("")
+            _print_trace(trace)
+        typer.echo(f"\nTrace: {trace.id}  (GET /api/traces/{trace.id})")
     typer.echo(f"\nSession: {session.id}")
     if active_thread:
         typer.echo(f"Thread:  {active_thread}  (ask turn appended; "
@@ -450,6 +474,53 @@ def ask(
     typer.echo("Annotate it:  maayan annotate --session "
                f"{session.id} --author 'Your Name' --kind connection --body '...' "
                "--ref '<ref>' --ref '<ref>'")
+
+
+_TRACE_VERB_GLYPH = {
+    "search": "🔍 חיפש",
+    "open_section": "📖 פתח",
+    "walk_graph": "🕸 הלך בגרף",
+    "lookup_term": "📚 בדק מונח",
+    "conclude": "✔ סיכם",
+}
+
+
+def _print_trace(trace: object) -> None:
+    """Render a StudyTrace as the vertical stepper — a shiur transcript, not a log."""
+    from maayan.agent.models import StudyTrace
+    from maayan.graph.models import EVIDENCE_GLYPH
+
+    assert isinstance(trace, StudyTrace)
+    typer.echo("כיצד נלמד?")
+    for i, step in enumerate(trace.steps, 1):
+        action = step.action
+        label = _TRACE_VERB_GLYPH.get(action.verb, action.verb)
+        target = getattr(action, "query", None) or getattr(action, "ref", None) or getattr(
+            action, "term", None
+        )
+        head = f"{i}. {label}" + (f'  "{target}"' if target else "")
+        typer.echo(f"  {head}")
+        digest = step.digest
+        if digest.hits:
+            top = digest.hits[0]
+            typer.echo(f"       → {len(digest.hits)} sources (top: {top.ref}, {top.score:.2f})")
+        for edge in digest.edges:
+            glyph = EVIDENCE_GLYPH.get(edge.evidence, "?")
+            typer.echo(f"       → {glyph} {edge.rel_type} ({edge.author}) → {edge.far}")
+        if digest.term:
+            typer.echo(f"       → {digest.term}")
+        if digest.note:
+            typer.echo(f"       → {digest.note}")
+    budgets = trace.budgets
+    if trace.forced:
+        # Budget exhaustion is shown honestly, never disguised as a conclusion.
+        which = budgets.exhausted or "malformed reply"
+        typer.echo(f"  ⏸ הגיע לגבול ({which}) — סיכם עם מה שנאסף")
+    typer.echo(
+        f"  budgets: hops {budgets.hops_used}/{budgets.hops_max} · "
+        f"chunks {budgets.chunks_used}/{budgets.chunks_max} · "
+        f"calls {budgets.calls_used}/{budgets.calls_max}"
+    )
 
 
 def _provenance_line(result: object) -> str:
@@ -1747,6 +1818,7 @@ def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
     import uvicorn
 
+    from maayan.agent.factory import build_agent_service
     from maayan.capture.factory import build_capture_service
     from maayan.compose.factory import build_composition_service
     from maayan.corpus.store import ChunkStore
@@ -1827,6 +1899,8 @@ def ui() -> None:
         graph=graph_store,
         suggestions=SuggestionStore(settings.db_path),
         apparatus=apparatus,
+        traces=_trace_store(settings),
+        agent=build_agent_service(settings, retriever, rag, backend),
         settings=settings,
         ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
@@ -1857,6 +1931,12 @@ def _graph_store_cli() -> GraphStore:
     from maayan.graph.store import GraphStore
 
     return GraphStore(_cfg().db_path)
+
+
+def _trace_store(settings: Settings) -> Any:
+    from maayan.agent.store import TraceStore
+
+    return TraceStore(settings.db_path)
 
 
 def _parse_endpoint(

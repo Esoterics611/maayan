@@ -10,6 +10,9 @@ from maayan.users.models import Role, UserOut
 class AskRequest(BaseModel):
     question: str
     k: int | None = None
+    # Chavrusa mode (Prompt 39): run the bounded multi-hop study loop instead of the
+    # one-shot ask. The refusal gate is unchanged — a refused seed never reaches the model.
+    agent: bool = False
 
 
 class ViaOut(BaseModel):
@@ -47,6 +50,9 @@ class AskResponse(BaseModel):
     reasoning: str | None = None
     # Verify mode (ANSWER_VERIFY_ENABLED): answer sentences not supported by their sources.
     unsupported_claims: list[str] = Field(default_factory=list)
+    # Chavrusa mode (Prompt 39): the persisted study trace's id, so the UI can open the
+    # stepper ("כיצד נלמד?"). None for a plain ask or a refusal (nothing was studied).
+    trace_id: str | None = None
 
 
 class InquiryOut(BaseModel):

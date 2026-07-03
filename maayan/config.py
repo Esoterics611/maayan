@@ -284,6 +284,25 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Chavrusa agent (Phase 7, Prompt 39) ---------------------------------
+    agent_enabled: bool = Field(
+        default=False,
+        description=(
+            "The bounded multi-hop study loop behind `ask --agent`. The default-deny "
+            "gate is unchanged: a refused seed never reaches the model."
+        ),
+    )
+    agent_max_hops: int = Field(
+        default=4, description="Max actions the agent may take before force-concluding."
+    )
+    agent_max_chunks: int = Field(
+        default=12, description="Max chunks in the agent's working set."
+    )
+    agent_max_calls: int = Field(
+        default=6,
+        description="Max model calls for CHOOSING actions (conclude's synthesis is extra).",
+    )
+
     # ---- Captured goldset / eval flywheel (Phase 7, Prompt 38) ---------------
     captured_goldset_enabled: bool = Field(
         default=True,

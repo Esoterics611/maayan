@@ -300,3 +300,58 @@ def test_reading_experience_controls_present() -> None:
     assert "openLibrary" in html       # sefer browser (Library tab)
     assert "maayan.readmode" in html   # reading mode persisted in localStorage
     assert "cycleReadMode" in html
+
+
+def test_ask_agent_branch_studies_and_returns_trace_id() -> None:
+    # Chavrusa mode (Prompt 39): /ask {agent:true} routes to agent.study and returns the
+    # trace id; a plain ask leaves trace_id None; an unconfigured agent is inert (503),
+    # never a fabricated answer.
+    from datetime import UTC, datetime
+
+    from maayan.agent.models import BudgetState, StudyTrace
+
+    class FakeAgent:
+        def __init__(self, trace: StudyTrace) -> None:
+            self._trace = trace
+            self.calls: list[str] = []
+
+        def study(self, question: str, *, k=None) -> StudyTrace:  # noqa: ANN001
+            self.calls.append(question)
+            return self._trace
+
+    ans = _answer(grounded=True)
+    trace = StudyTrace(
+        id="trace-42", question=ans.question, steps=[], answer=ans,
+        budgets=BudgetState(hops_max=4, chunks_max=12, calls_max=6),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    agent = FakeAgent(trace)
+    app = create_app(  # type: ignore[arg-type]
+        FakeRag(ans), FakeCapture(), _StubThreads(), _StubDevelop(), _StubTerms(),
+        _StubRetract(), _StubStats(), _StubCompose(), agent=agent,
+    )
+    client = TestClient(app)
+
+    data = client.post("/ask", json={"question": "מהי עבודת הבירורים?", "agent": True}).json()
+    assert data["trace_id"] == "trace-42"
+    assert agent.calls == ["מהי עבודת הבירורים?"]
+
+    plain = client.post("/ask", json={"question": "מהי בחירה"}).json()
+    assert plain["trace_id"] is None
+
+    # No agent wired → agent:true is inert, never a fake answer.
+    unwired = create_app(  # type: ignore[arg-type]
+        FakeRag(ans), FakeCapture(), _StubThreads(), _StubDevelop(), _StubTerms(),
+        _StubRetract(), _StubStats(), _StubCompose(),
+    )
+    r = TestClient(unwired).post("/ask", json={"question": "x", "agent": True})
+    assert r.status_code == 503
+
+
+def test_chavrusa_and_retraction_affordances_present() -> None:
+    # The חברותא toggle, the trace viewer, and the retraction-ledger click-through all ship.
+    client, _, _ = _client()
+    html = client.get("/").text
+    assert 'id="chavrusaToggle"' in html and "chavrusaOn" in html
+    assert "openTrace" in html and "/api/traces/" in html
+    assert "openRetractions" in html and "/retractions" in html
