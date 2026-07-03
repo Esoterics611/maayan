@@ -17,6 +17,7 @@ from maayan.clock import Clock
 from maayan.corpus.normalize import fold_surface
 from maayan.corpus.store import ChunkStore
 from maayan.embed.base import Embedder
+from maayan.eval.captured import CapturedRecorder
 from maayan.index.qdrant import QdrantIndex
 from maayan.lexicon.convert import term_to_chunk
 from maayan.lexicon.models import Term, TermType
@@ -33,12 +34,15 @@ class TermService:
         embedder: Embedder,
         index: QdrantIndex,
         clock: Clock,
+        *,
+        recorder: CapturedRecorder | None = None,
     ) -> None:
         self._terms = term_store
         self._chunks = chunk_store
         self._embedder = embedder
         self._index = index
         self._clock = clock
+        self._recorder = recorder
 
     def get_term(self, term_id: str) -> Term | None:
         return self._terms.get_term(term_id)
@@ -93,4 +97,8 @@ class TermService:
         self._index.ensure_collection()
         embeddings = self._embedder.embed([chunk.text])
         self._index.upsert_chunks(list(zip([chunk], embeddings, strict=True)))
+        # The eval flywheel (Prompt 38): the new term drafts its regression example.
+        # add_term is the single chokepoint (human adds AND populate approvals).
+        if self._recorder is not None:
+            self._recorder.record_term(term)
         return term

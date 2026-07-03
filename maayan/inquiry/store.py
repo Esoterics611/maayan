@@ -11,11 +11,15 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
 from maayan.clock import Clock
 from maayan.inquiry.models import InquiryItem, InquiryPayload
+
+if TYPE_CHECKING:  # import-cycle guard: eval.captured imports inquiry.models
+    from maayan.eval.captured import CapturedRecorder
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS inquiries (
@@ -42,7 +46,9 @@ _PARTS = TypeAdapter[dict[str, float]](dict[str, float])
 class InquiryStore:
     """Stores inquiry items; owns upsert dedupe + answered/dismissed transitions."""
 
-    def __init__(self, db_path: str, clock: Clock) -> None:
+    def __init__(
+        self, db_path: str, clock: Clock, *, recorder: CapturedRecorder | None = None
+    ) -> None:
         if db_path not in (":memory:", "") and "mode=memory" not in db_path:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -50,6 +56,7 @@ class InquiryStore:
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         self._clock = clock
+        self._recorder = recorder
 
     def upsert_open(self, item: InquiryItem) -> str:
         """Insert a drafted item, or refresh it in place if still open.
@@ -105,7 +112,12 @@ class InquiryStore:
 
     def mark_answered(self, item_id: str, *, resolution: str) -> InquiryItem:
         """Close an item with what answering created (chunk/term/relation id)."""
-        return self._close(item_id, status="answered", resolution=resolution)
+        closed = self._close(item_id, status="answered", resolution=resolution)
+        # The eval flywheel (Prompt 38): an answered refusal becomes a gate-only
+        # regression case ("this question should now be answerable").
+        if self._recorder is not None:
+            self._recorder.record_inquiry(closed)
+        return closed
 
     def mark_dismissed(self, item_id: str, *, resolution: str = "dismissed") -> InquiryItem:
         """Dismiss an item — a first-class outcome that teaches the queue."""

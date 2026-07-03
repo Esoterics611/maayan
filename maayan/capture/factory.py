@@ -24,6 +24,8 @@ def build_capture_service(
     index = QdrantIndex(
         build_qdrant_client(settings), settings.collection_name, embedder.dim
     )
+    from maayan.eval.captured import build_captured_recorder
+
     return CaptureService(
         CaptureStore(settings.db_path),
         ChunkStore(settings.db_path),
@@ -31,6 +33,7 @@ def build_capture_service(
         index,
         SystemClock(),
         allowed_kinds=settings.annotation_kinds,
+        recorder=build_captured_recorder(settings),
     )
 
 

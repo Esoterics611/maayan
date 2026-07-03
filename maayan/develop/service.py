@@ -27,6 +27,7 @@ from maayan.develop.convert import development_to_chunk
 from maayan.develop.models import Development
 from maayan.develop.store import DevelopmentStore
 from maayan.embed.base import Embedder
+from maayan.eval.captured import CapturedRecorder
 from maayan.generate.base import GenerationBackend, Message
 from maayan.generate.rag import build_context, extract_cited_refs
 from maayan.index.qdrant import QdrantIndex
@@ -86,6 +87,7 @@ class DevelopmentService:
         *,
         system_prompt: str = DEFAULT_DEVELOP_SYSTEM_PROMPT,
         refusal_text: str = DEFAULT_DEVELOP_REFUSAL,
+        recorder: CapturedRecorder | None = None,
     ) -> None:
         self._retriever = retriever
         self._backend = backend
@@ -98,6 +100,7 @@ class DevelopmentService:
         self._index = index
         self._system_prompt = system_prompt
         self._refusal_text = refusal_text
+        self._recorder = recorder
 
     def develop(self, seed: Annotation, *, thread_id: str) -> Development:
         """Develop `seed` grounded in the corpus; return a proposal (or honest refusal).
@@ -144,6 +147,9 @@ class DevelopmentService:
         approved = dev.model_copy(update={"status": "approved"})
         self._store.save_development(approved)
         self._index_derived(approved)
+        # The eval flywheel (Prompt 38): the approval drafts its regression example.
+        if self._recorder is not None:
+            self._recorder.record_development(approved)
         return approved
 
     def reject(self, development_id: str) -> Development:
