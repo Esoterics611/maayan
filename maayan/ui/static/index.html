@@ -62,6 +62,9 @@
     /* The via-line: expansion provenance, visually subordinate to the source it explains. */
     .vialine { font-size:.85em; color:#7a6f5c; margin:2px 0 4px 1.4em; }
     .vialine .ev-derived_bootstrap { color:#b8860b; } /* the one deliberate emotional cue */
+    /* Inquiry cards (שאלות לרב): questions to the Rav, never database rows. */
+    .inq { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0;
+           background:var(--panel); font-size:.92em; }
     .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
     .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
     .actions { margin-top:8px; display:flex; gap:8px; }
@@ -159,6 +162,14 @@
         <button id="newBtn" title="Start a topic">＋</button>
       </div>
       <div id="threadList"></div>
+      <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">שאלות לרב</div>
+          <button class="ghost" title="Regenerate the queue" onclick="generateInquiries()">↻</button>
+        </div>
+        <div id="inquiryPanel" class="hint">…</div>
+        <div id="harvestLine" class="hint" style="margin-top:6px"></div>
+      </div>
       <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
         <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Lexicon</div>
         <div id="termList"></div>
@@ -316,6 +327,57 @@
         ).join('') : '<div class="hint">No terms yet.</div>';
       } catch (e) { $('termList').innerHTML = '<div class="hint">No terms yet.</div>'; }
     }
+
+    // -- שאלות לרב: the inquiry queue (Prompt 37) ---------------------------
+    // Cards speak to the Rav in Hebrew; the priority math is printed on each
+    // card (an opaque queue would spend his trust along with his time), and
+    // dismiss carries the same weight as answer.
+    async function loadInquiries() {
+      try {
+        const data = await j(await fetch('/api/inquiries'));
+        const items = data.items || [];
+        if (!items.length) {
+          $('inquiryPanel').innerHTML = '<div class="hint">אין שאלות פתוחות</div>';
+        } else {
+          $('inquiryPanel').innerHTML = items.map(it => {
+            const parts = Object.entries(it.priority_parts || {})
+              .map(([k, v]) => `${k}(${v})`).join(' + ');
+            const ask = it.kind === 'refused_question' && it.payload && it.payload.questions
+              ? `<button class="ghost" title="נסה שוב בתיבת השאלה"
+                    onclick="prefillAsk(${attr(it.payload.questions[0])})">שאל שוב</button>` : '';
+            return `<div class="inq" dir="rtl">
+              <div style="font-weight:600">？ ${esc(it.title)}</div>
+              <div class="hint">${esc(it.detail)}</div>
+              <div class="hint" style="font-family:monospace">priority ${it.priority.toFixed(1)} = ${esc(parts)}</div>
+              <div class="row" style="margin-top:4px">
+                <button class="ghost" onclick="answerInquiry('${it.id}')">ענה ✓</button>
+                <button class="ghost" onclick="dismissInquiry('${it.id}')">דחה ✗</button>${ask}
+              </div></div>`;
+          }).join('');
+        }
+        const h = Object.entries(data.harvest || {});
+        $('harvestLine').textContent = h.length
+          ? 'היום נענו → ' + h.map(([k, v]) => `${k}: ${v}`).join(' · ') : '';
+      } catch (e) { $('inquiryPanel').innerHTML = '<div class="hint">inquiries unavailable</div>'; }
+    }
+    async function generateInquiries() {
+      try { await fetch('/api/inquiries/generate', { method: 'POST' }); } catch (e) {}
+      loadInquiries();
+    }
+    async function answerInquiry(id) {
+      const resolution = (prompt('מה נוצר מהתשובה? (מזהה קשר/מונח/chunk + מילה)', '') || '').trim();
+      if (!resolution) return;
+      await fetch(`/api/inquiries/${id}/answer`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resolution }) });
+      loadInquiries();
+    }
+    async function dismissInquiry(id) {
+      await fetch(`/api/inquiries/${id}/dismiss`, { method: 'POST' });
+      loadInquiries();
+    }
+    function prefillAsk(q) { $('q').value = q; $('q').focus(); }
+    window.generateInquiries = generateInquiries; window.answerInquiry = answerInquiry;
+    window.dismissInquiry = dismissInquiry; window.prefillAsk = prefillAsk;
 
     async function loadStats() {
       try {
@@ -617,7 +679,7 @@
     const savedAuthor = localStorage.getItem(AUTHOR_KEY) || '';
     $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
     $('composeAuthor').value = savedAuthor;
-    loadKinds(); loadThreads(); loadTerms(); loadStats();
+    loadKinds(); loadThreads(); loadTerms(); loadStats(); loadInquiries();
 
     // -- PWA: register the service worker (no-op where unsupported) ----------
     if ('serviceWorker' in navigator) {

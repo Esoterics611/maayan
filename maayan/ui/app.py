@@ -26,12 +26,18 @@ from maayan.capture.models import Annotation
 from maayan.capture.service import CaptureService
 from maayan.compose.models import Brief, Composition, SourceScope
 from maayan.compose.service import Composing
+from maayan.config import Settings
 from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.generate.rag import Answer, RAGService
+from maayan.graph.store import GraphStore
 from maayan.inbox.models import InboxItem
 from maayan.inbox.service import InboxService
+from maayan.inquiry.generate import SuggestionSource, generate_inquiries
+from maayan.inquiry.log import AskLog
+from maayan.inquiry.models import GenerateReport, InquiryItem
+from maayan.inquiry.store import InquiryStore
 from maayan.lexicon.models import TermType
 from maayan.lexicon.service import TermService
 from maayan.ocr.base import OCRer
@@ -48,6 +54,7 @@ from maayan.ui.models import (
     AnnotateRequest,
     AnnotateResponse,
     AnnotationOut,
+    AnswerInquiryRequest,
     ApproveTranscriptRequest,
     ApproveTranscriptResponse,
     AskInThreadRequest,
@@ -62,6 +69,8 @@ from maayan.ui.models import (
     DevelopRequest,
     ExportResponse,
     InboxItemOut,
+    InquiriesResponse,
+    InquiryOut,
     LibraryEntry,
     LibraryResponse,
     LoginRequest,
@@ -112,6 +121,16 @@ def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
         audio_id=meta.get("audio_id") if is_shiur else None,
         start_s=meta.get("start_s") if is_shiur else None,
         via=via,
+    )
+
+
+def _inquiry_out(item: InquiryItem) -> InquiryOut:
+    return InquiryOut(
+        id=item.id, kind=item.kind, title=item.title, detail=item.detail,
+        payload=item.payload.model_dump(mode="json"),
+        priority=item.priority, priority_parts=item.priority_parts,
+        status=item.status, created_at=item.created_at.isoformat(),
+        resolution=item.resolution,
     )
 
 
@@ -198,6 +217,11 @@ def create_app(
     chunks: ChunkStore | None = None,
     ocr: OCRer | None = None,
     inbox: InboxService | None = None,
+    ask_log: AskLog | None = None,
+    inquiries: InquiryStore | None = None,
+    graph: GraphStore | None = None,
+    suggestions: SuggestionSource | None = None,
+    settings: Settings | None = None,
     ocr_lang: str = "heb",
     context_turns: int = 6,
     auth_enabled: bool = False,
@@ -367,10 +391,24 @@ def create_app(
         return list(capture.allowed_kinds)
 
     # -- one-shot ask / annotate (kept; the thread flow is below) ------------
+    def _log_ask(
+        request: Request, answer: Answer, session_id: str, thread_id: str | None = None
+    ) -> None:
+        """Ask telemetry (Prompt 37): refusals become inquiries, not lost signals."""
+        if ask_log is None:
+            return
+        user: User | None = getattr(request.state, "user", None)
+        ask_log.record(
+            question=answer.question, refused=not answer.grounded,
+            top_score=answer.relevance, session_id=session_id, thread_id=thread_id,
+            user=user.username if user is not None else None,
+        )
+
     @app.post("/ask")
-    def ask(req: AskRequest) -> AskResponse:
+    def ask(req: AskRequest, request: Request) -> AskResponse:
         answer = rag.ask(req.question, k=req.k)
         session = capture.start_session(answer)  # so the answer can be annotated
+        _log_ask(request, answer, session.id)
         return _answer_to_response(answer, session.id)
 
     @app.post("/annotate")
@@ -427,13 +465,16 @@ def create_app(
         )
 
     @app.post("/threads/{thread_id}/ask")
-    def ask_in_thread_route(thread_id: str, req: AskInThreadRequest) -> AskResponse:
+    def ask_in_thread_route(
+        thread_id: str, req: AskInThreadRequest, request: Request
+    ) -> AskResponse:
         if threads.get_thread_with_turns(thread_id) is None:
             raise HTTPException(status_code=404, detail="Thread not found")
         result = ask_in_thread(
             rag, threads, thread_id, req.question, max_context_turns=context_turns
         )
         session = capture.start_session(result.answer)  # keep the answer annotatable
+        _log_ask(request, result.answer, session.id, thread_id)
         return _answer_to_response(result.answer, session.id)
 
     @app.post("/threads/{thread_id}/seed")
@@ -526,6 +567,46 @@ def create_app(
     @app.get("/stats")
     def get_stats() -> Stats:
         return stats.collect()
+
+    # -- the inquiry queue: שאלות לרב (Prompt 37) ----------------------------
+    def _inquiry_store() -> InquiryStore:
+        if inquiries is None:  # inquiry wiring absent — routes are inert
+            raise HTTPException(status_code=503, detail="inquiries not configured")
+        return inquiries
+
+    @app.get("/api/inquiries")
+    def list_inquiries(kind: str | None = None) -> InquiriesResponse:
+        store = _inquiry_store()
+        return InquiriesResponse(
+            items=[_inquiry_out(i) for i in store.list(status="open", kind=kind)],
+            harvest=store.harvest_today(),
+        )
+
+    @app.post("/api/inquiries/generate")
+    def generate_inquiries_route() -> GenerateReport:
+        store = _inquiry_store()
+        if settings is None:
+            raise HTTPException(status_code=503, detail="inquiry generation not configured")
+        return generate_inquiries(
+            store, store.clock, settings,
+            ask_log=ask_log, suggestions=suggestions, graph=graph,
+        )
+
+    @app.post("/api/inquiries/{item_id}/answer")
+    def answer_inquiry(item_id: str, req: AnswerInquiryRequest) -> InquiryOut:
+        try:
+            return _inquiry_out(
+                _inquiry_store().mark_answered(item_id, resolution=req.resolution)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/inquiries/{item_id}/dismiss")
+    def dismiss_inquiry(item_id: str) -> InquiryOut:
+        try:
+            return _inquiry_out(_inquiry_store().mark_dismissed(item_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # -- composition (brief → outline → fill → review → export) -------------
     @app.post("/compose")

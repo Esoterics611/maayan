@@ -49,6 +49,31 @@ class AskResponse(BaseModel):
     unsupported_claims: list[str] = Field(default_factory=list)
 
 
+class InquiryOut(BaseModel):
+    """One inquiry card (שאלות לרב): the voice, the printed math, the deep link."""
+
+    id: str
+    kind: str
+    title: str
+    detail: str
+    payload: dict[str, object]  # the typed per-kind payload, serialized
+    priority: float
+    priority_parts: dict[str, float]  # printed on the card — transparency over polish
+    status: str
+    created_at: str
+    resolution: str | None = None
+
+
+class InquiriesResponse(BaseModel):
+    items: list[InquiryOut]
+    # The harvest line: today's answered items by kind — the UI's only metric.
+    harvest: dict[str, int] = Field(default_factory=dict)
+
+
+class AnswerInquiryRequest(BaseModel):
+    resolution: str  # what answering created (chunk/term/relation id + note)
+
+
 class AnnotateRequest(BaseModel):
     session_id: str
     body: str

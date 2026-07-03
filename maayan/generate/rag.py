@@ -93,6 +93,9 @@ class Answer(BaseModel):
     sources: list[SearchResult]
     reasoning: str | None = None
     unsupported_claims: list[str] = []
+    # The absolute relevance the default-deny gate decided on — surfaced so the
+    # edges can log asks (AskLog, Prompt 37) without re-running retrieval.
+    relevance: float = 0.0
 
 
 def build_context(sources: list[SearchResult]) -> str:
@@ -204,6 +207,7 @@ class RAGService:
                 grounded=False,
                 cited_refs=[],
                 sources=sources,
+                relevance=retrieval.relevance,
             )
 
         # Two-stage when reasoning is on: first ANALYZE the sources into a study map,
@@ -240,6 +244,7 @@ class RAGService:
             sources=sources,
             reasoning=reasoning_text,
             unsupported_claims=unsupported,
+            relevance=retrieval.relevance,
         )
 
     # -- prompt assembly -----------------------------------------------------
