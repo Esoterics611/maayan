@@ -17,6 +17,7 @@ from maayan.capture.store import CaptureStore
 from maayan.clock import Clock
 from maayan.corpus.store import ChunkStore
 from maayan.embed.base import Embedder
+from maayan.eval.captured import CapturedRecorder
 from maayan.generate.rag import Answer
 from maayan.index.qdrant import QdrantIndex
 
@@ -33,6 +34,7 @@ class CaptureService:
         clock: Clock,
         *,
         allowed_kinds: Sequence[str],
+        recorder: CapturedRecorder | None = None,
     ) -> None:
         self._capture = capture_store
         self._chunks = chunk_store
@@ -40,6 +42,7 @@ class CaptureService:
         self._index = index
         self._clock = clock
         self._allowed_kinds = tuple(allowed_kinds)
+        self._recorder = recorder
 
     @property
     def allowed_kinds(self) -> tuple[str, ...]:
@@ -109,5 +112,10 @@ class CaptureService:
         self._index.ensure_collection()
         embeddings = self._embedder.embed([c.text for c in chunks])
         self._index.upsert_chunks(list(zip(chunks, embeddings, strict=True)))
+
+        # The eval flywheel (Prompt 38): a human-approved connection drafts its
+        # own regression example. Template-only; no-op for other kinds.
+        if self._recorder is not None:
+            self._recorder.record_connection(annotation)
 
         return annotation

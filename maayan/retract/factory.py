@@ -23,6 +23,8 @@ def build_retraction_service(
     sized from `settings.embed_dim` (what every embedder is constructed with). A
     shared embedder may still be passed (`maayan ui` does) and its dim wins.
     """
+    from maayan.eval.captured import build_captured_recorder
+
     dim = embedder.dim if embedder is not None else settings.embed_dim
     index = QdrantIndex(build_qdrant_client(settings), settings.collection_name, dim)
     return RetractionService(
@@ -33,4 +35,5 @@ def build_retraction_service(
         DevelopmentStore(settings.db_path),
         TermStore(settings.db_path),
         GraphStore(settings.db_path),
+        recorder=build_captured_recorder(settings),
     )

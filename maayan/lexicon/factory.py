@@ -25,12 +25,15 @@ def build_term_service(
     index = QdrantIndex(
         build_qdrant_client(settings), settings.collection_name, embedder.dim
     )
+    from maayan.eval.captured import build_captured_recorder
+
     return TermService(
         TermStore(settings.db_path),
         ChunkStore(settings.db_path),
         embedder,
         index,
         SystemClock(),
+        recorder=build_captured_recorder(settings),
     )
 
 

@@ -30,6 +30,7 @@ from maayan.clock import Clock
 from maayan.corpus.models import Chunk
 from maayan.corpus.store import ChunkStore
 from maayan.develop.store import DevelopmentStore
+from maayan.eval.captured import CapturedRecorder
 from maayan.graph.models import endpoint_str
 from maayan.graph.store import GraphStore
 from maayan.index.qdrant import QdrantIndex
@@ -63,6 +64,8 @@ class RetractionService:
         development_store: DevelopmentStore,
         term_store: TermStore,
         graph_store: GraphStore,
+        *,
+        recorder: CapturedRecorder | None = None,
     ) -> None:
         self._chunks = chunk_store
         self._retractions = retraction_store
@@ -71,6 +74,7 @@ class RetractionService:
         self._developments = development_store
         self._terms = term_store
         self._graph = graph_store
+        self._recorder = recorder
 
     def retract(self, target: str, *, author: str, reason: str) -> Retraction:
         """Retract the chunk identified by `target` (a stable chunk id OR a ref).
@@ -115,6 +119,14 @@ class RetractionService:
         for relation in self._graph.relations_from_chunk(chunk.id):
             if relation.status != "retracted":
                 self._graph.mark_retracted(relation.id)
+
+        # Flywheel hygiene (Prompt 38): examples drafted from this knowledge leave
+        # the suite with it — a retracted claim must not stay a regression target.
+        if self._recorder is not None:
+            for origin_key in ("contribution_id", "development_id", "term_id"):
+                origin_id = chunk.metadata.get(origin_key)
+                if isinstance(origin_id, str):
+                    self._recorder.retract_origin(origin_id)
 
         return self._retractions.save_retraction(retraction)
 

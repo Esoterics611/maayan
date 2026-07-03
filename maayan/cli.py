@@ -1282,11 +1282,68 @@ def evaluate(
         help="With --crosstext: also run with graph expansion ON and report both "
         "(what does structure buy?).",
     ),
+    captured: bool = typer.Option(
+        False, "--captured",
+        help="Run the machine-grown CAPTURED goldset (every approval drafted a case); "
+        "writes a date-stamped JSON report and prints deltas vs the previous run.",
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
     """Score retrieval (hit@k, recall@k, MRR), or the develop / cross-text / answer step."""
     settings = _cfg()
     require_qdrant(settings)
+
+    if captured:
+        from maayan.eval.captured import (
+            CapturedGoldsetStore,
+            CapturedRunRecord,
+            format_delta,
+            load_previous_report,
+            to_gold_examples,
+            write_captured_report,
+        )
+        from maayan.eval.harness import format_report, run_eval
+        from maayan.retrieve.factory import build_retriever
+
+        store = CapturedGoldsetStore(settings.db_path)
+        captured_examples = store.list_examples()
+        if not captured_examples:
+            typer.echo("(captured goldset is empty — approvals grow it automatically)")
+            return
+        gold = to_gold_examples(captured_examples)
+        gate_only = [ex for ex in captured_examples if not ex.expected_refs]
+        typer.echo(
+            f"Captured goldset: {len(captured_examples)} examples "
+            f"({len(gold)} ranked, {len(gate_only)} gate-only)\n"
+        )
+        retriever = build_retriever(settings)
+        report = run_eval(
+            retriever, gold, settings.eval_ks, score_threshold=settings.score_threshold
+        )
+        typer.echo(format_report(report))
+        answered = sum(
+            1
+            for ex in gate_only
+            if retriever.retrieve(ex.question).relevance >= settings.score_threshold
+        )
+        if gate_only:
+            typer.echo(
+                f"\nanswered-inquiry checks: {answered}/{len(gate_only)} "
+                "now clear the gate (were refusals)"
+            )
+        record = CapturedRunRecord(
+            date=SystemClock().now().isoformat(timespec="seconds"),
+            n_ranked=len(gold), n_gate_only=len(gate_only), gate_only_answered=answered,
+            ks=settings.eval_ks,
+            hit={str(kk): v for kk, v in report.hit.items()},
+            recall={str(kk): v for kk, v in report.recall.items()},
+            mrr=report.mrr, answer_rate=report.answer_rate,
+        )
+        previous = load_previous_report(settings.captured_reports_dir)
+        report_path = write_captured_report(record, settings.captured_reports_dir)
+        typer.echo(f"\nreport: {report_path}")
+        typer.echo(format_delta(record, previous))
+        return
 
     if crosstext:
         from maayan.eval.crosstext_harness import format_crosstext_report, run_crosstext_eval
@@ -1738,6 +1795,7 @@ def ui() -> None:
             typer.echo(f"auth: seeded first admin '{seeded.username}' (rotate the password!)")
 
     # Inquiry queue wiring (Prompt 37): telemetry + the שאלות לרב panel.
+    from maayan.eval.captured import build_captured_recorder
     from maayan.graph.store import GraphStore
     from maayan.inquiry.log import AskLog
     from maayan.inquiry.store import InquiryStore
@@ -1745,6 +1803,7 @@ def ui() -> None:
 
     clock = SystemClock()
     ask_log = AskLog(settings.db_path, clock) if settings.ask_log_enabled else None
+    recorder = build_captured_recorder(settings, clock=clock)
 
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
@@ -1754,7 +1813,7 @@ def ui() -> None:
         ocr=ocr,
         inbox=inbox,
         ask_log=ask_log,
-        inquiries=InquiryStore(settings.db_path, clock),
+        inquiries=InquiryStore(settings.db_path, clock, recorder=recorder),
         graph=GraphStore(settings.db_path),
         suggestions=SuggestionStore(settings.db_path),
         settings=settings,
@@ -2059,9 +2118,13 @@ _INQUIRY_RESOLVE_HINTS = {
 
 
 def _inquiry_store_cli() -> Any:
+    from maayan.eval.captured import build_captured_recorder
     from maayan.inquiry.store import InquiryStore
 
-    return InquiryStore(_cfg().db_path, SystemClock())
+    settings = _cfg()
+    return InquiryStore(
+        settings.db_path, SystemClock(), recorder=build_captured_recorder(settings)
+    )
 
 
 @inquiries_app.callback()

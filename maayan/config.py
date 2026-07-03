@@ -284,6 +284,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Captured goldset / eval flywheel (Phase 7, Prompt 38) ---------------
+    captured_goldset_enabled: bool = Field(
+        default=True,
+        description=(
+            "Every gated approval (connection/development/term, answered inquiry) "
+            "auto-drafts a deterministic regression example; retraction removes it."
+        ),
+    )
+    captured_reports_dir: str = Field(
+        default="eval/captured_reports",
+        description="Where `eval --captured` writes date-stamped JSON reports (trendable).",
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client
