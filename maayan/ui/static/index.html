@@ -65,6 +65,25 @@
     /* Inquiry cards (שאלות לרב): questions to the Rav, never database rows. */
     .inq { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0;
            background:var(--panel); font-size:.92em; }
+    /* The margins (Prompt 36): a bottom sheet on narrow screens, a floating
+       margin column on wide ones — the reader becomes a daf. */
+    .margins-sheet { position:fixed; z-index:60; background:var(--panel);
+      border:1px solid var(--line); box-shadow:0 -6px 24px rgba(0,0,0,.15);
+      left:0; right:0; bottom:0; max-height:55vh; border-radius:12px 12px 0 0;
+      display:flex; flex-direction:column; }
+    @media (min-width: 900px) {
+      .margins-sheet { left:auto; right:24px; top:70px; bottom:24px; width:340px;
+        max-height:none; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.15); }
+    }
+    .margins-head { display:flex; justify-content:space-between; align-items:center;
+      padding:10px 14px; border-bottom:1px solid var(--line); }
+    .margins-body { overflow-y:auto; padding:8px 14px; }
+    .margin-group { margin-bottom:10px; }
+    .margin-head { font-size:.8em; color:var(--muted); text-transform:uppercase;
+      letter-spacing:.04em; margin-bottom:4px; }
+    .margin-item { margin:4px 0; font-size:.92em; }
+    .margin-item .ev-derived_bootstrap { color:#b8860b; }
+    .outref { color:var(--muted); }  /* an anchor outside the corpus — real, not walkable */
     .src .ref input.srcpick { margin-right:5px; vertical-align:middle; cursor:pointer; }
     .connect { border:1px dashed var(--expert); border-radius:8px; padding:8px 10px; margin-top:10px; }
     .actions { margin-top:8px; display:flex; gap:8px; }
@@ -302,6 +321,9 @@
 
     const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
     const j = (r) => r.json();
+    // The one evidence-badge grammar (UI spec Rule 2) — identical everywhere.
+    const EV_GLYPH = {expert:'●', curated:'◆', deterministic:'⚙',
+                      derived_approved:'◐', derived_bootstrap:'◌'};
 
     async function loadKinds() {
       try { const ks = await j(await fetch('/kinds'));
@@ -452,15 +474,16 @@
                 title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
         // The via-line (graph expansion provenance): WHY this source appeared.
         // Seed hits have no via — the absence is the design.
-        const viaGlyph = {expert:'●', curated:'◆', deterministic:'⚙',
-                          derived_approved:'◐', derived_bootstrap:'◌'};
         const via = s.via ? `<div class="vialine" dir="auto">↳ via ${esc(s.via.rel_type)}
-            <span class="ev-${esc(s.via.evidence)}">${viaGlyph[s.via.evidence] || '?'}</span>
+            <span class="ev-${esc(s.via.evidence)}">${EV_GLYPH[s.via.evidence] || '?'}</span>
             (${esc(s.via.author)}) from <span class="srcref"
             onclick='openReader(${attr(s.via.seed_ref)}, ${attr(s.lang)})'>${esc(s.via.seed_ref)}</span></div>` : '';
+        // The margins affordance (Prompt 36): the daf's apparatus for this source.
+        const margins = `<button class="ghost" title="הגליון — מה ידוע סביב המקור"
+            onclick='openMargins(${attr(s.ref)})'>גליון ▸</button>`;
         return `<div class="src ${s.source}">
           <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
-            <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${retract}</div>
+            <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${margins}${retract}</div>
           ${via}<div dir="auto">${esc(s.text)}</div></div>`;
       }).join('');
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
@@ -1011,6 +1034,7 @@
       mkOverlay(
         `<div class="reader-head">
            <span class="title" dir="auto">${esc(data.label)} <span class="hint">${esc(data.book)}</span></span>
+           <button class="ghost" onclick='openMargins(${attr(ref)})' title="הגליון — מה ידוע סביב המקור">גליון ▸</button>
            <button class="ghost" onclick="cycleReadMode()" title="Light / sepia / dark">◑</button>
            <button class="ghost" onclick="bumpReadScale(-0.1)" title="Smaller">A−</button>
            <button class="ghost" onclick="bumpReadScale(0.1)" title="Larger">A+</button>
@@ -1018,6 +1042,54 @@
          </div><div class="reader-body">${segs}</div>`);
       const c = $('citedSeg'); if (c) c.scrollIntoView({ block: 'center' });
     }
+
+    // -- the margins (Prompt 36): the apparatus as a bottom sheet ---------------
+    // Groups render in the service's fixed order; every item is a click-through
+    // (study is walking); an empty apparatus is a statement, not an error.
+    async function openMargins(ref) {
+      let a;
+      try { a = await j(await fetch('/api/apparatus?ref=' + encodeURIComponent(ref))); }
+      catch (e) { toast('Margins unavailable.'); return; }
+      const relGroups = (a.relation_groups || []).map(g => {
+        const rows = g.items.map(it => {
+          const glyph = EV_GLYPH[it.relation.evidence] || '?';
+          const cls = it.in_corpus ? 'srcref' : 'outref';
+          const click = it.in_corpus ? ` onclick='closeMargins(); openReader(${attr(it.far_label)})'` : '';
+          const snip = it.far_snippet ? `<div class="hint" dir="auto">${esc(it.far_snippet)}</div>` : '';
+          return `<div class="margin-item">
+            <span class="ev-${esc(it.relation.evidence)}">${glyph}</span>
+            <span class="${cls}"${click} dir="auto">${esc(it.far_label)}</span>
+            <span class="hint">(${esc(it.relation.author)})</span>${snip}</div>`;
+        }).join('');
+        return `<div class="margin-group"><div class="margin-head">${esc(g.rel_type)}</div>${rows}</div>`;
+      }).join('');
+      const terms = (a.terms || []).length
+        ? `<div class="margin-group"><div class="margin-head">מונחים</div><div class="margin-item" dir="auto">`
+          + a.terms.map(t => esc(t.canonical)).join(' · ') + `</div></div>` : '';
+      const layer = (a.expert_layer || []).length
+        ? `<div class="margin-group"><div class="margin-head">שכבת הרב</div>`
+          + a.expert_layer.map(x => `<div class="margin-item" dir="auto">● <span class="srcref"
+              onclick='closeMargins(); openReader(${attr(x.ref)})'>${esc(x.snippet)}</span>
+              <span class="hint">(${esc(x.author || x.source)}${x.kind ? ', ' + esc(x.kind) : ''})</span></div>`).join('')
+          + `</div>` : '';
+      const devs = (a.developments || []).length
+        ? `<div class="margin-group"><div class="margin-head">פיתוחים</div>`
+          + a.developments.map(d => `<div class="margin-item" dir="auto">◐ ${esc(d.snippet)}
+              <span class="hint">(${esc(d.author)})</span></div>`).join('') + `</div>` : '';
+      const body = (a.total === 0)
+        ? '<div class="hint" dir="rtl" style="padding:12px">הגליון עדיין ריק</div>'
+        : relGroups + terms + layer + devs;
+      closeMargins();
+      const sheet = document.createElement('div');
+      sheet.className = 'margins-sheet'; sheet.id = 'marginsSheet';
+      sheet.innerHTML = `<div class="margins-head" dir="rtl">
+          <span style="font-weight:650" dir="auto">גליון · ${a.total} — ${esc(a.ref)}</span>
+          <button class="ghost" onclick="closeMargins()" title="Close">✕</button></div>
+        <div class="margins-body" dir="rtl">${body}</div>`;
+      document.body.appendChild(sheet);
+    }
+    function closeMargins() { const el = $('marginsSheet'); if (el) el.remove(); }
+    window.openMargins = openMargins; window.closeMargins = closeMargins;
 
     async function openLibrary() {
       document.body.classList.remove('drawer-open');
