@@ -406,6 +406,15 @@ def ask(
     capture = build_capture_service(settings, embedder=embedder)
     session = capture.start_session(answer)
 
+    # Ask telemetry (Prompt 37): refusals become inquiries instead of evaporating.
+    if settings.ask_log_enabled:
+        from maayan.inquiry.log import AskLog
+
+        AskLog(settings.db_path, SystemClock()).record(
+            question=question, refused=not answer.grounded, top_score=answer.relevance,
+            session_id=session.id, thread_id=active_thread,
+        )
+
     if not answer.grounded:
         typer.echo(f"\n[refused] {answer.text}")
         if answer.sources:
@@ -1728,6 +1737,15 @@ def ui() -> None:
         if seeded is not None:
             typer.echo(f"auth: seeded first admin '{seeded.username}' (rotate the password!)")
 
+    # Inquiry queue wiring (Prompt 37): telemetry + the שאלות לרב panel.
+    from maayan.graph.store import GraphStore
+    from maayan.inquiry.log import AskLog
+    from maayan.inquiry.store import InquiryStore
+    from maayan.lexicon.suggestions import SuggestionStore
+
+    clock = SystemClock()
+    ask_log = AskLog(settings.db_path, clock) if settings.ask_log_enabled else None
+
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
         users=users,
@@ -1735,6 +1753,11 @@ def ui() -> None:
         chunks=chunks_store,
         ocr=ocr,
         inbox=inbox,
+        ask_log=ask_log,
+        inquiries=InquiryStore(settings.db_path, clock),
+        graph=GraphStore(settings.db_path),
+        suggestions=SuggestionStore(settings.db_path),
+        settings=settings,
         ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
         auth_enabled=settings.auth_enabled,
@@ -2013,6 +2036,125 @@ def graph_stats() -> None:
         if tally:
             parts = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
             typer.echo(f"  {label}: {parts}")
+
+
+# --- inquiry queue: שאלות לרב (Phase 7, Prompt 37) ---------------------------
+# The system's questions for the scholar, ranked by expected value of an answer.
+inquiries_app = typer.Typer(
+    help="שאלות לרב — the system's prioritized questions for the scholar.",
+    invoke_without_command=True,
+    add_completion=False,
+)
+app.add_typer(inquiries_app, name="inquiries")
+
+# Deep links: each kind resolves through an EXISTING flow — the queue routes
+# attention, it never edits.
+_INQUIRY_RESOLVE_HINTS = {
+    "refused_question": "ענה → maayan annotate (או הוסף מקור/קשר) ואז inquiries answer",
+    "undergrounded_term": "אשר → maayan add-term / lexicon-review; דחה → inquiries dismiss",
+    "low_evidence_relation": "בדוק → maayan graph show; דחה קשר → maayan graph retract",
+    "contradiction": "הכרע → maayan graph retract על הקשר השגוי",
+    "re_review": "אשר מחדש או retract (chazarah)",
+}
+
+
+def _inquiry_store_cli() -> Any:
+    from maayan.inquiry.store import InquiryStore
+
+    return InquiryStore(_cfg().db_path, SystemClock())
+
+
+@inquiries_app.callback()
+def inquiries_list(
+    ctx: typer.Context,
+    kind: str | None = typer.Option(None, "--kind", help="Filter by inquiry kind."),
+    all_statuses: bool = typer.Option(
+        False, "--all", help="Include answered/dismissed items too."
+    ),
+) -> None:
+    """List open inquiries by priority (highest first)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    store = _inquiry_store_cli()
+    items = store.list(status=None if all_statuses else "open", kind=kind)
+    if not items:
+        typer.echo("(no open inquiries — run `maayan inquiries generate` after some use)")
+        return
+    for item in items:
+        status = "" if item.status == "open" else f"  [{item.status}]"
+        typer.echo(f"？ {item.kind}   priority {item.priority:.1f}{status}")
+        typer.echo(f"   {item.title}")
+        parts = " + ".join(f"{k}({v:g})" for k, v in item.priority_parts.items())
+        typer.echo(f"   priority = {parts}")
+        if item.detail:
+            typer.echo(f"   {item.detail}")
+        if item.resolution:
+            typer.echo(f"   ✓ {item.resolution}")
+        hint = _INQUIRY_RESOLVE_HINTS.get(item.kind, "")
+        if hint and item.status == "open":
+            typer.echo(f"   {hint}")
+        typer.echo(f"   id: {item.id}\n")
+    harvest = store.harvest_today()
+    if harvest:
+        tally = ", ".join(f"{k}: {v}" for k, v in sorted(harvest.items()))
+        typer.echo(f"היום נענו → {tally}")
+
+
+@inquiries_app.command("generate")
+def inquiries_generate() -> None:
+    """Regenerate the queue from telemetry, the deny-list, and the graph."""
+    from maayan.graph.store import GraphStore
+    from maayan.inquiry.generate import generate_inquiries
+    from maayan.inquiry.log import AskLog
+    from maayan.lexicon.suggestions import SuggestionStore
+
+    settings = _cfg()
+    clock = SystemClock()
+    report = generate_inquiries(
+        _inquiry_store_cli(),
+        clock,
+        settings,
+        ask_log=AskLog(settings.db_path, clock) if settings.ask_log_enabled else None,
+        suggestions=SuggestionStore(settings.db_path),
+        graph=GraphStore(settings.db_path),
+    )
+    by_kind = ", ".join(f"{k}={v}" for k, v in sorted(report.by_kind.items())) or "—"
+    typer.echo(
+        f"created: {report.created} ({by_kind})   refreshed: {report.refreshed}   "
+        f"kept closed: {report.skipped_terminal}"
+    )
+
+
+@inquiries_app.command("answer")
+def inquiries_answer(
+    item_id: str = typer.Argument(..., help="Inquiry id to close."),
+    resolution: str = typer.Option(
+        ..., "--resolution", "-r",
+        help="What answering created (chunk/term/relation id + a word).",
+    ),
+) -> None:
+    """Mark an inquiry answered, recording what it created."""
+    try:
+        item = _inquiry_store_cli().mark_answered(item_id, resolution=resolution)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"נענה ✓  {item.title}")
+    typer.echo(f"→ {item.resolution}")
+
+
+@inquiries_app.command("dismiss")
+def inquiries_dismiss(
+    item_id: str = typer.Argument(..., help="Inquiry id to dismiss."),
+    reason: str = typer.Option("dismissed", "--reason", help="Optional why (teaches the queue)."),
+) -> None:
+    """Dismiss an inquiry — a first-class outcome; it will not be regenerated."""
+    try:
+        item = _inquiry_store_cli().mark_dismissed(item_id, resolution=reason)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"נדחה ✗  {item.title}")
 
 
 # --- user management (auth / multi-user) ------------------------------------

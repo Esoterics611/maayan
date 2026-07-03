@@ -248,6 +248,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Inquiry queue (Phase 7, Prompt 37) ----------------------------------
+    ask_log_enabled: bool = Field(
+        default=True,
+        description=(
+            "Log every ask (question, refused, top score) so refused questions become "
+            "inquiries instead of evaporating. No new PII: user mirrors existing auth."
+        ),
+    )
+    inquiry_confidence_threshold: float = Field(
+        default=0.7,
+        description="Approved relations below this confidence surface for expert review.",
+    )
+    inquiry_count_weight: float = Field(
+        default=0.8,
+        description="Priority weight × an item's count signal (e.g. refusals in a cluster).",
+    )
+    inquiry_recency_weight: float = Field(
+        default=1.0, description="Priority weight × the item's recency score (0..1)."
+    )
+    inquiry_recency_halflife_days: float = Field(
+        default=7.0, description="Days after which an item's recency score halves."
+    )
+    inquiry_kind_weights: dict[str, float] = Field(
+        default={
+            "refused_question": 5.0,
+            "contradiction": 4.5,
+            "undergrounded_term": 3.5,
+            "low_evidence_relation": 2.5,
+            "re_review": 1.5,
+        },
+        description=(
+            "Base priority per inquiry kind — the queue's values, stated in config: "
+            "learners' unanswered questions first, then conflicts, then coverage gaps."
+        ),
+    )
+
     # ---- Corpus -------------------------------------------------------------
     # Config-driven list of works to ingest. Each entry is a Sefaria *base ref*
     # that resolves to a depth-2 node (chapters → segments), which the client
