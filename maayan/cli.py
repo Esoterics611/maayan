@@ -373,6 +373,7 @@ def ask(
     from maayan.capture.factory import build_capture_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
+    from maayan.generate.parent import build_parent_context
     from maayan.generate.rag import RAGService
     from maayan.retrieve.factory import build_retriever
 
@@ -391,6 +392,8 @@ def ask(
     rag = RAGService(
         retriever, backend, score_threshold=settings.score_threshold,
         reasoning=use_reasoning, verify=use_verify,
+        parent_context=build_parent_context(settings),
+        parent_context_chars=settings.parent_context_chars,
     )
 
     if use_agent and (thread_id or topic):
@@ -1825,6 +1828,7 @@ def ui() -> None:
     from maayan.develop.factory import build_development_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
+    from maayan.generate.parent import build_parent_context
     from maayan.generate.rag import RAGService
     from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
@@ -1848,6 +1852,8 @@ def ui() -> None:
     rag = RAGService(
         retriever, backend, score_threshold=settings.score_threshold,
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+        parent_context=build_parent_context(settings),
+        parent_context_chars=settings.parent_context_chars,
     )
     capture = build_capture_service(settings, embedder=embedder)
     threads = build_thread_service(settings)
@@ -2460,6 +2466,99 @@ def user_passwd(username: str = typer.Argument(..., help="Username to reset.")) 
         typer.echo(f"error: {exc}")
         raise typer.Exit(1) from exc
     typer.echo(f"password updated for {username}")
+
+
+@app.command()
+def summarize(
+    book: str = typer.Option(..., "--book", help="The sefer to summarize, section by section."),
+    units: int | None = typer.Option(
+        None, "--units", "-n", help="Draft at most N sections this run (sampling / cost)."
+    ),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter slug)."
+    ),
+    pace: float = typer.Option(
+        None, "--pace", help="Seconds between sections (default: config summary_pace_seconds)."
+    ),
+    include_unsupported: bool = typer.Option(
+        False, "--include-unsupported", help="Also queue ungrounded drafts (flagged), for review."
+    ),
+) -> None:
+    """Drip-draft one grounded, faithfulness-checked summary per section (indexes nothing).
+
+    Each draft lands 'proposed' for `summaries` → `summary-approve`. Makes real generation
+    calls — set SUMMARY_DRAFT_MODEL (or --model) to draft with a stronger model.
+    """
+    from maayan.summarize.factory import build_summary_service
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"summary_draft_model": model})
+    if pace is not None:
+        settings = settings.model_copy(update={"summary_pace_seconds": pace})
+    require_qdrant(settings)
+
+    service = build_summary_service(settings)
+    stats = asyncio.run(
+        service.draft_book(book, units=units, persist_unsupported=include_unsupported)
+    )
+    typer.echo(
+        f"[summarize] {book}: drafted {stats.drafted} section(s), "
+        f"{stats.supported} grounded & queued, {stats.failed} failed."
+    )
+    typer.echo("Review: `maayan summaries`, then `maayan summary-approve <id> --author ...`.")
+
+
+@app.command()
+def summaries(
+    book: str | None = typer.Option(None, "--book", help="Only this book's pending summaries."),
+) -> None:
+    """List pending section summaries awaiting approval (read-only; no models loaded)."""
+    from maayan.summarize.store import SummaryStore
+
+    pending = SummaryStore(_cfg().db_path).list(status="proposed", book=book)
+    if not pending:
+        typer.echo("No pending summaries. Run `maayan summarize --book ...` first.")
+        return
+    typer.echo(f"{len(pending)} pending summary(ies):")
+    for s in pending:
+        flag = "" if s.supported else "  [ungrounded]"
+        typer.echo(f"  {s.id}  · {s.parent_label or s.parent_ref}{flag}")
+        typer.echo(f"      {s.text[:120]}")
+
+
+@app.command(name="summary-approve")
+def summary_approve(
+    summary_id: str = typer.Argument(..., help="Pending summary id (from `maayan summaries`)."),
+    author: str = typer.Option(..., "--author", help="The expert approving it (becomes author)."),
+) -> None:
+    """Approve a drafted summary → index it as a retrievable summary chunk."""
+    from maayan.summarize.factory import build_summary_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        summary = build_summary_service(settings).approve(summary_id, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"approved summary of {summary.parent_label or summary.parent_ref} by {author}.")
+    typer.echo("It will now surface in retrieval; its margins lead down into the passages.")
+
+
+@app.command(name="summary-reject")
+def summary_reject(
+    summary_id: str = typer.Argument(..., help="The pending summary id to reject."),
+) -> None:
+    """Reject a drafted summary (indexes nothing; the corpus is unchanged)."""
+    from maayan.summarize.factory import build_summary_service
+
+    try:
+        build_summary_service(_cfg()).reject(summary_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"rejected summary {summary_id}.")
 
 
 study_app = typer.Typer(

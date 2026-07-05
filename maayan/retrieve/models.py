@@ -34,6 +34,9 @@ class SearchResult(BaseModel):
     source: str
     payload: dict[str, Any]
     via: Via | None = None  # set only on graph-expanded hits
+    # A window of neighboring passages from the same section (Prompt 42), added at
+    # generation time for context ONLY. Never citable — the citation stays this hit.
+    parent_context: str = ""
 
     def first_line(self, width: int = 100) -> str:
         """First line of the text, trimmed — handy for CLI output."""

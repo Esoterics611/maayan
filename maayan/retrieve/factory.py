@@ -68,6 +68,7 @@ def build_retriever(
         derived_boost=settings.derived_boost,
         term_boost=settings.term_boost,
         shiur_boost=settings.shiur_boost,
+        summary_boost=settings.summary_boost,
         hybrid=True if hybrid is None else hybrid,
     )
 

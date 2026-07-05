@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from maayan.generate.base import GenerationBackend, Message
+from maayan.generate.parent import ParentContextProvider
 from maayan.retrieve.models import SearchResult
 from maayan.retrieve.retriever import Retrieving
 
@@ -110,10 +111,20 @@ class Answer(BaseModel):
 
 
 def build_context(sources: list[SearchResult]) -> str:
-    """Render retrieved sources as a numbered, citable block."""
+    """Render retrieved sources as a numbered, citable block.
+
+    A source may carry `parent_context` (Prompt 42): neighboring passages from its
+    section, rendered as an explicitly NON-citable sub-block so the model can read the
+    flow — but the [S#] tag, and therefore the citation, is always the hit alone.
+    """
     lines = ["SOURCES:"]
     for i, s in enumerate(sources, 1):
         lines.append(f"[S{i}] ({s.ref}) {s.text}")
+        if s.parent_context:
+            lines.append(
+                f"    (surrounding context for [S{i}] — do NOT cite this, cite only [S{i}]): "
+                f"{s.parent_context}"
+            )
     return "\n".join(lines)
 
 
@@ -181,6 +192,8 @@ class RAGService:
         verify: bool = False,
         analyze_prompt: str = ANALYZE_SYSTEM_PROMPT,
         verify_prompt: str = VERIFY_SYSTEM_PROMPT,
+        parent_context: ParentContextProvider | None = None,
+        parent_context_chars: int = 0,
     ) -> None:
         self._retriever = retriever
         self._backend = backend
@@ -192,6 +205,8 @@ class RAGService:
         self._verify = verify
         self._analyze_prompt = analyze_prompt
         self._verify_prompt = verify_prompt
+        self._parent_context = parent_context
+        self._parent_context_chars = parent_context_chars
 
     def ask(
         self,
@@ -245,6 +260,10 @@ class RAGService:
         conclude step (Prompt 39) runs the EXACT same path over its working set.
         Callers are responsible for having applied the gate first.
         """
+        # Parent-context (Prompt 42): attach each hit's section window for the model to
+        # read. The window is context only — citations still resolve to the hits alone.
+        self._attach_parent_context(sources)
+
         # Two-stage when reasoning is on: first ANALYZE the sources into a study map,
         # then SYNTHESIZE the answer from sources + map. Single pass otherwise.
         reasoning_text: str | None = None
@@ -281,6 +300,16 @@ class RAGService:
             unsupported_claims=unsupported,
             relevance=relevance,
         )
+
+    def _attach_parent_context(self, sources: list[SearchResult]) -> None:
+        """Populate each hit's `parent_context` window when parent-context is enabled."""
+        if self._parent_context is None or self._parent_context_chars <= 0:
+            return
+        for source in sources:
+            if not source.parent_context:
+                source.parent_context = self._parent_context.window(
+                    source.ref, source.lang, max_chars=self._parent_context_chars
+                )
 
     # -- prompt assembly -----------------------------------------------------
     @staticmethod
