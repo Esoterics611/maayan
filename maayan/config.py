@@ -331,6 +331,35 @@ class Settings(BaseSettings):
         description="Run the faithfulness pass on each proposal; flagged ones are unsupported.",
     )
 
+    # ---- Consolidation + chazarah (Phase 7, Prompt 41) ----------------------
+    # Sugya pages consolidate a cluster of approved knowledge into a curated, versioned,
+    # gated topic page; chazarah resurfaces aging/low-evidence/never-used knowledge for
+    # re-review. Neither weakens the gate — pages index only on approval, and superseding
+    # a version retracts the old chunks through the audited retract flow.
+    sugya_min_cluster_size: int = Field(
+        default=2,
+        description="Min corpus refs in a connected component for it to form a sugya cluster.",
+    )
+    sugya_draft_model: str = Field(
+        default="",
+        description=(
+            "Model id used to DRAFT sugya pages (mirrors lexicon_draft_model). Blank → the "
+            "generation model."
+        ),
+    )
+    chazarah_bootstrap_days: float = Field(
+        default=90.0,
+        description="Bootstrap-evidence edges older than this many days come up for re-review.",
+    )
+    chazarah_base_interval_days: float = Field(
+        default=30.0,
+        description="Initial spaced-repetition interval for a newly scheduled re-review target.",
+    )
+    chazarah_interval_factor: float = Field(
+        default=2.0,
+        description="Each re-review confirmation multiplies the target's next-review interval.",
+    )
+
     # ---- Captured goldset / eval flywheel (Phase 7, Prompt 38) ---------------
     captured_goldset_enabled: bool = Field(
         default=True,
