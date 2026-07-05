@@ -43,6 +43,9 @@ class AskRecord(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     user: str | None = None  # mirrors existing auth; no new PII
+    # The refs the answer cited — the join key for chazarah's never-retrieved pass
+    # (Prompt 41): knowledge no logged ask ever leaned on comes up for re-review.
+    cited_refs: list[str] = Field(default_factory=list)
     timestamp: datetime
 
 

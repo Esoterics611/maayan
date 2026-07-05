@@ -10,8 +10,10 @@ UI routes) right where the session is captured; `ASK_LOG_ENABLED` gates it.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +29,7 @@ CREATE TABLE IF NOT EXISTS ask_log (
     session_id TEXT,
     thread_id  TEXT,
     user       TEXT,
+    cited_refs TEXT NOT NULL DEFAULT '[]',   -- json array (chazarah's never-retrieved join)
     timestamp  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ask_log_refused ON ask_log(refused);
@@ -42,8 +45,17 @@ class AskLog:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
         self._clock = clock
+
+    def _migrate(self) -> None:
+        """Add `cited_refs` in place for DBs created before it existed (default '[]')."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(ask_log)")}
+        if "cited_refs" not in existing:
+            self._conn.execute(
+                "ALTER TABLE ask_log ADD COLUMN cited_refs TEXT NOT NULL DEFAULT '[]'"
+            )
 
     def record(
         self,
@@ -54,6 +66,7 @@ class AskLog:
         session_id: str | None = None,
         thread_id: str | None = None,
         user: str | None = None,
+        cited_refs: Sequence[str] = (),
     ) -> AskRecord:
         record = AskRecord(
             id=str(uuid.uuid4()),
@@ -63,11 +76,12 @@ class AskLog:
             session_id=session_id,
             thread_id=thread_id,
             user=user,
+            cited_refs=list(cited_refs),
             timestamp=self._clock.now(),
         )
         self._conn.execute(
             "INSERT INTO ask_log (id, question, refused, top_score, session_id, thread_id, "
-            "user, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "user, cited_refs, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record.id,
                 record.question,
@@ -76,11 +90,19 @@ class AskLog:
                 record.session_id,
                 record.thread_id,
                 record.user,
+                json.dumps(record.cited_refs, ensure_ascii=False),
                 record.timestamp.isoformat(),
             ),
         )
         self._conn.commit()
         return record
+
+    def cited_refs_ever(self) -> set[str]:
+        """Every ref any logged answer cited — chazarah's 'has been retrieved' set."""
+        seen: set[str] = set()
+        for row in self._conn.execute("SELECT cited_refs FROM ask_log"):
+            seen.update(json.loads(row["cited_refs"]))
+        return seen
 
     def list_refused(self, *, limit: int | None = None) -> list[AskRecord]:
         sql = "SELECT * FROM ask_log WHERE refused = 1 ORDER BY timestamp"
@@ -118,5 +140,6 @@ class AskLog:
             session_id=row["session_id"],
             thread_id=row["thread_id"],
             user=row["user"],
+            cited_refs=json.loads(row["cited_refs"]) if "cited_refs" in row.keys() else [],
             timestamp=datetime.fromisoformat(row["timestamp"]),
         )

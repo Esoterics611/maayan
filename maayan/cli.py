@@ -431,7 +431,7 @@ def ask(
 
         AskLog(settings.db_path, SystemClock()).record(
             question=question, refused=not answer.grounded, top_score=answer.relevance,
-            session_id=session.id, thread_id=active_thread,
+            session_id=session.id, thread_id=active_thread, cited_refs=answer.cited_refs,
         )
 
     if not answer.grounded:
@@ -2592,6 +2592,108 @@ def study_report(
         typer.echo(f"Wrote report → {out}")
     else:
         typer.echo(markdown)
+
+
+sugya_app = typer.Typer(
+    help="Sugya pages: consolidate clusters of approved knowledge into curated, gated pages.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(sugya_app, name="sugya")
+
+
+@sugya_app.command("draft")
+def sugya_draft(
+    concept: str = typer.Option(..., "--concept", help="Concept the cluster is anchored on."),
+    author: str = typer.Option(..., "--author", "-a", help="Who is drafting (provenance)."),
+) -> None:
+    """Draft a proposed sugya page from the cluster anchored on a concept (indexes nothing)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        page = build_sugya_service(settings).draft(concept=concept, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"drafted sugya page {page.id} · «{page.title}» · {len(page.sections)} section(s)")
+    for section in page.sections:
+        typer.echo(f"  {section.title}: cites {', '.join(section.cited_refs) or '—'}")
+    typer.echo(f"Approve: `maayan sugya approve {page.id} --author <you>`.")
+
+
+@sugya_app.command("approve")
+def sugya_approve(
+    page_id: str = typer.Argument(..., help="Proposed sugya page id (from `sugya list`)."),
+    author: str = typer.Option(..., "--author", "-a", help="The approving human."),
+) -> None:
+    """Approve a page → index it as retrievable sugya chunks; supersede the prior version."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        page = build_sugya_service(settings).approve(page_id, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"approved sugya «{page.title}» v{page.version} — indexed {len(page.chunk_ids)} chunk(s)."
+    )
+    if page.supersedes is not None:
+        typer.echo(f"superseded {page.supersedes} (its chunks retracted, audited).")
+
+
+@sugya_app.command("reject")
+def sugya_reject(
+    page_id: str = typer.Argument(..., help="Proposed sugya page id to reject."),
+) -> None:
+    """Reject a proposed page (indexes nothing; the corpus is unchanged)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    try:
+        build_sugya_service(_cfg()).reject(page_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"rejected sugya page {page_id}.")
+
+
+@sugya_app.command("list")
+def sugya_list(
+    status: str | None = typer.Option(
+        None, "--status", help="proposed|approved|superseded|rejected"
+    ),
+) -> None:
+    """List sugya pages (read-only; no models loaded)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    pages = build_sugya_service(_cfg()).list(status=status)
+    if not pages:
+        typer.echo("(no sugya pages)")
+        return
+    for page in pages:
+        typer.echo(
+            f"{page.id}  · «{page.title}» v{page.version} · {page.status} · "
+            f"{len(page.sections)} section(s) · cites {len(page.cited_refs)} ref(s)"
+        )
+
+
+@app.command()
+def chazarah() -> None:
+    """Run one chazarah pass: queue re-review inquiries for aging/low-evidence/unused edges."""
+    from maayan.consolidate.factory import build_chazarah_scheduler
+
+    report = build_chazarah_scheduler(_cfg()).run()
+    typer.echo(
+        f"chazarah: scheduled {report.scheduled} target(s), queued {report.queued} re-review(s)."
+    )
+    for reason, n in sorted(report.by_reason.items()):
+        typer.echo(f"  {reason}: {n}")
+    typer.echo(
+        "Review: the שאלות לרב panel (re_review items), or `maayan inquiries --kind re_review`."
+    )
 
 
 # All CLI subcommands registered.
