@@ -303,6 +303,34 @@ class Settings(BaseSettings):
         description="Max model calls for CHOOSING actions (conclude's synthesis is extra).",
     )
 
+    # ---- Study programs (Phase 7, Prompt 40) --------------------------------
+    # A sweep runs the chavrusa over a sefer unit by unit, drafting typed edge
+    # proposals for the gates. It reuses the populate drip's pacing/backoff/resume
+    # (populate_*), so only the study-specific knobs live here. Nothing it drafts is
+    # auto-approved — every edge lands "proposed" (evidence derived_bootstrap).
+    study_program_model: str = Field(
+        default="",
+        description=(
+            "Model id used to DRAFT study-program proposals (mirrors lexicon_draft_model). "
+            "Blank → the generation model. Set the OpenRouter Claude slug to sweep with "
+            "Claude while maayan's own answers stay on the configured model."
+        ),
+    )
+    study_program_k: int = Field(
+        default=8,
+        description="Corpus sources co-retrieved per unit to ground (and gate) its proposals.",
+    )
+    study_unit_max_proposals: int = Field(
+        default=6, description="Per-unit budget: hard cap on proposals drafted from one unit."
+    )
+    study_pace_seconds: float = Field(
+        default=20.0, description="Seconds between units in a study sweep (drip pacing)."
+    )
+    study_draft_verify: bool = Field(
+        default=True,
+        description="Run the faithfulness pass on each proposal; flagged ones are unsupported.",
+    )
+
     # ---- Captured goldset / eval flywheel (Phase 7, Prompt 38) ---------------
     captured_goldset_enabled: bool = Field(
         default=True,
