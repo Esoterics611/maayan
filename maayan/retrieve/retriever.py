@@ -76,6 +76,7 @@ class Retriever:
         derived_boost: float = 1.0,
         term_boost: float = 1.0,
         shiur_boost: float = 1.0,
+        summary_boost: float = 1.0,
         hybrid: bool = True,
     ) -> None:
         self._index = index
@@ -87,6 +88,7 @@ class Retriever:
         self._derived_boost = derived_boost
         self._term_boost = term_boost
         self._shiur_boost = shiur_boost
+        self._summary_boost = summary_boost
         self._hybrid = hybrid
 
     def retrieve(
@@ -160,7 +162,7 @@ class Retriever:
         )
 
     def _source_boost(self, source: str) -> float:
-        """Score multiplier per source: expert (human), derived, term, shiur (approved audio)."""
+        """Score multiplier per source: expert, derived, term, shiur, summary (all human-gated)."""
         if source == "expert":
             return self._expert_boost
         if source == "derived":
@@ -169,12 +171,15 @@ class Retriever:
             return self._term_boost
         if source == "shiur":
             return self._shiur_boost
+        if source == "summary":
+            return self._summary_boost
         return 1.0
 
     def _apply_source_boosts(self, results: list[SearchResult]) -> list[SearchResult]:
         if (
             self._expert_boost == 1.0 and self._derived_boost == 1.0
             and self._term_boost == 1.0 and self._shiur_boost == 1.0
+            and self._summary_boost == 1.0
         ):
             return results
         for r in results:

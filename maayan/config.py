@@ -119,6 +119,10 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier for source='shiur' chunks (approved transcribed recordings).",
     )
+    summary_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='summary' chunks (gated section summaries, Prompt 42).",
+    )
 
     # ---- Query expansion (Prompt 31a) ---------------------------------------
     # Off by default so existing behavior/eval baseline are unchanged. When on, the
@@ -329,6 +333,29 @@ class Settings(BaseSettings):
     study_draft_verify: bool = Field(
         default=True,
         description="Run the faithfulness pass on each proposal; flagged ones are unsupported.",
+    )
+
+    # ---- Structural depth (Phase 7, Prompt 42) ------------------------------
+    # Two additions, both gated, neither touching printed text: a window of a hit's
+    # neighboring passages fed to the model at generation time (citation stays the hit),
+    # and gated one-level section summaries indexed as source="summary".
+    parent_context_chars: int = Field(
+        default=0,
+        description=(
+            "Chars of neighboring same-section passages attached to each hit at generation "
+            "time (0 = off). Context only — the citation is always the retrieved passage."
+        ),
+    )
+    summary_draft_model: str = Field(
+        default="",
+        description="Model id used to DRAFT section summaries (mirrors lexicon_draft_model).",
+    )
+    summary_pace_seconds: float = Field(
+        default=20.0, description="Seconds between sections in a `summarize` drip run."
+    )
+    summary_draft_verify: bool = Field(
+        default=True,
+        description="Run the faithfulness pass on each summary; flagged summaries are unsupported.",
     )
 
     # ---- Consolidation + chazarah (Phase 7, Prompt 41) ----------------------
