@@ -77,30 +77,35 @@ make index                    # incremental; add --rebuild to re-embed everythin
 > via the injected Clock). Use `--limit` while you're trying things out, then do a full
 > run once. Re-running is **idempotent** (stable chunk ids → upsert, never duplicate).
 
-### Embedding performance — GPU vs CPU (read before `index --rebuild`)
+### Embedding performance — bge-m3 is CPU-bound on this box (read before a big reindex)
 
-`index --rebuild` re-embeds the **whole** corpus (~4.3k chunks) with bge-m3. The device
-comes from `EMBED_DEVICE` in `.env`:
+A full `index --rebuild` re-embeds the **whole** corpus with bge-m3; even an *incremental*
+`make index` after a large ingest (e.g. Likutei Torah, ~4.5k new chunks) still embeds every
+new chunk. Budget for it: on this machine it runs at **~0.4 chunk/s (~24 chunks/min)** — a
+~4.5k-chunk pass is **~3 hours**; the full ~8.7k-chunk corpus ~6 hours.
 
-| `EMBED_DEVICE` | bge-m3 full reindex | Notes |
-|---|---|---|
-| `cpu` / `auto`-picking-CPU | **~2 hours** (~0.4 chunk/s, one core pinned) | painfully slow |
-| `cuda` | **a few minutes** | ~10–20× faster |
-
-**Finding (2026-07, this machine):** a **Quadro T1000 (4 GB)** is present and
-`torch.cuda.is_available()` is `True`, yet `EMBED_DEVICE=auto` ran the reindex on **CPU**
-(2 h). Fix — set the device explicitly:
+**Verified finding (2026-07, this machine).** A **Quadro T1000 (4 GB)** is present,
+`torch.cuda.is_available()` is `True`, and `EMBED_DEVICE=cuda` *does* load bge-m3 on the GPU
+(~1.7 GB resident, 100 % util). **Yet throughput is the same ~0.4 chunk/s as CPU**, and
+raising `EMBED_BATCH_SIZE` from 8 → 32 changed nothing (GPU memory barely moved: 1707 →
+1733 MiB; rate stayed flat). The bottleneck is **not** GPU compute — it is bge-m3's CPU-side
+sparse/lexical pass, pinned to one core. The device/batch knobs don't buy speed here, so run
+a large reindex as a **background job**, not an interactive wait. Set the device explicitly
+anyway (it's harmless, and a future GPU without the CPU bottleneck would benefit):
 
 ```dotenv
-EMBED_DEVICE=cuda
-EMBED_BATCH_SIZE=8      # keep batches small so bge-m3 (~2.3GB) fits the 4GB card
+EMBED_DEVICE=cuda       # loads on GPU; harmless, but not faster here (CPU-bound pipeline)
+EMBED_BATCH_SIZE=8      # 8 vs 32 made no measurable difference on this box
 ```
 
-Caveats for the 4 GB card: if a reindex OOMs, drop `EMBED_BATCH_SIZE` to 4, or fall back
-to `EMBED_DEVICE=cpu` and let it run. You rarely reindex — only after a fresh Qdrant
-volume or a new corpus ingest; day-to-day the UI only embeds one short query at a time,
-which is trivial on either device. **Don't kill a reindex that's most of the way done to
-switch devices — `--rebuild` restarts from zero.**
+Practical guidance:
+- **Incremental `make index` is resumable** — it only embeds chunks Qdrant doesn't have yet,
+  so you can kill it and rerun and it picks up where it left off. Retrieval works on the
+  partial index throughout (status stays green).
+- **`index --rebuild` is NOT resumable** — it re-embeds from zero, so don't kill one that's
+  most of the way done.
+- You rarely do either — only after a fresh Qdrant volume or a large new corpus ingest.
+  Day-to-day the UI embeds one short query at a time, trivial on either device.
 
 ## 4. Verify the Knowledge base loaded
 
