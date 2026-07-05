@@ -2462,6 +2462,138 @@ def user_passwd(username: str = typer.Argument(..., help="Username to reset.")) 
     typer.echo(f"password updated for {username}")
 
 
+study_app = typer.Typer(
+    help="Study programs: sweep a sefer, unit by unit, drafting proposed edges for the gates.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(study_app, name="study")
+
+
+@study_app.command("run")
+def study_run(
+    book: str = typer.Option(..., "--book", help="The sefer to sweep (a corpus book name)."),
+    task: str = typer.Option(
+        "relations", "--task", help="What to draft: relations | terms | mashal."
+    ),
+    units: int | None = typer.Option(
+        None, "--units", "-n", help="Process at most N units this run (sampling / cost)."
+    ),
+    program_id: str | None = typer.Option(
+        None, "--program", help="Resume an existing program instead of starting a new one."
+    ),
+    author: str = typer.Option(
+        None, "--author", "-a", help="Program author (provenance on every drafted edge)."
+    ),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter slug)."
+    ),
+    pace: float = typer.Option(
+        None, "--pace", help="Seconds between units (default: config study_pace_seconds)."
+    ),
+) -> None:
+    """Sweep a book into proposed, cited, typed edges — paced, resumable, gate-preserving.
+
+    Nothing is indexed or approved: each supported proposal lands as a *proposed*
+    relation (evidence derived_bootstrap) awaiting the Rav. Makes real generation calls —
+    set STUDY_PROGRAM_MODEL (or --model) to draft with a stronger model.
+    """
+    from typing import get_args as _get_args
+
+    from maayan.agent.program_factory import build_study_program_runner
+    from maayan.agent.program_models import ProgramTask
+
+    if task not in _get_args(ProgramTask):
+        raise typer.BadParameter("--task must be one of: relations | terms | mashal")
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"study_program_model": model})
+    if pace is not None:
+        settings = settings.model_copy(update={"study_pace_seconds": pace})
+    require_qdrant(settings)
+
+    runner = build_study_program_runner(settings)
+    if program_id is not None:
+        from maayan.agent.program_store import ProgramStore
+
+        program = ProgramStore(settings.db_path).get_program(program_id)
+        if program is None:
+            typer.echo(f"error: no study program with id {program_id!r}")
+            raise typer.Exit(1)
+    else:
+        who = (author or "").strip()
+        if not who:
+            raise typer.BadParameter("--author is required when starting a new program")
+        program = runner.create(
+            book=book,
+            task=cast("ProgramTask", task),
+            author=f"program:{who}",
+            model=settings.study_program_model,
+        )
+    typer.echo(
+        f"[study] program {program.id} · {program.book} · task={program.task} · "
+        f"from unit {program.cursor}/{program.total_units}, pace={settings.study_pace_seconds}s"
+    )
+    program = asyncio.run(runner.run(program, units=units))
+    c = program.counts
+    typer.echo(
+        f"[study] {program.status}: {program.cursor}/{program.total_units} units · "
+        f"drafted {c.drafted}, passed {c.passed_checks}, queued {c.queued} "
+        f"(model calls {c.model_calls})"
+    )
+    typer.echo(
+        f"Review: `maayan graph list --status proposed`; "
+        f"report: `maayan study report {program.id}`."
+    )
+
+
+@study_app.command("status")
+def study_status() -> None:
+    """List study programs and their progress (read-only; no models loaded)."""
+    from maayan.agent.program_store import ProgramStore
+
+    programs = ProgramStore(_cfg().db_path).list_programs()
+    if not programs:
+        typer.echo("No study programs yet. Start one: `maayan study run --book ... --author ...`.")
+        return
+    for p in programs:
+        c = p.counts
+        typer.echo(
+            f"{p.id}  · {p.book} · {p.task} · {p.status} · {p.cursor}/{p.total_units} units · "
+            f"drafted {c.drafted}/passed {c.passed_checks}/queued {c.queued}"
+        )
+
+
+@study_app.command("report")
+def study_report(
+    program_id: str = typer.Argument(..., help="Program id (from `maayan study status`)."),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the markdown report to this path instead of stdout."
+    ),
+) -> None:
+    """Emit the drafted/passed/queued funnel report (POPULATE_REPORT-style markdown)."""
+    from pathlib import Path
+
+    from maayan.agent.program import render_report_markdown
+    from maayan.agent.program_factory import build_study_program_runner
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        report = build_study_program_runner(settings).build_report(program_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    markdown = render_report_markdown(report)
+    if out is not None:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(markdown, encoding="utf-8")
+        typer.echo(f"Wrote report → {out}")
+    else:
+        typer.echo(markdown)
+
+
 # All CLI subcommands registered.
 
 
