@@ -77,6 +77,31 @@ make index                    # incremental; add --rebuild to re-embed everythin
 > via the injected Clock). Use `--limit` while you're trying things out, then do a full
 > run once. Re-running is **idempotent** (stable chunk ids → upsert, never duplicate).
 
+### Embedding performance — GPU vs CPU (read before `index --rebuild`)
+
+`index --rebuild` re-embeds the **whole** corpus (~4.3k chunks) with bge-m3. The device
+comes from `EMBED_DEVICE` in `.env`:
+
+| `EMBED_DEVICE` | bge-m3 full reindex | Notes |
+|---|---|---|
+| `cpu` / `auto`-picking-CPU | **~2 hours** (~0.4 chunk/s, one core pinned) | painfully slow |
+| `cuda` | **a few minutes** | ~10–20× faster |
+
+**Finding (2026-07, this machine):** a **Quadro T1000 (4 GB)** is present and
+`torch.cuda.is_available()` is `True`, yet `EMBED_DEVICE=auto` ran the reindex on **CPU**
+(2 h). Fix — set the device explicitly:
+
+```dotenv
+EMBED_DEVICE=cuda
+EMBED_BATCH_SIZE=8      # keep batches small so bge-m3 (~2.3GB) fits the 4GB card
+```
+
+Caveats for the 4 GB card: if a reindex OOMs, drop `EMBED_BATCH_SIZE` to 4, or fall back
+to `EMBED_DEVICE=cpu` and let it run. You rarely reindex — only after a fresh Qdrant
+volume or a new corpus ingest; day-to-day the UI only embeds one short query at a time,
+which is trivial on either device. **Don't kill a reindex that's most of the way done to
+switch devices — `--rebuild` restarts from zero.**
+
 ## 4. Verify the Knowledge base loaded
 
 ```bash
