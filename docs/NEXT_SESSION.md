@@ -1,19 +1,45 @@
-# Next session — resume Phase 7
+# Next session — Phase 7 complete
 
-## Where things stand (2026-07-03)
+## Where things stand (2026-07-05)
 
-- **Branch `prompt39-chavrusa-agent` @ `972a4d6`** — committed, green (437+ tests, mypy/ruff clean), **not merged**.
-  - Prompt 39 (chavrusa agent) complete: `maayan/agent/`, `ask --agent [--show-trace]`, `GET /api/traces/{id}`.
-  - UI wiring (the gap that had orphaned the agent): a **חברותא** toggle in the composer runs the study loop and shows a **כיצד נלמד? ▸** trace stepper.
-  - **Retraction ledger** surfaced (stats count → מה נמחק audit overlay).
-  - **docs/UI_EXECUTION_PLAN_PHASE7.md** — full CLI/route → UI surface audit + a 20-step browser-only e2e protocol + what stays CLI and why.
-- **Not done:** Prompts **40** (study programs), **41** (chazarah/sugya pages), **42** (parent context + gated summaries).
-- **Base caveat:** the 33–39 code exists **only locally**. `origin/main` is stale at `3288577` (33–38 were merged locally, never pushed). Any worktree/branch must start from the local `prompt39-chavrusa-agent` tip, **not** `origin/main`.
+**Phase 7 (docs/BUILD_PLAN_PHASE7.md, prompts 33–42) is COMPLETE.** All ten prompts are
+implemented, green (460 tests, mypy strict clean, ruff clean), and merged to local
+`main` with `--no-ff` merge commits. `origin/main` had advanced to include Prompt 39, so
+the old "origin is stale" caveat no longer applies — branch off `main`.
 
-## What NOT to repeat
+The three prompts finished this session (each on its own branch off `main`, merged):
 
-Parallelizing 40/41/42 with `isolation:worktree` subagents **failed**: the worktree base resolved to stale `origin/main` (missing `maayan/graph`, `maayan/agent`, `maayan/inquiry`), so the agents couldn't build. And 40/41/42 all edit `config.py` + `cli.py` + `ui/app.py` + `index.html`, so parallel branches conflict three ways. **Do them sequentially** on branches off `prompt39-chavrusa-agent`, reusing the existing `.venv`.
+- **Prompt 40 — study programs** (`maayan/agent/program*.py`): `StudyProgramRunner`
+  sweeps a sefer unit by unit (reusing the populate drip for pacing/backoff/resume);
+  `ProgramDrafter` proposes typed edges whose object must be a co-retrieved source (no
+  invented mekoros), each faithfulness-checked, landing as `status="proposed"`
+  `derived_bootstrap` relations — nothing auto-approved. CLI: `study run|status|report`.
+- **Prompt 41 — chazarah** (`maayan/consolidate/`): deterministic clustering (union-find
+  over approved edges) → `SugyaDrafter` (sources → connections → open questions, cites
+  only the cluster's refs) → `SugyaService` gate; approving version N+1 supersedes N,
+  retracting its exact chunks through the **audited retract flow** (`sugya` added to
+  `RETRACTABLE_SOURCES`). `ChazarahScheduler` queues `re_review` inquiries
+  (stale-bootstrap / low-confidence / never-retrieved) with Anki-style intervals.
+  `AskLog` gained a `cited_refs` column (migration-safe) for the never-retrieved join.
+  CLI: `sugya draft|approve|reject|list`, `chazarah`.
+- **Prompt 42 — structural depth**: parent-context answering
+  (`SearchResult.parent_context` + `SectionWindowProvider`; `RAGService` attaches a hit's
+  section window at generation time — **the citation stays the exact hit**, asserted;
+  default `PARENT_CONTEXT_CHARS=0` so the eval baseline is unchanged). Gated one-level
+  section summaries (`maayan/summarize/`, `source="summary"`, proposed→approved gate like
+  develop, retractable, `summary_boost` wired in the same place as the other source
+  boosts). CLI: `summarize`, `summaries`, `summary-approve|-reject`.
 
-## Paste this to resume
+**Nothing is pushed to origin** — the merges are local; the Rav reviews and pushes.
 
-> Continue Phase 7 of maayan. Branch off the current `prompt39-chavrusa-agent` tip (it has prompts 33–39; do **not** branch from `origin/main`, which is stale). Implement the remaining prompts **one at a time, sequentially** (they all touch `config.py`/`cli.py`/`ui/app.py`/`index.html`, so don't parallelize): **Prompt 40 → 41 → 42**, each verbatim from `docs/BUILD_PLAN_PHASE7.md`, following `CLAUDE.md` and the UI surfaces in `docs/UI_SPEC_PHASE7.md` §6. For each: new branch `promptNN-<slug>`, DoD green (`make test`, `make typecheck`, `make lint`), commit. Prompt 40 depends on `maayan/agent/`; 41 on graph(33)+inquiry(37); 42 is standalone. Keep the trust core fixed (default-deny never weakened, nothing model-drafted auto-approved, printed text immutable, retraction via the existing audited service). When all three are green, run each prompt's live "Show" step against the local DB and report.
+## What's left (not code — verification + the top-model program)
+
+1. **Live "Show" runs.** Each of 40/41/42 has a `Show:` step in BUILD_PLAN_PHASE7.md to
+   run against the real DB (needs local Qdrant + bge-m3). These are CLI-first features;
+   their scholar-facing surfaces are automatic (proposed edges via graph/inquiry; sugya
+   and summary chunks are retrievable in Library/reader).
+2. **UI_EXECUTION_PLAN §2.3 browser review pass** — open every surface, check the five
+   UI_SPEC rules, run the §3 e2e protocol top to bottom.
+3. **The top-model program** (BUILD_PLAN_PHASE7 §7): ontology review with the Rav → the
+   Great Sweep (Prompt 40 at scale, measuring elasticity) → the adversarial bikores →
+   the synthesis exam / the paper.
