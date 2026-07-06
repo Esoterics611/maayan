@@ -11,6 +11,7 @@ an orchestration layer, NOT a new generation engine. All collaborators are injec
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from typing import Protocol
@@ -26,6 +27,8 @@ from maayan.generate.base import GenerationBackend, Message
 from maayan.generate.rag import build_context, extract_cited_refs
 from maayan.retrieve.retriever import Retrieving
 from maayan.threads.service import ThreadService
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OUTLINE_SYSTEM_PROMPT = (
     "You are helping a Torah scholar plan a structured piece grounded in chassidus / "
@@ -240,9 +243,19 @@ class CompositionService:
             source=brief.source_scope.source,
         )
         sources = retrieval.results
+        supported = bool(sources) and retrieval.relevance >= self._settings.score_threshold
+
+        # Per-section gate trace (R1): makes an intermittent "corpus silent" refusal
+        # diagnosable — was retrieval empty, or did relevance just miss the threshold?
+        logger.info(
+            "compose.fill heading=%r query=%r hits=%d relevance=%.3f threshold=%.3f book=%r -> %s",
+            section.heading, section.query, len(sources), retrieval.relevance,
+            self._settings.score_threshold, brief.source_scope.book,
+            "FILL" if supported else "GAP",
+        )
 
         # DEFAULT-DENY per section: an unsupported section is a gap, with NO model call.
-        if not sources or retrieval.relevance < self._settings.score_threshold:
+        if not supported:
             return section.model_copy(update={
                 "supported": False, "text": self._gap_text, "cited_refs": [], "grounded_in": [],
             })

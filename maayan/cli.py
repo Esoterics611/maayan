@@ -1817,6 +1817,24 @@ def transcribe(
 
 
 @app.command()
+def backup(
+    keep: int | None = typer.Option(
+        None, "--keep", help="How many recent backups to retain (default: config backup_keep)."
+    ),
+) -> None:
+    """Back up the SQLite knowledge layer (consistent online copy) to the backup dir."""
+    from maayan.backup import backup_sqlite
+
+    settings = _cfg()
+    dest = backup_sqlite(
+        settings.db_path,
+        settings.backup_dir,
+        keep=keep if keep is not None else settings.backup_keep,
+    )
+    typer.echo(f"Backed up {settings.db_path} → {dest}")
+
+
+@app.command()
 def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
     import uvicorn
@@ -1832,6 +1850,7 @@ def ui() -> None:
     from maayan.generate.rag import RAGService
     from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
+    from maayan.logconfig import configure_logging
     from maayan.ocr.factory import build_ocrer
     from maayan.retract.factory import build_retraction_service
     from maayan.retrieve.factory import build_retriever
@@ -1842,6 +1861,7 @@ def ui() -> None:
     from maayan.users.factory import build_user_service
 
     settings = _cfg()
+    configure_logging(settings.log_level)  # surface diagnostics (e.g. compose fill gate) in the log
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared across services
     backend = build_generation_backend(settings)
@@ -1907,6 +1927,8 @@ def ui() -> None:
         apparatus=apparatus,
         traces=_trace_store(settings),
         agent=build_agent_service(settings, retriever, rag, backend),
+        captured=_captured_store(settings),
+        retriever=retriever,
         settings=settings,
         ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
@@ -1943,6 +1965,12 @@ def _trace_store(settings: Settings) -> Any:
     from maayan.agent.store import TraceStore
 
     return TraceStore(settings.db_path)
+
+
+def _captured_store(settings: Settings) -> Any:
+    from maayan.eval.captured import CapturedGoldsetStore
+
+    return CapturedGoldsetStore(settings.db_path)
 
 
 def _parse_endpoint(

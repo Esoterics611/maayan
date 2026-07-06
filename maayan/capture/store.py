@@ -126,6 +126,29 @@ class CaptureStore:
         ).fetchone()
         return self._row_to_annotation(row) if row else None
 
+    def list_annotations(
+        self, *, author: str | None = None, kind: str | None = None, limit: int = 100
+    ) -> list[Annotation]:
+        """List contributions newest-first across all sessions (the contributions panel).
+
+        Optional filters by author/kind. Unlike `get_annotations`, this spans sessions so
+        an expert can browse everything they've taught in one place.
+        """
+        clauses: list[str] = []
+        params: list[object] = []
+        if author is not None:
+            clauses.append("author = ?")
+            params.append(author)
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM annotations {where} ORDER BY timestamp DESC LIMIT ?", params
+        )
+        return [self._row_to_annotation(r) for r in rows]
+
     def counts_by_author(self) -> dict[str, int]:
         """Contribution counts grouped by author (for the stats dashboard)."""
         rows = self._conn.execute(

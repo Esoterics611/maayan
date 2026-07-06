@@ -15,6 +15,21 @@ from pydantic import BaseModel
 Role = Literal["system", "user", "assistant"]
 
 
+class GenerationError(RuntimeError):
+    """A generation backend failed to produce a completion.
+
+    Raised for upstream/provider errors, timeouts, or an empty response (e.g.
+    OpenRouter returning HTTP 200 with ``choices: null`` on a transient upstream
+    hiccup). Carries a user-facing message so the UI can surface a retryable
+    notice instead of an opaque 500. `retryable` hints that simply asking again
+    is likely to succeed (the transient case).
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class Message(BaseModel):
     role: Role
     content: str

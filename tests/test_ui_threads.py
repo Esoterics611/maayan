@@ -65,6 +65,14 @@ class FakeCapture:
     def get_annotation(self, annotation_id: str) -> Annotation | None:
         return self.annotations.get(annotation_id)
 
+    def list_annotations(self, *, author=None, kind=None, limit=100) -> list[Annotation]:
+        items = list(self.annotations.values())
+        if author is not None:
+            items = [a for a in items if a.author == author]
+        if kind is not None:
+            items = [a for a in items if a.kind == kind]
+        return items[:limit]
+
     def start_session(self, answer: Answer) -> Session:
         self._sessions += 1
         return Session(
@@ -184,6 +192,54 @@ def test_get_thread_404() -> None:
     assert _client().get("/threads/nope").status_code == 404
 
 
+def test_ask_in_thread_generation_error_returns_502_with_detail() -> None:
+    # A backend generation failure (e.g. an empty/errored model response) must reach the
+    # UI as a clean, readable 502 — never an opaque 500 that leaves the thread dead.
+    from maayan.generate.base import GenerationError
+
+    class _RaisingRag:
+        def ask(self, question: str, *, context_turns: Sequence[ContextTurn] = ()) -> Answer:
+            raise GenerationError("the model provider returned an empty response")
+
+    threads = ThreadService(ThreadStore(":memory:"), FakeClock())
+    app = create_app(  # type: ignore[arg-type]
+        _RaisingRag(), FakeCapture(), threads, FakeDevelop(threads), FakeTerms(),
+        _StubRetract(), _StubStats(), _StubCompose(), context_turns=6,
+    )
+    client = TestClient(app)
+    tid = client.post("/threads", json={"title": "t"}).json()["id"]
+
+    r = client.post(f"/threads/{tid}/ask", json={"question": "מהי בחירה"})
+
+    assert r.status_code == 502
+    body = r.json()
+    assert "empty response" in body["detail"]
+    assert body["retryable"] is True
+
+
+def test_contributions_panel_lists_saved_connection() -> None:
+    # A saved connection must be browsable (not invisible) and not yet a seed.
+    client = _client()
+    tid = _new_thread(client)
+    session_id = client.post(
+        f"/threads/{tid}/ask", json={"question": "מהי בחירה"}
+    ).json()["session_id"]
+    client.post("/annotate", json={
+        "session_id": session_id, "author": "ronnie", "kind": "connection",
+        "body": "Tanya ↔ Likutei Torah on bechira", "linked_refs": ["Tanya 1:6", "LT 2:1"],
+    })
+
+    got = client.get("/api/contributions").json()
+
+    assert got["total"] >= 1
+    top = got["contributions"][0]
+    assert top["author"] == "ronnie"
+    assert top["kind"] == "connection"
+    assert "bechira" in top["body"]
+    assert top["linked_refs"] == ["Tanya 1:6", "LT 2:1"]
+    assert top["opens_aspect"] is False
+
+
 def test_ask_in_thread_grounded_appends_turn_and_badges_source() -> None:
     client = _client()
     tid = _new_thread(client)
@@ -298,7 +354,7 @@ def test_connect_sources_links_refs_across_books() -> None:
 
 def test_index_html_has_connect_affordance() -> None:
     html = _client().get("/").text
-    for marker in ("connectSelected", "srcpick", "Connect selected"):
+    for marker in ("connectSelected", "srcpick", "Connect →"):
         assert marker in html, f"missing connect-sources markup: {marker}"
 
 

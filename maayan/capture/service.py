@@ -57,6 +57,11 @@ class CaptureService:
     def get_annotation(self, annotation_id: str) -> Annotation | None:
         return self._capture.get_annotation(annotation_id)
 
+    def list_annotations(
+        self, *, author: str | None = None, kind: str | None = None, limit: int = 100
+    ) -> list[Annotation]:
+        return self._capture.list_annotations(author=author, kind=kind, limit=limit)
+
     def start_session(self, answer: Answer) -> Session:
         """Record a session from a RAG Answer and return it (with its new id)."""
         session = Session(

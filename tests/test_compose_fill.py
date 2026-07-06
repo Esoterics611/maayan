@@ -5,9 +5,12 @@ Mock retriever + backend; no network, no models.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import NamedTuple
+
+import pytest
 
 from maayan.clock import FakeClock
 from maayan.compose.models import Brief, Composition, Section, SourceScope
@@ -104,6 +107,23 @@ def test_empty_retrieval_section_is_a_gap() -> None:
     brief = _seed_brief(h.store)
     _seed_composition(h.store, brief, ["q"])
     assert h.svc.fill("c-1").sections[0].supported is False
+
+
+def test_fill_logs_gate_decision_per_section(caplog: pytest.LogCaptureFixture) -> None:
+    # R1 instrumentation: each section logs hits/relevance/threshold and FILL vs GAP, so an
+    # intermittent "corpus silent" refusal can be told apart from a below-threshold miss.
+    retriever = FakeRetriever({"q-ok": ([_sr("Tanya 1:6")], 0.7), "q-gap": ([], 0.0)})
+    h = _harness(retriever, RecordingBackend())
+    brief = _seed_brief(h.store)
+    _seed_composition(h.store, brief, ["q-ok", "q-gap"])
+
+    with caplog.at_level(logging.INFO, logger="maayan.compose.service"):
+        h.svc.fill("c-1")
+
+    log = "\n".join(caplog.messages)
+    assert "-> FILL" in log and "-> GAP" in log
+    assert "relevance=0.700" in log and "relevance=0.000" in log
+    assert "hits=1" in log and "hits=0" in log
 
 
 # -- (b) supported section cites only retrieved refs --------------------------

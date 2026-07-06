@@ -9,7 +9,22 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from maayan.generate.base import Message
+from maayan.generate.base import GenerationError, Message
+
+
+def _error_detail(response: object) -> str:
+    """Pull a human message out of an OpenRouter error-in-200 body, if present.
+
+    OpenRouter signals a transient upstream failure by returning HTTP 200 with
+    ``choices: null`` and an ``error`` object; the OpenAI SDK parses the latter
+    into ``response.error``. Best-effort — returns "" when there's nothing useful.
+    """
+    err = getattr(response, "error", None)
+    if isinstance(err, dict):
+        msg = err.get("message")
+        if isinstance(msg, str) and msg:
+            return msg
+    return ""
 
 
 class OpenRouterBackend:
@@ -36,12 +51,32 @@ class OpenRouterBackend:
         self._max_tokens = max_tokens
 
     def generate(self, system: str, messages: Sequence[Message]) -> str:
+        from openai import OpenAIError
+
         chat: list[dict[str, str]] = [{"role": "system", "content": system}]
         chat.extend({"role": m.role, "content": m.content} for m in messages)
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=chat,  # type: ignore[arg-type]
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
+
+        # OpenRouter occasionally returns HTTP 200 with choices=null on a transient
+        # upstream/provider hiccup — the SDK doesn't treat that as an error, so its own
+        # retries never fire and blindly indexing choices[0] crashes the whole request.
+        # Re-issue once immediately (no backoff, so no clock needed) before giving up;
+        # a hand-rerun is exactly what recovers this in practice.
+        last_detail = ""
+        for _ in range(2):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=chat,  # type: ignore[arg-type]
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens,
+                )
+            except OpenAIError as exc:
+                raise GenerationError(f"The model provider errored: {exc}") from exc
+            if response.choices:
+                return response.choices[0].message.content or ""
+            last_detail = _error_detail(response)
+
+        suffix = f" ({last_detail})" if last_detail else ""
+        raise GenerationError(
+            f"The model provider returned an empty response{suffix}. Please try again."
         )
-        return response.choices[0].message.content or ""

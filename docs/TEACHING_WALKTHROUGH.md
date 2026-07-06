@@ -20,6 +20,10 @@ make ui      # → http://127.0.0.1:8000
 
 - **Log in** as your account (auth is on). Your **display name auto-fills the `author`
   field** on everything you save — no need to retype it.
+- **Know the header** (redesigned): **⚖️ הכרעות** opens the review workbench — everything
+  awaiting your approval, with a live count badge; **🏅** opens the golden-questions
+  panel; **📥** the quick-capture inbox; **?** the in-app guide (the four-step loop +
+  the badge/glyph legend). An empty thread shows the same four steps as a strip.
 - **Corpus check** — the drawer's *Knowledge base* panel (or `uv run maayan stats`) should
   show **~8,760 chunks**: Tanya (1,394) + Torah Or + **Likutei Torah (4,491)** + your
   expert/term layers. If Likutei Torah is missing, see RUNBOOK §3.
@@ -46,10 +50,13 @@ available and only falls back to server Whisper when it can't — so this mainly
 Each step ends with **✓ confirm it learned** so you can see the Knowledge base actually grow.
 
 ### A1. Ask (nothing is saved yet)
-1. In the thread composer, type a question (or tap **🎤** to dictate) and **Ask**.
+1. In the thread composer, type a question (or tap **🎤** to dictate) and **שאל · Ask**.
 2. You get a **grounded, cited** answer — or an **honest refusal** when the corpus doesn't
    support one. Sources are badged **sefaria · chabad · expert · derived · term · shiur**.
 3. Tap any source ref to **read it in context** (the reader opens on the cited segment).
+4. **On a refusal**, the answer now offers the teach path directly: **🌱 לַמֵּד מזה** opens
+   the seed panel with your question pre-filled as the develop directive (and the refusal
+   was already logged for the inquiry queue).
 
 > Asking never writes to the Knowledge base. It's how you surface the real refs you'll teach
 > *from* in the next steps.
@@ -60,32 +67,35 @@ two works.
 1. Ask something that pulls sources from **both** books (e.g. *"אהבת עולם ואהבה בתענוגים"*).
 2. Under the answer, **tick two or more sources** — e.g. one **Tanya** passage + one
    **Likutei Torah** passage.
-3. Write the insight in the **Connect** box and press **Connect selected →**.
-4. **✓ confirm it learned:** re-ask the topic — your connection now appears with an
-   `expert` badge (and, with `EXPERT_BOOST` set, ranks above raw text). Or from the CLI:
-   `uv run maayan search "<topic>" --source expert`.
+3. Write the insight in the **לַמֵּד חיבור** box and press **חבר ✓ Connect →**.
+4. **✓ confirm it learned — now one click:** the confirmation tells you the connection
+   entered the Knowledge base **and became a 🏅 golden question**; press
+   **בדוק שהוא עולה →** and it runs a retrieval-only check, reporting the rank at which
+   your new connection surfaces for that question (honest when it doesn't).
 
 > Shortcut: **highlight text** inside a source and choose **Connect** from the pop-up to tick
 > that source in without scrolling.
 
 ### A3. Seed → Develop → Approve (let the model draft, you gate it)
-1. Open **Seed ▾** in the composer. Write **seed knowledge** + a **directive** (what the model
-   should develop — the directive is kept *out* of the embedded text). Press **Plant seed**.
-2. Press **Develop this**. The model returns a **grounded, cited** proposal — or an honest
-   refusal if the sources don't reach.
-3. **Approve** → indexed as a `derived` chunk. **Reject** → nothing is indexed.
+1. Open **🌱 זרע ▾** in the composer. Write **your knowledge** + a **הנחיה / directive**
+   (what the model should develop — kept *out* of the embedded text). Press **🌱 שתול זרע**.
+2. Press **פתח ▸ Develop** on the seed turn. The model returns a **grounded, cited**
+   proposal — or an honest refusal if the sources don't reach.
+3. **✓ אשר** → indexed as a `derived` chunk (and captured as a golden question).
+   **✗ דחה** → nothing is indexed. Proposed developments also wait in **⚖️ הכרעות**,
+   so you can approve them later, across all threads, from one queue.
 4. **✓ confirm it learned:** the approved development surfaces on future asks with a `derived`
    badge.
 
 ### A4. Define a term (protect a Holy Name / technical term)
-1. Open **Term ▾**. Enter the **canonical** form, **type**, **definition**, **surface forms**,
-   and (optional) **gematria**. Save.
+1. Open **📖 מונח ▾**. Enter the **canonical** form, **type**, **definition**, **surface
+   forms**, and (optional) **gematria**. Save.
 2. It's badged **term**, appears in the drawer **lexicon**, and is protected from
    abbreviation-mangling in retrieval.
 3. **✓ confirm it learned:** `uv run maayan search '<surface form>' --source term`.
 
 ### A5. Shiur transcription — teach from a recording (voice)
-1. Open **Shiur ▾** → **record** in-browser or **upload** an audio file.
+1. Open **🎙 שיעור ▾** → **record** in-browser or **upload** an audio file.
 2. It transcribes **asynchronously** — a progress bar polls the job.
 3. You're dropped into **review**: edit segments, accept lexicon-aware corrections, then mark
    **reviewed**.
@@ -102,9 +112,25 @@ two works.
 
 ### A7. Retract — fix a mistake (the eraser)
 - Any **layered** source card (expert / derived / term / shiur) carries **Retract ✕**. It
-  removes the chunk from retrieval, is provenanced (who/why), and **survives a rebuild**.
+  opens a proper form (target shown, reason recorded, your name sticky), removes the chunk
+  from retrieval — **and removes the golden question it had captured** — and survives a
+  rebuild.
 - Printed text (sefaria / chabad) has no Retract button — it's read-only, enforced in code.
 - To correct: **retract + re-add** through the normal loop (there's no in-place edit).
+
+### A8. ⚖️ הכרעות — the review workbench (everything gated, one queue)
+The header's **⚖️** badge counts everything awaiting your judgment; click it to open one
+queue with four sections:
+- **פיתוחים** — proposed developments from *all* threads: **✓ אשר / ✗ דחה** here, or
+  **פתח בנושא ▸** to read the full context first.
+- **קשרים** — proposed graph edges (e.g. drafted by `maayan study run` over a whole
+  sefer). This is their **first UI gate**: approving is attributed to you (a bootstrap
+  edge becomes `derived_approved` with your name); rejecting retracts it. Until now this
+  needed `maayan graph approve` in a terminal.
+- **שאלות לרב** — the inquiry queue (moved here from the sidebar; the sidebar keeps a
+  count + פתח ▸). Answering opens a form asking *what you created*; the card still
+  prints its priority math.
+- **מחשבות** — parked inbox thoughts, one click from becoming seeds.
 
 ---
 
@@ -113,27 +139,33 @@ two works.
 "Golden questions" are the evaluation set that tells you whether teaching is actually helping.
 In maayan they come from **two directions**, and the flywheel is the point.
 
-### B1. The flywheel — teaching *auto-builds* your gold set
+### B1. The flywheel — teaching *auto-builds* your gold set, and now you can SEE it
 `captured_goldset_enabled=true` (default): **every gated approval** — a Connect, an approved
 Develop, a new Term, or an answered inquiry — **auto-drafts a deterministic regression
 example**. A retraction removes its example. So as you do Part A, your captured gold set grows
-by itself. Trendable reports:
+by itself.
+
+**In the UI:** press **🏅** in the header. The gold panel shows the set's size, its origins
+(חיבור / פיתוח / מונח / שאלה שנענתה), how many examples test only the refusal gate, the
+newest examples (retracted ones greyed — hygiene visible), and the **latest eval report's
+scores** once one exists. Trendable reports still run from the terminal:
 
 ```bash
 uv run maayan eval --captured        # scores the auto-captured examples (date-stamped JSON in eval/captured_reports/)
 ```
 
-### B2. Answer inquiries in the UI — "שאלות לרב" (questions to the Rav)
-The right drawer has an **inquiry queue** — the system's own list of where it's weak (refused
-questions, low-confidence answers), each card printing its **priority** math so the queue
-earns your time honestly.
+### B2. Answer inquiries — "שאלות לרב" (now inside ⚖️ הכרעות)
+The inquiry queue — the system's own list of where it's weak (refused questions,
+low-confidence answers) — lives in the **⚖️ review workbench** (the sidebar shows the open
+count). Each card still prints its **priority** math so the queue earns your time honestly.
 
-1. Press **↻** to (re)generate the queue.
+1. Press **↻ שאלות** in the workbench header to (re)generate the queue.
 2. On a card:
-   - **שאל שוב** (ask again) — re-runs a refused question into the Ask box so you can **teach
+   - **שאל שוב ↩** (ask again) — drops a refused question into the Ask box so you can **teach
      from it** (do A2/A3/A4 to create the missing knowledge).
-   - **ענה ✓** (answer) — after you've taught, record **what resolved it** (a connection/term/
-     chunk id + a word). This marks it answered and feeds the day's **harvest** line.
+   - **ענה ✓** (answer) — after you've taught, a form asks **what resolved it** (a connection/
+     term/chunk id + a word). This marks it answered and feeds the day's **harvest** line at
+     the top of the workbench.
    - **דחה ✗** (dismiss) — carries the same weight as answering; use it when the question isn't
      worth teaching.
 
@@ -187,7 +219,8 @@ move.
 ## The whole loop in one line
 
 **Ask** (find refs) → **Connect / Seed→Develop→Approve / Term / Shiur** (teach) → the approval
-**auto-captures a gold example** → **inquiry queue** tells you what's still weak → curate
+**auto-captures a 🏅 gold example** (see it in the gold panel; verify it retrieves with one
+click) → **⚖️ הכרעות** tells you what's still waiting and what's still weak → curate
 `eval/*.yaml` for rigor → **`maayan eval`** proves it. Everything you add is attributed and
 retractable; the printed text never changes.
 
