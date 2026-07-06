@@ -16,7 +16,7 @@ from collections.abc import Sequence
 
 import httpx
 
-from maayan.generate.base import Message
+from maayan.generate.base import GenerationError, Message
 
 
 class OllamaBackend:
@@ -39,16 +39,21 @@ class OllamaBackend:
     def generate(self, system: str, messages: Sequence[Message]) -> str:
         chat: list[dict[str, str]] = [{"role": "system", "content": system}]
         chat.extend({"role": m.role, "content": m.content} for m in messages)
-        resp = self._client.post(
-            f"{self._base_url}/api/chat",
-            json={
-                "model": self._model,
-                "messages": chat,
-                "stream": False,
-                "options": {"temperature": self._temperature},
-            },
-        )
-        resp.raise_for_status()
+        try:
+            resp = self._client.post(
+                f"{self._base_url}/api/chat",
+                json={
+                    "model": self._model,
+                    "messages": chat,
+                    "stream": False,
+                    "options": {"temperature": self._temperature},
+                },
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            # Surface a clean, retryable error (unreachable daemon, HTTP 5xx, timeout)
+            # rather than an opaque 500 — the UI shows it and offers a retry.
+            raise GenerationError(f"The local model backend errored: {exc}") from exc
         data = resp.json()
         message = data.get("message") if isinstance(data, dict) else None
         if not isinstance(message, dict):

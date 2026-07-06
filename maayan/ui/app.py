@@ -34,6 +34,7 @@ from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
 from maayan.eval.captured import CapturedGoldsetStore, load_previous_report
+from maayan.generate.base import GenerationError
 from maayan.generate.rag import Answer, RAGService
 from maayan.graph.apparatus import Apparatus, ApparatusService
 from maayan.graph.models import Relation
@@ -274,6 +275,14 @@ def create_app(
     cookie_max_age: int = 604_800,
 ) -> FastAPI:
     app = FastAPI(title="maayan", docs_url="/docs")
+
+    @app.exception_handler(GenerationError)
+    async def _on_generation_error(request: Request, exc: GenerationError) -> JSONResponse:
+        # A generation backend failure (empty/errored model response) becomes a clean,
+        # readable 502 the UI can show with a retry — never an opaque 500 stack trace.
+        return JSONResponse(
+            status_code=502, content={"detail": str(exc), "retryable": exc.retryable}
+        )
 
     if auth_enabled and users is None:
         raise ValueError("auth_enabled requires a UserService to be injected")

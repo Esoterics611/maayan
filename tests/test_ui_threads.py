@@ -184,6 +184,31 @@ def test_get_thread_404() -> None:
     assert _client().get("/threads/nope").status_code == 404
 
 
+def test_ask_in_thread_generation_error_returns_502_with_detail() -> None:
+    # A backend generation failure (e.g. an empty/errored model response) must reach the
+    # UI as a clean, readable 502 — never an opaque 500 that leaves the thread dead.
+    from maayan.generate.base import GenerationError
+
+    class _RaisingRag:
+        def ask(self, question: str, *, context_turns: Sequence[ContextTurn] = ()) -> Answer:
+            raise GenerationError("the model provider returned an empty response")
+
+    threads = ThreadService(ThreadStore(":memory:"), FakeClock())
+    app = create_app(  # type: ignore[arg-type]
+        _RaisingRag(), FakeCapture(), threads, FakeDevelop(threads), FakeTerms(),
+        _StubRetract(), _StubStats(), _StubCompose(), context_turns=6,
+    )
+    client = TestClient(app)
+    tid = client.post("/threads", json={"title": "t"}).json()["id"]
+
+    r = client.post(f"/threads/{tid}/ask", json={"question": "מהי בחירה"})
+
+    assert r.status_code == 502
+    body = r.json()
+    assert "empty response" in body["detail"]
+    assert body["retryable"] is True
+
+
 def test_ask_in_thread_grounded_appends_turn_and_badges_source() -> None:
     client = _client()
     tid = _new_thread(client)

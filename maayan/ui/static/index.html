@@ -370,6 +370,18 @@
 
     const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
     const j = (r) => r.json();
+    // POST JSON and surface HTTP errors instead of silently parsing a 500/502 body as if
+    // it were an answer. Throws Error(detail) on !ok so callers can show a retryable notice.
+    async function jPost(url, payload) {
+      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload) });
+      if (!r.ok) {
+        let detail = 'שגיאה ' + r.status;
+        try { const e = await r.json(); if (e && e.detail) detail = e.detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      return r.json();
+    }
     // The one evidence-badge grammar (UI spec Rule 2) — identical everywhere.
     const EV_GLYPH = {expert:'●', curated:'◆', deterministic:'⚙',
                       derived_approved:'◐', derived_bootstrap:'◌'};
@@ -891,6 +903,28 @@
     }
     window.teachFromRefusal = teachFromRefusal;
 
+    // A connection is retrievable knowledge, but a SEED is *developable*. This promotes a
+    // just-made connection into a seed in the current thread, where the model develops it
+    // (grounded + cited) and the expert adjudicates — the full teaching loop, not a dead end.
+    let lastConnection = null;
+    async function seedFromConnection() {
+      if (!lastConnection) return;
+      const { body, refs, question } = lastConnection;
+      const author = $('connectAuthor').value.trim() || localStorage.getItem(AUTHOR_KEY) || '';
+      if (!author) { toast('שם נדרש — הזרע נרשם עליך.'); $('connectAuthor').focus(); return; }
+      localStorage.setItem(AUTHOR_KEY, author);
+      if (!active) await newTopic((body || question || 'seed').slice(0, 48));
+      const r = await fetch('/threads/' + active + '/seed', { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ author, kind: 'connection', body,
+          directive: question || null, linked_refs: refs || [] }) });
+      if (r.ok) {
+        toast('נפתח כזרע ✓ — בשיחה, לחץ “פתח ▸ Develop” כדי שהמודל יפתח אותו.');
+        await openThread(active);
+      } else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
+    }
+    window.seedFromConnection = seedFromConnection;
+
     async function connectSelected() {
       const status = $('connectStatus');
       const picks = [...document.querySelectorAll('.srcpick:checked')];
@@ -908,9 +942,12 @@
         // captured, and a one-click retrieval check ("did it learn?").
         const resp = await j(r);
         const vref = 'Expert · connection · ' + String(resp.annotation_id).slice(0, 8);
+        // Remember what was connected so it can be promoted into a developable seed.
+        lastConnection = { body, refs, question: lastAnswer.question };
         status.innerHTML = `נשמר ✓ החיבור נכנס למאגר (${refs.length} מקורות מקושרים)`
-          + ` — וגם נוסף כ־🏅 שאלת־זהב (מבחן קבוע). `
+          + ` — וגם נוסף כ־🏅 שאלת־זהב (מבחן קבוע).<br>`
           + `<button class="ghost" onclick='verifyLearned(${attr(lastAnswer.question)}, ${attr(vref)}, "connectStatus2")'>בדוק שהוא עולה →</button>`
+          + ` <button class="secondary" onclick='seedFromConnection()' title="הפוך את החיבור לזרע שהמודל יפתח, ואתה תכריע">🌱 פתח כזרע — Develop it →</button>`
           + `<span id="connectStatus2" class="hint"></span>`;
         $('connectBody').value = '';
         picks.forEach(el => { el.checked = false; });
@@ -947,6 +984,16 @@
     }
     window.retractSource = retractSource;
 
+    // A failed ask (e.g. a transient model hiccup returning an empty response) must not
+    // leave the user staring at a dead, empty thread — show the reason and a one-click retry.
+    function renderAskError(msg, q) {
+      $('q').value = q;  // keep the question so "Retry" (or Enter) just re-asks it
+      $('answerSources').innerHTML = `<div class="turn ask"><div class="who">שגיאה</div>
+        <div class="body refused" dir="auto">התשובה לא נוצרה — ${esc(msg)}</div>
+        <div class="actions"><button id="askRetry" class="secondary">נסה שוב · Retry</button></div></div>`;
+      const rb = $('askRetry'); if (rb) rb.onclick = () => ask();
+    }
+
     async function ask() {
       const q = $('q').value.trim(); if (!q) return;
       $('askBtn').disabled = true; $('askBtn').textContent = '…';
@@ -954,19 +1001,18 @@
         if (chavrusaOn) {
           // חברותא: a bounded study loop, outside any thread (the agent takes no thread
           // context, mirroring `ask --agent`). The answer renders with a "כיצד נלמד?" link.
-          const data = await j(await fetch('/ask',
-            { method:'POST', headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ question: q, agent: true }) }));
+          const data = await jPost('/ask', { question: q, agent: true });
           $('q').value = '';
           renderAnswerSources(data);
           return;
         }
         if (!active) await newTopic(q.slice(0, 48));
-        const data = await j(await fetch('/threads/' + active + '/ask',
-          { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question: q }) }));
+        const data = await jPost('/threads/' + active + '/ask', { question: q });
         $('q').value = '';
         await openThread(active);
         renderAnswerSources(data);
+      } catch (e) {
+        renderAskError(e && e.message ? e.message : 'הבקשה נכשלה', q);
       } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'שאל · Ask'; }
     }
 
