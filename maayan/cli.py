@@ -1817,6 +1817,24 @@ def transcribe(
 
 
 @app.command()
+def backup(
+    keep: int | None = typer.Option(
+        None, "--keep", help="How many recent backups to retain (default: config backup_keep)."
+    ),
+) -> None:
+    """Back up the SQLite knowledge layer (consistent online copy) to the backup dir."""
+    from maayan.backup import backup_sqlite
+
+    settings = _cfg()
+    dest = backup_sqlite(
+        settings.db_path,
+        settings.backup_dir,
+        keep=keep if keep is not None else settings.backup_keep,
+    )
+    typer.echo(f"Backed up {settings.db_path} → {dest}")
+
+
+@app.command()
 def ui() -> None:
     """Run the local chat + capture web UI (FastAPI)."""
     import uvicorn
