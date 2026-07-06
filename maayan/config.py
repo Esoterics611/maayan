@@ -560,6 +560,9 @@ class Settings(BaseSettings):
     backup_keep: int = Field(
         default=14, description="How many recent SQLite backups to retain (older are pruned)."
     )
+    log_level: str = Field(
+        default="INFO", description="Log level for maayan's own logs at the CLI entrypoints."
+    )
 
     # ---- Evaluation ---------------------------------------------------------
     eval_goldset_path: str = Field(default="eval/goldset.yaml")

@@ -1850,6 +1850,7 @@ def ui() -> None:
     from maayan.generate.rag import RAGService
     from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
+    from maayan.logconfig import configure_logging
     from maayan.ocr.factory import build_ocrer
     from maayan.retract.factory import build_retraction_service
     from maayan.retrieve.factory import build_retriever
@@ -1860,6 +1861,7 @@ def ui() -> None:
     from maayan.users.factory import build_user_service
 
     settings = _cfg()
+    configure_logging(settings.log_level)  # surface diagnostics (e.g. compose fill gate) in the log
     require_qdrant(settings)
     embedder = build_embedder(settings)  # built once, shared across services
     backend = build_generation_backend(settings)
