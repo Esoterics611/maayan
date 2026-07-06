@@ -40,8 +40,10 @@ from maayan.retract.store import RetractionStore
 
 # Printed text is immutable: never retractable, rejected in code.
 PRINTED_SOURCES = frozenset({"sefaria", "chabad"})
-# Only layered, human-added knowledge is retractable.
-RETRACTABLE_SOURCES = frozenset({"expert", "derived", "term"})
+# Only layered, human-added knowledge is retractable. `sugya` (Prompt 41): a
+# consolidated page's chunks are retracted when a newer version supersedes it.
+# `summary` (Prompt 42): gated section summaries are retractable like any layer.
+RETRACTABLE_SOURCES = frozenset({"expert", "derived", "term", "sugya", "summary"})
 
 
 class Retracting(Protocol):

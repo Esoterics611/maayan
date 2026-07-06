@@ -119,6 +119,10 @@ class Settings(BaseSettings):
         default=1.0,
         description="Multiplier for source='shiur' chunks (approved transcribed recordings).",
     )
+    summary_boost: float = Field(
+        default=1.0,
+        description="Multiplier for source='summary' chunks (gated section summaries, Prompt 42).",
+    )
 
     # ---- Query expansion (Prompt 31a) ---------------------------------------
     # Off by default so existing behavior/eval baseline are unchanged. When on, the
@@ -301,6 +305,86 @@ class Settings(BaseSettings):
     agent_max_calls: int = Field(
         default=6,
         description="Max model calls for CHOOSING actions (conclude's synthesis is extra).",
+    )
+
+    # ---- Study programs (Phase 7, Prompt 40) --------------------------------
+    # A sweep runs the chavrusa over a sefer unit by unit, drafting typed edge
+    # proposals for the gates. It reuses the populate drip's pacing/backoff/resume
+    # (populate_*), so only the study-specific knobs live here. Nothing it drafts is
+    # auto-approved — every edge lands "proposed" (evidence derived_bootstrap).
+    study_program_model: str = Field(
+        default="",
+        description=(
+            "Model id used to DRAFT study-program proposals (mirrors lexicon_draft_model). "
+            "Blank → the generation model. Set the OpenRouter Claude slug to sweep with "
+            "Claude while maayan's own answers stay on the configured model."
+        ),
+    )
+    study_program_k: int = Field(
+        default=8,
+        description="Corpus sources co-retrieved per unit to ground (and gate) its proposals.",
+    )
+    study_unit_max_proposals: int = Field(
+        default=6, description="Per-unit budget: hard cap on proposals drafted from one unit."
+    )
+    study_pace_seconds: float = Field(
+        default=20.0, description="Seconds between units in a study sweep (drip pacing)."
+    )
+    study_draft_verify: bool = Field(
+        default=True,
+        description="Run the faithfulness pass on each proposal; flagged ones are unsupported.",
+    )
+
+    # ---- Structural depth (Phase 7, Prompt 42) ------------------------------
+    # Two additions, both gated, neither touching printed text: a window of a hit's
+    # neighboring passages fed to the model at generation time (citation stays the hit),
+    # and gated one-level section summaries indexed as source="summary".
+    parent_context_chars: int = Field(
+        default=0,
+        description=(
+            "Chars of neighboring same-section passages attached to each hit at generation "
+            "time (0 = off). Context only — the citation is always the retrieved passage."
+        ),
+    )
+    summary_draft_model: str = Field(
+        default="",
+        description="Model id used to DRAFT section summaries (mirrors lexicon_draft_model).",
+    )
+    summary_pace_seconds: float = Field(
+        default=20.0, description="Seconds between sections in a `summarize` drip run."
+    )
+    summary_draft_verify: bool = Field(
+        default=True,
+        description="Run the faithfulness pass on each summary; flagged summaries are unsupported.",
+    )
+
+    # ---- Consolidation + chazarah (Phase 7, Prompt 41) ----------------------
+    # Sugya pages consolidate a cluster of approved knowledge into a curated, versioned,
+    # gated topic page; chazarah resurfaces aging/low-evidence/never-used knowledge for
+    # re-review. Neither weakens the gate — pages index only on approval, and superseding
+    # a version retracts the old chunks through the audited retract flow.
+    sugya_min_cluster_size: int = Field(
+        default=2,
+        description="Min corpus refs in a connected component for it to form a sugya cluster.",
+    )
+    sugya_draft_model: str = Field(
+        default="",
+        description=(
+            "Model id used to DRAFT sugya pages (mirrors lexicon_draft_model). Blank → the "
+            "generation model."
+        ),
+    )
+    chazarah_bootstrap_days: float = Field(
+        default=90.0,
+        description="Bootstrap-evidence edges older than this many days come up for re-review.",
+    )
+    chazarah_base_interval_days: float = Field(
+        default=30.0,
+        description="Initial spaced-repetition interval for a newly scheduled re-review target.",
+    )
+    chazarah_interval_factor: float = Field(
+        default=2.0,
+        description="Each re-review confirmation multiplies the target's next-review interval.",
     )
 
     # ---- Captured goldset / eval flywheel (Phase 7, Prompt 38) ---------------

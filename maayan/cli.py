@@ -373,6 +373,7 @@ def ask(
     from maayan.capture.factory import build_capture_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
+    from maayan.generate.parent import build_parent_context
     from maayan.generate.rag import RAGService
     from maayan.retrieve.factory import build_retriever
 
@@ -391,6 +392,8 @@ def ask(
     rag = RAGService(
         retriever, backend, score_threshold=settings.score_threshold,
         reasoning=use_reasoning, verify=use_verify,
+        parent_context=build_parent_context(settings),
+        parent_context_chars=settings.parent_context_chars,
     )
 
     if use_agent and (thread_id or topic):
@@ -431,7 +434,7 @@ def ask(
 
         AskLog(settings.db_path, SystemClock()).record(
             question=question, refused=not answer.grounded, top_score=answer.relevance,
-            session_id=session.id, thread_id=active_thread,
+            session_id=session.id, thread_id=active_thread, cited_refs=answer.cited_refs,
         )
 
     if not answer.grounded:
@@ -1825,6 +1828,7 @@ def ui() -> None:
     from maayan.develop.factory import build_development_service
     from maayan.embed.factory import build_embedder
     from maayan.generate.factory import build_generation_backend
+    from maayan.generate.parent import build_parent_context
     from maayan.generate.rag import RAGService
     from maayan.inbox.factory import build_inbox_service
     from maayan.lexicon.factory import build_term_service
@@ -1848,6 +1852,8 @@ def ui() -> None:
     rag = RAGService(
         retriever, backend, score_threshold=settings.score_threshold,
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
+        parent_context=build_parent_context(settings),
+        parent_context_chars=settings.parent_context_chars,
     )
     capture = build_capture_service(settings, embedder=embedder)
     threads = build_thread_service(settings)
@@ -2460,6 +2466,333 @@ def user_passwd(username: str = typer.Argument(..., help="Username to reset.")) 
         typer.echo(f"error: {exc}")
         raise typer.Exit(1) from exc
     typer.echo(f"password updated for {username}")
+
+
+@app.command()
+def summarize(
+    book: str = typer.Option(..., "--book", help="The sefer to summarize, section by section."),
+    units: int | None = typer.Option(
+        None, "--units", "-n", help="Draft at most N sections this run (sampling / cost)."
+    ),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter slug)."
+    ),
+    pace: float = typer.Option(
+        None, "--pace", help="Seconds between sections (default: config summary_pace_seconds)."
+    ),
+    include_unsupported: bool = typer.Option(
+        False, "--include-unsupported", help="Also queue ungrounded drafts (flagged), for review."
+    ),
+) -> None:
+    """Drip-draft one grounded, faithfulness-checked summary per section (indexes nothing).
+
+    Each draft lands 'proposed' for `summaries` → `summary-approve`. Makes real generation
+    calls — set SUMMARY_DRAFT_MODEL (or --model) to draft with a stronger model.
+    """
+    from maayan.summarize.factory import build_summary_service
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"summary_draft_model": model})
+    if pace is not None:
+        settings = settings.model_copy(update={"summary_pace_seconds": pace})
+    require_qdrant(settings)
+
+    service = build_summary_service(settings)
+    stats = asyncio.run(
+        service.draft_book(book, units=units, persist_unsupported=include_unsupported)
+    )
+    typer.echo(
+        f"[summarize] {book}: drafted {stats.drafted} section(s), "
+        f"{stats.supported} grounded & queued, {stats.failed} failed."
+    )
+    typer.echo("Review: `maayan summaries`, then `maayan summary-approve <id> --author ...`.")
+
+
+@app.command()
+def summaries(
+    book: str | None = typer.Option(None, "--book", help="Only this book's pending summaries."),
+) -> None:
+    """List pending section summaries awaiting approval (read-only; no models loaded)."""
+    from maayan.summarize.store import SummaryStore
+
+    pending = SummaryStore(_cfg().db_path).list(status="proposed", book=book)
+    if not pending:
+        typer.echo("No pending summaries. Run `maayan summarize --book ...` first.")
+        return
+    typer.echo(f"{len(pending)} pending summary(ies):")
+    for s in pending:
+        flag = "" if s.supported else "  [ungrounded]"
+        typer.echo(f"  {s.id}  · {s.parent_label or s.parent_ref}{flag}")
+        typer.echo(f"      {s.text[:120]}")
+
+
+@app.command(name="summary-approve")
+def summary_approve(
+    summary_id: str = typer.Argument(..., help="Pending summary id (from `maayan summaries`)."),
+    author: str = typer.Option(..., "--author", help="The expert approving it (becomes author)."),
+) -> None:
+    """Approve a drafted summary → index it as a retrievable summary chunk."""
+    from maayan.summarize.factory import build_summary_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        summary = build_summary_service(settings).approve(summary_id, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"approved summary of {summary.parent_label or summary.parent_ref} by {author}.")
+    typer.echo("It will now surface in retrieval; its margins lead down into the passages.")
+
+
+@app.command(name="summary-reject")
+def summary_reject(
+    summary_id: str = typer.Argument(..., help="The pending summary id to reject."),
+) -> None:
+    """Reject a drafted summary (indexes nothing; the corpus is unchanged)."""
+    from maayan.summarize.factory import build_summary_service
+
+    try:
+        build_summary_service(_cfg()).reject(summary_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"rejected summary {summary_id}.")
+
+
+study_app = typer.Typer(
+    help="Study programs: sweep a sefer, unit by unit, drafting proposed edges for the gates.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(study_app, name="study")
+
+
+@study_app.command("run")
+def study_run(
+    book: str = typer.Option(..., "--book", help="The sefer to sweep (a corpus book name)."),
+    task: str = typer.Option(
+        "relations", "--task", help="What to draft: relations | terms | mashal."
+    ),
+    units: int | None = typer.Option(
+        None, "--units", "-n", help="Process at most N units this run (sampling / cost)."
+    ),
+    program_id: str | None = typer.Option(
+        None, "--program", help="Resume an existing program instead of starting a new one."
+    ),
+    author: str = typer.Option(
+        None, "--author", "-a", help="Program author (provenance on every drafted edge)."
+    ),
+    model: str = typer.Option(
+        None, "--model", help="Override the drafting model (e.g. an OpenRouter slug)."
+    ),
+    pace: float = typer.Option(
+        None, "--pace", help="Seconds between units (default: config study_pace_seconds)."
+    ),
+) -> None:
+    """Sweep a book into proposed, cited, typed edges — paced, resumable, gate-preserving.
+
+    Nothing is indexed or approved: each supported proposal lands as a *proposed*
+    relation (evidence derived_bootstrap) awaiting the Rav. Makes real generation calls —
+    set STUDY_PROGRAM_MODEL (or --model) to draft with a stronger model.
+    """
+    from typing import get_args as _get_args
+
+    from maayan.agent.program_factory import build_study_program_runner
+    from maayan.agent.program_models import ProgramTask
+
+    if task not in _get_args(ProgramTask):
+        raise typer.BadParameter("--task must be one of: relations | terms | mashal")
+
+    settings = _cfg()
+    if model:
+        settings = settings.model_copy(update={"study_program_model": model})
+    if pace is not None:
+        settings = settings.model_copy(update={"study_pace_seconds": pace})
+    require_qdrant(settings)
+
+    runner = build_study_program_runner(settings)
+    if program_id is not None:
+        from maayan.agent.program_store import ProgramStore
+
+        program = ProgramStore(settings.db_path).get_program(program_id)
+        if program is None:
+            typer.echo(f"error: no study program with id {program_id!r}")
+            raise typer.Exit(1)
+    else:
+        who = (author or "").strip()
+        if not who:
+            raise typer.BadParameter("--author is required when starting a new program")
+        program = runner.create(
+            book=book,
+            task=cast("ProgramTask", task),
+            author=f"program:{who}",
+            model=settings.study_program_model,
+        )
+    typer.echo(
+        f"[study] program {program.id} · {program.book} · task={program.task} · "
+        f"from unit {program.cursor}/{program.total_units}, pace={settings.study_pace_seconds}s"
+    )
+    program = asyncio.run(runner.run(program, units=units))
+    c = program.counts
+    typer.echo(
+        f"[study] {program.status}: {program.cursor}/{program.total_units} units · "
+        f"drafted {c.drafted}, passed {c.passed_checks}, queued {c.queued} "
+        f"(model calls {c.model_calls})"
+    )
+    typer.echo(
+        f"Review: `maayan graph list --status proposed`; "
+        f"report: `maayan study report {program.id}`."
+    )
+
+
+@study_app.command("status")
+def study_status() -> None:
+    """List study programs and their progress (read-only; no models loaded)."""
+    from maayan.agent.program_store import ProgramStore
+
+    programs = ProgramStore(_cfg().db_path).list_programs()
+    if not programs:
+        typer.echo("No study programs yet. Start one: `maayan study run --book ... --author ...`.")
+        return
+    for p in programs:
+        c = p.counts
+        typer.echo(
+            f"{p.id}  · {p.book} · {p.task} · {p.status} · {p.cursor}/{p.total_units} units · "
+            f"drafted {c.drafted}/passed {c.passed_checks}/queued {c.queued}"
+        )
+
+
+@study_app.command("report")
+def study_report(
+    program_id: str = typer.Argument(..., help="Program id (from `maayan study status`)."),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the markdown report to this path instead of stdout."
+    ),
+) -> None:
+    """Emit the drafted/passed/queued funnel report (POPULATE_REPORT-style markdown)."""
+    from pathlib import Path
+
+    from maayan.agent.program import render_report_markdown
+    from maayan.agent.program_factory import build_study_program_runner
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        report = build_study_program_runner(settings).build_report(program_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    markdown = render_report_markdown(report)
+    if out is not None:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(markdown, encoding="utf-8")
+        typer.echo(f"Wrote report → {out}")
+    else:
+        typer.echo(markdown)
+
+
+sugya_app = typer.Typer(
+    help="Sugya pages: consolidate clusters of approved knowledge into curated, gated pages.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(sugya_app, name="sugya")
+
+
+@sugya_app.command("draft")
+def sugya_draft(
+    concept: str = typer.Option(..., "--concept", help="Concept the cluster is anchored on."),
+    author: str = typer.Option(..., "--author", "-a", help="Who is drafting (provenance)."),
+) -> None:
+    """Draft a proposed sugya page from the cluster anchored on a concept (indexes nothing)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        page = build_sugya_service(settings).draft(concept=concept, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"drafted sugya page {page.id} · «{page.title}» · {len(page.sections)} section(s)")
+    for section in page.sections:
+        typer.echo(f"  {section.title}: cites {', '.join(section.cited_refs) or '—'}")
+    typer.echo(f"Approve: `maayan sugya approve {page.id} --author <you>`.")
+
+
+@sugya_app.command("approve")
+def sugya_approve(
+    page_id: str = typer.Argument(..., help="Proposed sugya page id (from `sugya list`)."),
+    author: str = typer.Option(..., "--author", "-a", help="The approving human."),
+) -> None:
+    """Approve a page → index it as retrievable sugya chunks; supersede the prior version."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    settings = _cfg()
+    require_qdrant(settings)
+    try:
+        page = build_sugya_service(settings).approve(page_id, author=author)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"approved sugya «{page.title}» v{page.version} — indexed {len(page.chunk_ids)} chunk(s)."
+    )
+    if page.supersedes is not None:
+        typer.echo(f"superseded {page.supersedes} (its chunks retracted, audited).")
+
+
+@sugya_app.command("reject")
+def sugya_reject(
+    page_id: str = typer.Argument(..., help="Proposed sugya page id to reject."),
+) -> None:
+    """Reject a proposed page (indexes nothing; the corpus is unchanged)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    try:
+        build_sugya_service(_cfg()).reject(page_id)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"rejected sugya page {page_id}.")
+
+
+@sugya_app.command("list")
+def sugya_list(
+    status: str | None = typer.Option(
+        None, "--status", help="proposed|approved|superseded|rejected"
+    ),
+) -> None:
+    """List sugya pages (read-only; no models loaded)."""
+    from maayan.consolidate.factory import build_sugya_service
+
+    pages = build_sugya_service(_cfg()).list(status=status)
+    if not pages:
+        typer.echo("(no sugya pages)")
+        return
+    for page in pages:
+        typer.echo(
+            f"{page.id}  · «{page.title}» v{page.version} · {page.status} · "
+            f"{len(page.sections)} section(s) · cites {len(page.cited_refs)} ref(s)"
+        )
+
+
+@app.command()
+def chazarah() -> None:
+    """Run one chazarah pass: queue re-review inquiries for aging/low-evidence/unused edges."""
+    from maayan.consolidate.factory import build_chazarah_scheduler
+
+    report = build_chazarah_scheduler(_cfg()).run()
+    typer.echo(
+        f"chazarah: scheduled {report.scheduled} target(s), queued {report.queued} re-review(s)."
+    )
+    for reason, n in sorted(report.by_reason.items()):
+        typer.echo(f"  {reason}: {n}")
+    typer.echo(
+        "Review: the שאלות לרב panel (re_review items), or `maayan inquiries --kind re_review`."
+    )
 
 
 # All CLI subcommands registered.

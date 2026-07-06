@@ -411,7 +411,7 @@ def create_app(
         ask_log.record(
             question=answer.question, refused=not answer.grounded,
             top_score=answer.relevance, session_id=session_id, thread_id=thread_id,
-            user=user.username if user is not None else None,
+            user=user.username if user is not None else None, cited_refs=answer.cited_refs,
         )
 
     @app.post("/ask")

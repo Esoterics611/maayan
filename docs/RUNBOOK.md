@@ -77,6 +77,36 @@ make index                    # incremental; add --rebuild to re-embed everythin
 > via the injected Clock). Use `--limit` while you're trying things out, then do a full
 > run once. Re-running is **idempotent** (stable chunk ids → upsert, never duplicate).
 
+### Embedding performance — bge-m3 is CPU-bound on this box (read before a big reindex)
+
+A full `index --rebuild` re-embeds the **whole** corpus with bge-m3; even an *incremental*
+`make index` after a large ingest (e.g. Likutei Torah, ~4.5k new chunks) still embeds every
+new chunk. Budget for it: on this machine it runs at **~0.4 chunk/s (~24 chunks/min)** — a
+~4.5k-chunk pass is **~3 hours**; the full ~8.7k-chunk corpus ~6 hours.
+
+**Verified finding (2026-07, this machine).** A **Quadro T1000 (4 GB)** is present,
+`torch.cuda.is_available()` is `True`, and `EMBED_DEVICE=cuda` *does* load bge-m3 on the GPU
+(~1.7 GB resident, 100 % util). **Yet throughput is the same ~0.4 chunk/s as CPU**, and
+raising `EMBED_BATCH_SIZE` from 8 → 32 changed nothing (GPU memory barely moved: 1707 →
+1733 MiB; rate stayed flat). The bottleneck is **not** GPU compute — it is bge-m3's CPU-side
+sparse/lexical pass, pinned to one core. The device/batch knobs don't buy speed here, so run
+a large reindex as a **background job**, not an interactive wait. Set the device explicitly
+anyway (it's harmless, and a future GPU without the CPU bottleneck would benefit):
+
+```dotenv
+EMBED_DEVICE=cuda       # loads on GPU; harmless, but not faster here (CPU-bound pipeline)
+EMBED_BATCH_SIZE=8      # 8 vs 32 made no measurable difference on this box
+```
+
+Practical guidance:
+- **Incremental `make index` is resumable** — it only embeds chunks Qdrant doesn't have yet,
+  so you can kill it and rerun and it picks up where it left off. Retrieval works on the
+  partial index throughout (status stays green).
+- **`index --rebuild` is NOT resumable** — it re-embeds from zero, so don't kill one that's
+  most of the way done.
+- You rarely do either — only after a fresh Qdrant volume or a large new corpus ingest.
+  Day-to-day the UI embeds one short query at a time, trivial on either device.
+
 ## 4. Verify the Knowledge base loaded
 
 ```bash
@@ -105,7 +135,9 @@ make ui            # → http://127.0.0.1:8000   (ask · teach · connect · dev
 ```
 
 > Using the app (web + installable phone PWA — voice, OCR, highlight-to-act, inbox,
-> reader, shiur transcription): **[UI_GUIDE.md](UI_GUIDE.md)**.
+> reader, shiur transcription): **[UI_GUIDE.md](UI_GUIDE.md)** (feature reference).
+> **New:** a click-by-click walkthrough of the whole teaching loop *and* golden
+> questions in the browser — **[TEACHING_WALKTHROUGH.md](TEACHING_WALKTHROUGH.md)**.
 
 ## 6. Teach the Assistant a connection — and confirm it learned
 
