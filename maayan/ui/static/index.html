@@ -825,7 +825,8 @@
           + loopStripHTML();
         return;
       }
-      $('turns').innerHTML = turns.map(t => {
+      lastTurns = turns;
+      $('turns').innerHTML = turns.map((t, i) => {
         let extra = '';
         if (t.turn_type === 'seed' && t.is_seed) {
           if (t.directive) extra += `<div class="hint">הנחיה לפיתוח: ${esc(t.directive)}</div>`;
@@ -840,6 +841,10 @@
                    + `<button class="secondary" onclick="withBusy(this, () => decide('${t.record_id}','reject'))"
                         title="שום דבר לא ייכנס">✗ דחה</button></div>`;
         }
+        if (['ask', 'development', 'seed'].includes(t.turn_type) && t.text) {
+          extra += `<div class="actions"><button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadTurn(${i})">⬇︎ .md</button>`
+                 + `<button class="ghost" title="הדפס / שמור כ־PDF / שתף" onclick="printTurn(${i})">🖨 שתף</button></div>`;
+        }
         const statusBadge = t.status ? `<span class="badge ${t.status}">${t.status}</span>` : '';
         return `<div class="turn ${t.turn_type}">
           <div class="who">${t.turn_type} · ${esc(t.author)}${statusBadge}</div>
@@ -847,6 +852,66 @@
       }).join('');
       $('turns').scrollTop = $('turns').scrollHeight;
     }
+
+    // --- share / export: a properly-formatted RTL Markdown download, or a print/PDF view ---
+    function _docMarkdown(title, text, refs, meta) {
+      let md = '# ' + (title || 'מעיין') + '\n\n' + (text || '').trim() + '\n';
+      if (refs && refs.length) md += '\n## מקורות\n' + refs.map(r => '- ' + r).join('\n') + '\n';
+      if (meta) md += '\n---\n\n' + meta + '\n';
+      return md;
+    }
+    function _mdFilename(title) {
+      const base = (title || 'maayan').replace(/[\\/:*?"<>|\n\r]+/g, ' ').trim().slice(0, 60);
+      return (base || 'maayan') + '.md';
+    }
+    function downloadMd(title, text, refs, meta) {
+      const blob = new Blob([_docMarkdown(title, text, refs, meta)], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = _mdFilename(title);
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('הורד ✓ ' + _mdFilename(title));
+    }
+    // Self-contained RTL document in a new window → the browser's print dialog also gives
+    // "Save as PDF", so this is the share/print path. No external resources (CSP-safe).
+    function printRtl(title, text, refs, meta) {
+      const refsHtml = (refs && refs.length)
+        ? '<h2>מקורות</h2><ul>' + refs.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>' : '';
+      const metaHtml = meta ? '<hr><p class="meta">' + esc(meta) + '</p>' : '';
+      const html = '<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>'
+        + esc(title || 'מעיין') + '</title><style>'
+        + 'body{font-family:"Frank Ruhl Libre",Georgia,serif;max-width:44rem;margin:2rem auto;'
+        + 'padding:0 1rem;line-height:1.9;color:#1a1a1a}h1{font-size:1.5rem}h2{font-size:1.1rem;'
+        + 'margin-top:1.4rem}.body{white-space:pre-wrap}.meta{color:#666;font-size:.85rem}'
+        + 'ul{padding-inline-start:1.2rem}@media print{body{margin:0}}</style></head><body>'
+        + '<h1>' + esc(title || 'מעיין') + '</h1><div class="body">' + esc(text || '') + '</div>'
+        + refsHtml + metaHtml + '</body></html>';
+      const w = window.open('', '_blank');
+      if (!w) { toast('החלון נחסם — אפשר חלונות קופצים כדי להדפיס/לשתף.'); return; }
+      w.document.write(html); w.document.close(); w.focus();
+      setTimeout(() => w.print(), 350);
+    }
+    function _answerPayload(d) {
+      const refs = (d.sources || []).map(s => s.ref).filter(Boolean);
+      return { title: d.question || 'תשובה', text: d.answer || '',
+               refs, meta: [new Date().toLocaleDateString('he-IL'), 'מעיין'].join(' · ') };
+    }
+    function downloadAnswer() { const p = _answerPayload(lastAnswer || {}); downloadMd(p.title, p.text, p.refs, p.meta); }
+    function printAnswer() { const p = _answerPayload(lastAnswer || {}); printRtl(p.title, p.text, p.refs, p.meta); }
+    window.downloadAnswer = downloadAnswer; window.printAnswer = printAnswer;
+    let lastTurns = [];
+    function _turnPayload(t) {
+      const refs = (t.grounded_in && t.grounded_in.length) ? t.grounded_in : (t.cited_refs || []);
+      const title = t.directive
+        || (t.turn_type === 'development' ? 'פיתוח' : t.turn_type === 'seed' ? 'זרע' : 'לימוד');
+      const meta = [t.author, t.turn_type, new Date().toLocaleDateString('he-IL')]
+        .filter(Boolean).join(' · ') + ' · מעיין';
+      return { title, text: t.text || '', refs, meta };
+    }
+    function downloadTurn(i) { const t = lastTurns[i]; if (t) { const p = _turnPayload(t); downloadMd(p.title, p.text, p.refs, p.meta); } }
+    function printTurn(i) { const t = lastTurns[i]; if (t) { const p = _turnPayload(t); printRtl(p.title, p.text, p.refs, p.meta); } }
+    window.downloadTurn = downloadTurn; window.printTurn = printTurn;
 
     function renderAnswerSources(data) {
       lastAnswer = data;
@@ -910,8 +975,11 @@
              title="How the chavrusa studied this — search, open, follow, conclude">כיצד נלמד? ▸</button></div>` : '';
       const readHint = data.grounded && sources.length
         ? `<div class="hint">הקש על מקור לקריאה בהקשר · גליון ▸ מראה מה ידוע סביבו</div>` : '';
+      const share = data.grounded ? `<div class="actions">`
+          + `<button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadAnswer()">⬇︎ הורד .md</button>`
+          + `<button class="ghost" title="הדפס או שמור כ־PDF / שתף" onclick="printAnswer()">🖨 הדפס / שתף</button></div>` : '';
       $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer${data.trace_id ? ' · חברותא' : ''}</div>
-        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
+        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${share}${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
       const ca = $('connectAuthor');
       if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
       const cb = $('connectBody');                       // dictation + OCR on the connection insight
