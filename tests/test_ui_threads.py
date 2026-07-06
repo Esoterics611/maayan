@@ -65,6 +65,14 @@ class FakeCapture:
     def get_annotation(self, annotation_id: str) -> Annotation | None:
         return self.annotations.get(annotation_id)
 
+    def list_annotations(self, *, author=None, kind=None, limit=100) -> list[Annotation]:
+        items = list(self.annotations.values())
+        if author is not None:
+            items = [a for a in items if a.author == author]
+        if kind is not None:
+            items = [a for a in items if a.kind == kind]
+        return items[:limit]
+
     def start_session(self, answer: Answer) -> Session:
         self._sessions += 1
         return Session(
@@ -207,6 +215,29 @@ def test_ask_in_thread_generation_error_returns_502_with_detail() -> None:
     body = r.json()
     assert "empty response" in body["detail"]
     assert body["retryable"] is True
+
+
+def test_contributions_panel_lists_saved_connection() -> None:
+    # A saved connection must be browsable (not invisible) and not yet a seed.
+    client = _client()
+    tid = _new_thread(client)
+    session_id = client.post(
+        f"/threads/{tid}/ask", json={"question": "מהי בחירה"}
+    ).json()["session_id"]
+    client.post("/annotate", json={
+        "session_id": session_id, "author": "ronnie", "kind": "connection",
+        "body": "Tanya ↔ Likutei Torah on bechira", "linked_refs": ["Tanya 1:6", "LT 2:1"],
+    })
+
+    got = client.get("/api/contributions").json()
+
+    assert got["total"] >= 1
+    top = got["contributions"][0]
+    assert top["author"] == "ronnie"
+    assert top["kind"] == "connection"
+    assert "bechira" in top["body"]
+    assert top["linked_refs"] == ["Tanya 1:6", "LT 2:1"]
+    assert top["opens_aspect"] is False
 
 
 def test_ask_in_thread_grounded_appends_turn_and_badges_source() -> None:

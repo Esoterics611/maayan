@@ -72,6 +72,8 @@ from maayan.ui.models import (
     CaptureThoughtRequest,
     ComposeRequest,
     CompositionResponse,
+    ContributionOut,
+    ContributionsResponse,
     CreateThreadRequest,
     CreateUserRequest,
     DevelopmentResponse,
@@ -192,6 +194,13 @@ def _thread_out(thread: Thread) -> ThreadOut:
     return ThreadOut(
         id=thread.id, title=thread.title,
         created_at=thread.created_at.isoformat(), updated_at=thread.updated_at.isoformat(),
+    )
+
+
+def _contribution_out(a: Annotation) -> ContributionOut:
+    return ContributionOut(
+        id=a.id, author=a.author, kind=a.kind, body=a.body, linked_refs=a.linked_refs,
+        directive=a.directive, opens_aspect=a.opens_aspect, created_at=a.timestamp.isoformat(),
     )
 
 
@@ -789,6 +798,17 @@ def create_app(
         )
 
     # -- verify (R5): "did it learn?" — retrieval only, never a model call ----------
+    @app.get("/api/contributions")
+    def list_contributions(
+        author: str = "", kind: str = "", limit: int = 100
+    ) -> ContributionsResponse:
+        # Browse the expert's captured knowledge (connections/corrections/seeds) in one
+        # place — so a saved connection isn't invisible, and can be promoted to a seed.
+        items = capture.list_annotations(author=author or None, kind=kind or None, limit=limit)
+        return ContributionsResponse(
+            contributions=[_contribution_out(a) for a in items], total=len(items)
+        )
+
     @app.get("/api/verify")
     def verify_learned(question: str, ref: str = "", k: int | None = None) -> VerifyResponse:
         if retriever is None:  # retriever wiring absent — route is inert

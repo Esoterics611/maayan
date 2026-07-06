@@ -229,6 +229,13 @@
         <div id="reviewSummary" class="hint">…</div>
       </div>
       <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">🧑‍🏫 התרומות שלי</div>
+          <button class="ghost" title="רענן" onclick="loadContributions()">↻</button>
+        </div>
+        <div id="contribList" class="hint">…</div>
+      </div>
+      <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
         <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Lexicon</div>
         <div id="termList"></div>
       </div>
@@ -903,27 +910,63 @@
     }
     window.teachFromRefusal = teachFromRefusal;
 
-    // A connection is retrievable knowledge, but a SEED is *developable*. This promotes a
-    // just-made connection into a seed in the current thread, where the model develops it
-    // (grounded + cited) and the expert adjudicates — the full teaching loop, not a dead end.
+    // A connection is retrievable knowledge, but a SEED is *developable*. This plants an
+    // insight as a seed in the current thread, where the model develops it (grounded +
+    // cited) and the expert adjudicates — the full teaching loop, not a dead end. Shared by
+    // the connect confirmation and the contributions panel.
     let lastConnection = null;
-    async function seedFromConnection() {
-      if (!lastConnection) return;
-      const { body, refs, question } = lastConnection;
-      const author = $('connectAuthor').value.trim() || localStorage.getItem(AUTHOR_KEY) || '';
-      if (!author) { toast('שם נדרש — הזרע נרשם עליך.'); $('connectAuthor').focus(); return; }
+    async function plantSeedFrom(body, refs, directive, author) {
+      author = (author || $('connectAuthor').value.trim() || localStorage.getItem(AUTHOR_KEY) || '').trim();
+      if (!author) { toast('שם נדרש — הזרע נרשם עליך.'); return; }
+      if (!body) { toast('אין תוכן להפוך לזרע.'); return; }
       localStorage.setItem(AUTHOR_KEY, author);
-      if (!active) await newTopic((body || question || 'seed').slice(0, 48));
+      if (!active) await newTopic(body.slice(0, 48));
       const r = await fetch('/threads/' + active + '/seed', { method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ author, kind: 'connection', body,
-          directive: question || null, linked_refs: refs || [] }) });
+          directive: directive || null, linked_refs: refs || [] }) });
       if (r.ok) {
         toast('נפתח כזרע ✓ — בשיחה, לחץ “פתח ▸ Develop” כדי שהמודל יפתח אותו.');
         await openThread(active);
       } else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
     }
+    async function seedFromConnection() {
+      if (!lastConnection) return;
+      await plantSeedFrom(lastConnection.body, lastConnection.refs, lastConnection.question, null);
+    }
     window.seedFromConnection = seedFromConnection;
+
+    // Contributions panel: browse everything the expert has taught (connections/corrections/
+    // seeds) so a saved connection isn't invisible — and promote any of them into a seed.
+    let contributions = [];
+    async function loadContributions() {
+      let items = [];
+      try { const d = await j(await fetch('/api/contributions?limit=50')); items = d.contributions || []; }
+      catch (e) { $('contribList').innerHTML = '<div class="hint">לא זמין.</div>'; return; }
+      contributions = items;
+      if (!items.length) {
+        $('contribList').innerHTML = '<div class="hint">עדיין אין תרומות — סמן ✓ מקורות ולַמֵּד חיבור.</div>';
+        return;
+      }
+      $('contribList').innerHTML = items.map((c, i) => {
+        const refs = (c.linked_refs || []).length
+          ? `<div class="hint">↔ ${esc(c.linked_refs.join(' · '))}</div>` : '';
+        const dev = c.opens_aspect ? '<span class="hint">🌱 זרע</span>'
+          : `<button class="ghost" title="הפוך את התרומה לזרע ופתח לפיתוח"
+               onclick="developContribution(${i})">🌱 פתח כזרע</button>`;
+        return `<div style="border:1px solid var(--line); border-radius:6px; padding:6px; margin-top:6px">
+          <div class="row" style="justify-content:space-between; gap:6px; align-items:center">
+            <span class="badge">${esc(c.kind)}</span>${dev}</div>
+          <div dir="auto" style="margin-top:4px">${esc((c.body || '').slice(0, 160))}</div>
+          ${refs}<div class="hint">${esc(c.author)}</div></div>`;
+      }).join('');
+    }
+    window.loadContributions = loadContributions;
+    async function developContribution(i) {
+      const c = contributions[i]; if (!c) return;
+      await plantSeedFrom(c.body, c.linked_refs || [], c.directive, c.author);
+    }
+    window.developContribution = developContribution;
 
     async function connectSelected() {
       const status = $('connectStatus');
@@ -951,7 +994,7 @@
           + `<span id="connectStatus2" class="hint"></span>`;
         $('connectBody').value = '';
         picks.forEach(el => { el.checked = false; });
-        loadReviewCount();
+        loadReviewCount(); loadContributions();
       } else { const e = await j(r); status.textContent = 'שגיאה: ' + (e.detail || r.status); }
     }
     window.connectSelected = connectSelected;
@@ -1195,7 +1238,7 @@
     $('reviewBtn').onclick = () => openReview();
     $('goldBtn').onclick = () => openGold();
     $('guideBtn').onclick = () => openGuide();
-    loadKinds(); loadThreads(); loadTerms(); loadStats(); loadReviewCount();
+    loadKinds(); loadThreads(); loadTerms(); loadStats(); loadReviewCount(); loadContributions();
     // First landing (no thread open yet): teach the loop where the work starts.
     if (!active) $('turns').insertAdjacentHTML('beforeend', loopStripHTML());
 

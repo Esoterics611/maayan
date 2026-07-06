@@ -124,6 +124,30 @@ def test_seed_round_trips_through_store() -> None:
     store.close()
 
 
+def test_list_annotations_spans_sessions_newest_first_and_filters() -> None:
+    """The contributions panel browses all contributions, newest-first, with filters."""
+    from datetime import timedelta
+
+    store = CaptureStore(":memory:")
+    t0 = FakeClock().now()
+
+    def _ann(id_: str, sess: str, author: str, kind: str, minutes: int) -> Annotation:
+        return Annotation(
+            id=id_, session_id=sess, timestamp=t0 + timedelta(minutes=minutes),
+            author=author, kind=kind, body=f"body {id_}",
+        )
+
+    store.save_annotation(_ann("a1", "s1", "ronnie", "connection", 0))
+    store.save_annotation(_ann("a2", "s2", "ronnie", "correction", 1))
+    store.save_annotation(_ann("a3", "s2", "dovber", "connection", 2))
+
+    assert [a.id for a in store.list_annotations()] == ["a3", "a2", "a1"]  # newest-first
+    assert [a.id for a in store.list_annotations(author="ronnie")] == ["a2", "a1"]
+    assert [a.id for a in store.list_annotations(kind="connection")] == ["a3", "a1"]
+    assert [a.id for a in store.list_annotations(limit=1)] == ["a3"]
+    store.close()
+
+
 def test_unknown_kind_rejected() -> None:
     idx = QdrantIndex(QdrantClient(location=":memory:"), "t", DIM)
     svc = _service(idx, HashingEmbedder(dim=DIM))

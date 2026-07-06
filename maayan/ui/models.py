@@ -488,3 +488,20 @@ class VerifyResponse(BaseModel):
     found: bool
     rank: int | None = None  # 1-based position of `ref` among the results, when found
     top: list[VerifyHit] = Field(default_factory=list)
+
+
+# -- contributions: browse the expert's captured knowledge (connections/seeds/…) ----------
+class ContributionOut(BaseModel):
+    id: str
+    author: str
+    kind: str
+    body: str
+    linked_refs: list[str] = Field(default_factory=list)
+    directive: str | None = None
+    opens_aspect: bool = False  # already a seed → no "turn into seed" affordance
+    created_at: str
+
+
+class ContributionsResponse(BaseModel):
+    contributions: list[ContributionOut] = Field(default_factory=list)
+    total: int = 0
