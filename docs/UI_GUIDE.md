@@ -32,13 +32,16 @@ page first; your display name then auto-fills the **author** field on everything
 
 ## 2. The layout
 
-- **Header** — `☰` opens the topics/lexicon drawer (mobile); `📥` opens the **quick-capture
-  inbox** (below).
-- **Left drawer** — your **topic threads**, the **lexicon** (defined terms), and a
-  **Knowledge base** health panel.
+- **Header** — `☰` opens the topics/lexicon drawer (mobile); **⚖️ הכרעות** opens the
+  review workbench (everything awaiting your approval, with a live count badge);
+  **🏅** the golden-questions panel; **📥** the **quick-capture inbox** (below);
+  **?** the in-app guide (the four-step loop + the badge/glyph legend).
+- **Left drawer** — your **topic threads**, an **הכרעות** count with a פתח ▸ shortcut,
+  the **lexicon** (defined terms), and a **Knowledge base** health panel.
 - **Center** — the conversation for the active thread, with the composer (Ask + the
-  *Seed ▾ / Term ▾ / Compose ▾ / Shiur ▾* tools) underneath.
-- **Bottom tab bar (mobile)** — Ask · Threads · Capture · Library.
+  *🌱 זרע / 📖 מונח / 📝 חיבור / 🎙 שיעור* tools) underneath. An empty thread shows the
+  four-step loop strip (dismissible; always available under **?**).
+- **Bottom tab bar (mobile)** — שאל · נושאים · לַמֵּד · ספרייה.
 
 Everything happens inside a **topic thread** — start or reopen one from the drawer first.
 
