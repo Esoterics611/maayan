@@ -140,5 +140,6 @@ into `shiur` chunks that are retrievable alongside the text — and a cited shiu
 You decide what your Assistant learns. The corpus's printed text is read-only; everything you
 add is attributed and retractable.
 
-See also: **[RUNBOOK.md](RUNBOOK.md)** (CLI walkthrough) · **[cloud_deploy/](cloud_deploy/README.md)**
-(put it online).
+See also: **[TEACHING_WALKTHROUGH.md](TEACHING_WALKTHROUGH.md)** (click-by-click teaching loop +
+golden questions) · **[RUNBOOK.md](RUNBOOK.md)** (CLI walkthrough) ·
+**[cloud_deploy/](cloud_deploy/README.md)** (put it online).

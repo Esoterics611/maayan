@@ -135,7 +135,9 @@ make ui            # → http://127.0.0.1:8000   (ask · teach · connect · dev
 ```
 
 > Using the app (web + installable phone PWA — voice, OCR, highlight-to-act, inbox,
-> reader, shiur transcription): **[UI_GUIDE.md](UI_GUIDE.md)**.
+> reader, shiur transcription): **[UI_GUIDE.md](UI_GUIDE.md)** (feature reference).
+> **New:** a click-by-click walkthrough of the whole teaching loop *and* golden
+> questions in the browser — **[TEACHING_WALKTHROUGH.md](TEACHING_WALKTHROUGH.md)**.
 
 ## 6. Teach the Assistant a connection — and confirm it learned
 
