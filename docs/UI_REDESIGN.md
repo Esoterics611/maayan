@@ -245,8 +245,8 @@ One number, one place to go.
 - Shows the **latest captured-eval report** (date, hit@k / recall / MRR + the delta
   line vs the previous run) read from `captured_reports/` — *display only* in
   Phase 1; a "run now" button is Phase 3 (long-running job UX).
-- Names the **curated YAML sets** (goldset / crosstext / develop) with counts and one
-  line on how to edit them (deliberately file-based — the panel says so, honestly).
+- Names the **curated YAML sets** (goldset / crosstext / develop) and says honestly
+  that gold is edited in files, not clicked (per-set counts: Phase 2).
 - Copy anchors the concept: *"כל אישור שלך הופך למבחן קבוע — זו הדרך לדעת שהלימוד
   באמת עוזר."*
 

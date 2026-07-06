@@ -298,7 +298,7 @@ def test_connect_sources_links_refs_across_books() -> None:
 
 def test_index_html_has_connect_affordance() -> None:
     html = _client().get("/").text
-    for marker in ("connectSelected", "srcpick", "Connect selected"):
+    for marker in ("connectSelected", "srcpick", "Connect →"):
         assert marker in html, f"missing connect-sources markup: {marker}"
 
 

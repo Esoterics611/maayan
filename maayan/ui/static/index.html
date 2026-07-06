@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="maayan" />
   <style>
     :root { --bg:#f6f4ef; --panel:#fff; --ink:#23201b; --muted:#8a8275;
-            --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b;
+            --line:#e4ded2; --accent:#6b4f2a; --cited:#b8860b; --gold:#a07908;
             --expert:#2e6b4f; --derived:#3a5a9b; --seed:#8a5a2b; --term:#6b4f8a; --shiur:#b5651d; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
@@ -93,6 +93,37 @@
     .hidden { display:none; }
     .empty { color:var(--muted); text-align:center; margin-top:40px; }
 
+    /* --- UI redesign Phase 1: header nav, loop strip, modal, review cards, gold --- */
+    .navbtn { position:relative; background:transparent; color:var(--ink); font-size:17px;
+              padding:4px 9px; border:1px solid var(--line); border-radius:8px; cursor:pointer;
+              flex:0 0 auto; font-weight:400; }
+    .navbtn:hover { background:var(--bg); }
+    .navbtn .cnt { position:absolute; top:-7px; right:-7px; background:var(--accent); color:#fff;
+                   font-size:11px; font-weight:700; border-radius:9px; min-width:18px; height:18px;
+                   line-height:18px; text-align:center; padding:0 3px; }
+    .navbtn .cnt.zero { display:none; }
+    .loopstrip { border:1px solid var(--line); background:var(--panel); border-radius:12px;
+                 padding:14px 16px; margin:18px auto 0; max-width:660px; font-size:14px;
+                 text-align:start; position:relative; }
+    .loopstrip .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+                        gap:10px; margin-top:10px; }
+    .loopstrip .step { border-inline-start:3px solid var(--line); padding-inline-start:9px; }
+    .loopstrip .step b { display:block; margin-bottom:2px; }
+    .loopstrip .dismiss { position:absolute; top:8px; inset-inline-end:10px; }
+    .modal-back { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:95; display:flex; }
+    .modal { background:var(--panel); margin:auto; width:min(480px,92vw); border-radius:12px;
+             padding:18px 20px; box-shadow:0 12px 48px rgba(0,0,0,.3); }
+    .modal h3 { margin:0 0 6px; font-size:16px; }
+    .modal .ctx { font-size:13px; color:var(--muted); margin-bottom:10px; white-space:pre-wrap; }
+    .modal .err { color:#9a3b2f; font-size:13px; min-height:17px; margin-top:6px; }
+    .review-sec { margin-bottom:18px; }
+    .review-sec h4 { margin:0 0 6px; font-size:12px; color:var(--muted);
+                     text-transform:uppercase; letter-spacing:.04em; }
+    .badge.gold { color:var(--gold); border-color:var(--gold); }
+    .kpi { display:inline-block; border:1px solid var(--line); border-radius:8px;
+           padding:6px 10px; margin:0 6px 6px 0; font-size:13px; background:var(--panel); }
+    .kpi b { font-size:16px; }
+
     /* --- mobile chrome (hidden on desktop) --- */
     .menu-btn { display:none; background:transparent; color:var(--ink); font-size:20px;
                 padding:4px 8px; border:1px solid var(--line); border-radius:8px; }
@@ -172,23 +203,30 @@
 <body>
   <header>
     <button class="menu-btn" id="menuBtn" aria-label="Topics & lexicon">☰</button>
-    <h1>מעיין · maayan <small>your Assistant for Tanya · Torah Or · Likutei Torah — grounded in the Knowledge base you build (ask · teach · connect · develop)</small></h1>
-    <button class="menu-btn" id="inboxBtn" aria-label="Quick-capture inbox" title="Quick-capture inbox" style="margin-inline-start:auto">📥</button>
+    <h1>מעיין · maayan <small>שאל · לַמֵּד · והמעיין גדל — ask, teach, and it grows</small></h1>
+    <span style="flex:1"></span>
+    <button class="navbtn" id="reviewBtn" aria-label="Review queue"
+      title="הכרעות — כל מה שמחכה לאישור שלך, במקום אחד">⚖️<span class="cnt zero" id="reviewCnt"></span></button>
+    <button class="navbtn" id="goldBtn" aria-label="Golden questions"
+      title="שאלות זהב — המבחנים שהלימוד שלך בונה">🏅</button>
+    <button class="navbtn" id="inboxBtn" aria-label="Quick-capture inbox"
+      title="📥 קלוט מחשבה — תמיין אותה לנושא אחר כך">📥</button>
+    <button class="navbtn" id="guideBtn" aria-label="Guide"
+      title="מדריך — איך הלולאה עובדת">?</button>
   </header>
   <div class="layout">
     <aside>
       <div class="row" style="margin-bottom:10px">
-        <input id="newTitle" placeholder="New topic title…" dir="auto" />
+        <input id="newTitle" placeholder="נושא חדש… New topic" dir="auto" />
         <button id="newBtn" title="Start a topic">＋</button>
       </div>
       <div id="threadList"></div>
       <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
         <div class="row" style="justify-content:space-between; align-items:center">
-          <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">שאלות לרב</div>
-          <button class="ghost" title="Regenerate the queue" onclick="generateInquiries()">↻</button>
+          <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">⚖️ הכרעות</div>
+          <button class="ghost" title="פתח את שולחן ההכרעות" onclick="openReview()">פתח ▸</button>
         </div>
-        <div id="inquiryPanel" class="hint">…</div>
-        <div id="harvestLine" class="hint" style="margin-top:6px"></div>
+        <div id="reviewSummary" class="hint">…</div>
       </div>
       <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px">
         <div class="hint" style="text-transform:uppercase; letter-spacing:.04em">Lexicon</div>
@@ -204,41 +242,46 @@
     </aside>
 
     <main>
-      <div id="turns" class="turns"><div class="empty">Pick or start a topic to begin.</div></div>
+      <div id="turns" class="turns"><div class="empty">בחר או פתח נושא כדי להתחיל · Pick or start a topic to begin.</div></div>
 
       <div class="composer">
         <div id="answerSources"></div>
         <div class="row">
-          <input id="q" placeholder="Ask within this topic…  e.g. מהי נפש הבהמית" dir="auto" />
+          <input id="q" placeholder="שאל שאלה בתוך הנושא…  e.g. מהי נפש הבהמית" dir="auto" />
           <button id="micQ" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
           <button id="voiceLang" type="button" class="ghost" title="Voice language (tap to switch)">עב</button>
-          <button id="askBtn">Ask</button>
+          <button id="askBtn">שאל · Ask</button>
           <button id="chavrusaToggle" class="secondary" title="חברותא — study this question over several hops (search → open → follow a connection → conclude). Same refusal gate.">חברותא ○</button>
-          <button id="seedToggle" class="secondary" title="Plant a seed">Seed ▾</button>
-          <button id="termToggle" class="secondary" title="Define a term / Holy Name">Term ▾</button>
-          <button id="composeToggle" class="secondary" title="Compose a grounded document">Compose ▾</button>
-          <button id="shiurToggle" class="secondary" title="Transcribe a shiur recording">Shiur ▾</button>
+          <button id="seedToggle" class="secondary" title="לַמֵּד ידע חדש: כתוב זרע, המודל יפתח אותו, ואתה תכריע — כלום לא נכנס בלי אישורך">🌱 זרע ▾</button>
+          <button id="termToggle" class="secondary" title="הגדר מונח או שם קדוש — נכנס למילון, נשלף בחיפוש, ומוגן משיבוש ראשי־תיבות">📖 מונח ▾</button>
+          <button id="composeToggle" class="secondary" title="חבר מסמך מבוסס־מקורות (ראשי פרקים לשיעור) — כל סעיף מצוטט או פער כן">📝 חיבור ▾</button>
+          <button id="shiurToggle" class="secondary" title="הקלט או העלה שיעור — תמלול, סקירה שלך, ואישור לפני שנכנס למאגר">🎙 שיעור ▾</button>
         </div>
-        <div class="hint">Answers come only from retrieved sources, with citations; follow-ups use the thread as context but never bypass the refusal gate.</div>
+        <div class="hint">תשובות באות רק מהמקורות שנשלפו, עם ציטוטים — או סירוב כן.
+          אחרי תשובה: <b>סמן ✓ שני מקורות ולמד חיבור</b> — זה הצעד שמגדיל את המעיין.</div>
 
         <div id="seedBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
+          <div class="hint" style="margin-bottom:6px">🌱 <b>זרע</b> — ידע שלך (גם מחוץ לספרים). המודל יפתח אותו להצעה מצוטטת,
+            והיא תחכה לאישורך בהכרעות — <b>שום דבר לא נכנס למאגר בלי ההכרעה שלך</b>.</div>
           <div class="row">
-            <div><label class="field">Author <span class="hint">(required)</span></label><input id="author" placeholder="Your name" /></div>
-            <div><label class="field">Kind</label><select id="kind"></select></div>
+            <div><label class="field">שם · Author <span class="hint">(חובה — הידע נרשם עליך)</span></label><input id="author" placeholder="Your name" /></div>
+            <div><label class="field">סוג · Kind</label><select id="kind"></select></div>
           </div>
-          <label class="field with-mic"><span>Seed knowledge (often from outside the corpus)</span>
+          <label class="field with-mic"><span>הידע שלך <span class="hint">(גם ממקור שאינו בספרייה)</span></span>
             <button id="micSeed" type="button" class="mic" title="Dictate (voice)" aria-label="Dictate">🎤</button>
             <button id="ocrSeed" type="button" class="mic" title="Photograph a page (OCR → review)" aria-label="Photograph page">📷</button></label>
           <textarea id="seedBody" rows="2" dir="auto" placeholder="e.g. אהבה בתענוגים היא גילוי שם ע&quot;ב…"></textarea>
-          <label class="field">Directive — what should the model develop? <span class="hint">(kept out of the embedded text)</span></label>
-          <input id="directive" dir="auto" placeholder="e.g. find where this is hinted at in Tanya" />
-          <div class="actions"><button id="seedBtn">Plant seed</button><span id="seedStatus" class="hint"></span></div>
+          <label class="field">הנחיה — מה המודל יפתח מזה? <span class="hint">(לא נכנסת לטקסט שנשמר)</span></label>
+          <input id="directive" dir="auto" placeholder="e.g. מצא היכן זה נרמז בתניא" />
+          <div class="actions"><button id="seedBtn">🌱 שתול זרע</button><span id="seedStatus" class="hint"></span></div>
         </div>
 
         <div id="termBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
-          <div class="hint" style="margin-bottom:6px">Define a Holy Name / technical term as an entity — it becomes a retrievable <span class="badge term">term</span> and is protected from abbreviation expansion. Tip: select text in a source above, then click “Term ▾” to prefill the surface form.</div>
+          <div class="hint" style="margin-bottom:6px">📖 <b>מונח</b> — הגדר שם קדוש / מונח טכני. הוא נכנס למילון, עולה בחיפושים עם תג
+            <span class="badge term">term</span>, ומוגן משיבוש ראשי־תיבות.
+            טיפ: סמן טקסט במקור למעלה ואז לחץ “📖 מונח ▾” — הצורה תתמלא מאליה.</div>
           <div class="row">
-            <div><label class="field">Author <span class="hint">(required)</span></label><input id="termAuthor" placeholder="Your name" /></div>
+            <div><label class="field">שם · Author <span class="hint">(חובה)</span></label><input id="termAuthor" placeholder="Your name" /></div>
             <div><label class="field">Type</label>
               <select id="termType">
                 <option value="concept">concept</option>
@@ -267,9 +310,11 @@
         </div>
 
         <div id="composeBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
-          <div class="hint" style="margin-bottom:6px">Compose a grounded document (a shiur outline first): a brief → an editable outline → a fill that grounds each section or leaves an <b>honest gap</b> where the corpus is silent. Approval never re-ingests prose — promote a section's <i>connection</i> instead.</div>
+          <div class="hint" style="margin-bottom:6px">📝 <b>חיבור מסמך</b> — כתוב כוונה, קבל ראשי פרקים, ואז מילוי שבו כל סעיף
+            מצוטט מהמקורות או נשאר <b>פער כן</b> כשאין מקור. הפרוזה לא נכנסת למאגר —
+            אפשר לקדם את ה<i>חיבור</i> של סעיף, לא את הטקסט.</div>
           <div class="row">
-            <div><label class="field">Author <span class="hint">(required)</span></label><input id="composeAuthor" placeholder="Your name" /></div>
+            <div><label class="field">שם · Author <span class="hint">(חובה)</span></label><input id="composeAuthor" placeholder="Your name" /></div>
             <div><label class="field">Type</label>
               <select id="composeType">
                 <option value="shiur_outline">shiur_outline</option>
@@ -288,7 +333,8 @@
         </div>
 
         <div id="shiurBox" class="hidden" style="margin-top:10px; border-top:1px dashed var(--line); padding-top:10px">
-          <div class="hint" style="margin-bottom:6px">Transcribe a shiur: record in-app or upload a file. It's stored and transcribed in the background (keep working — the job is polled), then shown for review. Nothing enters the Knowledge base until you approve it (next update).</div>
+          <div class="hint" style="margin-bottom:6px">🎙 <b>שיעור</b> — הקלט כאן או העלה קובץ. התמלול רץ ברקע (אפשר להמשיך לעבוד),
+            ואז מוצג לסקירה: תתקן, תסמן “נסקר”, ותאשר. <b>שום דבר לא נכנס למאגר עד האישור שלך.</b></div>
           <div class="row">
             <button id="shiurRec" type="button" class="secondary" title="Record a shiur">● Record</button>
             <label class="secondary" style="flex:0 0 auto; padding:9px 15px; border-radius:8px; cursor:pointer" title="Upload an audio file">Upload<input id="shiurFile" type="file" accept="audio/*" style="display:none" /></label>
@@ -309,10 +355,10 @@
     <button type="button" data-act="seed" title="Quote the selection into a seed">Quote → seed</button>
   </div>
   <nav class="tabbar" id="tabbar">
-    <button data-tab="ask">Ask</button>
-    <button data-tab="threads">Threads</button>
-    <button data-tab="capture">Capture</button>
-    <button data-tab="library">Library</button>
+    <button data-tab="ask">שאל</button>
+    <button data-tab="threads">נושאים</button>
+    <button data-tab="capture">לַמֵּד</button>
+    <button data-tab="library">ספרייה</button>
   </nav>
 
   <script>
@@ -353,56 +399,312 @@
       } catch (e) { $('termList').innerHTML = '<div class="hint">No terms yet.</div>'; }
     }
 
-    // -- שאלות לרב: the inquiry queue (Prompt 37) ---------------------------
-    // Cards speak to the Rav in Hebrew; the priority math is printed on each
-    // card (an opaque queue would spend his trust along with his time), and
-    // dismiss carries the same weight as answer.
-    async function loadInquiries() {
-      try {
-        const data = await j(await fetch('/api/inquiries'));
-        const items = data.items || [];
-        if (!items.length) {
-          $('inquiryPanel').innerHTML = '<div class="hint">אין שאלות פתוחות</div>';
-        } else {
-          $('inquiryPanel').innerHTML = items.map(it => {
-            const parts = Object.entries(it.priority_parts || {})
-              .map(([k, v]) => `${k}(${v})`).join(' + ');
-            const ask = it.kind === 'refused_question' && it.payload && it.payload.questions
-              ? `<button class="ghost" title="נסה שוב בתיבת השאלה"
-                    onclick="prefillAsk(${attr(it.payload.questions[0])})">שאל שוב</button>` : '';
-            return `<div class="inq" dir="rtl">
-              <div style="font-weight:600">？ ${esc(it.title)}</div>
-              <div class="hint">${esc(it.detail)}</div>
-              <div class="hint" style="font-family:monospace">priority ${it.priority.toFixed(1)} = ${esc(parts)}</div>
-              <div class="row" style="margin-top:4px">
-                <button class="ghost" onclick="answerInquiry('${it.id}')">ענה ✓</button>
-                <button class="ghost" onclick="dismissInquiry('${it.id}')">דחה ✗</button>${ask}
-              </div></div>`;
-          }).join('');
-        }
-        const h = Object.entries(data.harvest || {});
-        $('harvestLine').textContent = h.length
-          ? 'היום נענו → ' + h.map(([k, v]) => `${k}: ${v}`).join(' · ') : '';
-      } catch (e) { $('inquiryPanel').innerHTML = '<div class="hint">inquiries unavailable</div>'; }
+    // -- modal helper (R6): the sacred actions deserve better than window.prompt --
+    // One small form-in-overlay: context shown, validation inline, cancel does nothing.
+    function mkModal({ title, context, fields, submitLabel, onSubmit }) {
+      const back = document.createElement('div');
+      back.className = 'modal-back';
+      const inputs = (fields || []).map(f => `
+        <label class="field">${esc(f.label)}</label>
+        ${f.textarea
+          ? `<textarea id="m-${esc(f.id)}" rows="2" dir="auto" placeholder="${esc(f.placeholder || '')}"></textarea>`
+          : `<input id="m-${esc(f.id)}" dir="auto" placeholder="${esc(f.placeholder || '')}" />`}
+      `).join('');
+      back.innerHTML = `<div class="modal">
+        <h3 dir="auto">${esc(title)}</h3>
+        ${context ? `<div class="ctx" dir="auto">${esc(context)}</div>` : ''}
+        ${inputs}
+        <div class="err" id="m-err"></div>
+        <div class="actions" style="justify-content:flex-end">
+          <button class="secondary" id="m-cancel">ביטול</button>
+          <button id="m-ok">${esc(submitLabel || 'שמור')}</button>
+        </div></div>`;
+      back.addEventListener('click', (e) => { if (e.target === back) back.remove(); });
+      document.body.appendChild(back);
+      // Initial values set via .value (never interpolated into markup): quote-safe.
+      (fields || []).forEach(f => {
+        const el = back.querySelector('#m-' + f.id);
+        if (el && f.value) el.value = f.value;
+      });
+      const err = back.querySelector('#m-err');
+      back.querySelector('#m-cancel').onclick = () => back.remove();
+      back.querySelector('#m-ok').onclick = async () => {
+        const values = {};
+        (fields || []).forEach(f => { values[f.id] = back.querySelector('#m-' + f.id).value.trim(); });
+        await onSubmit(values, (msg) => { err.textContent = msg; }, () => back.remove());
+      };
+      const first = back.querySelector('input, textarea');
+      if (first) first.focus();
+      return back;
     }
+    window.mkModal = mkModal;
+
+    // -- the Review workbench (הכרעות): every gate in one place (redesign R3) ----
+    // One queue, one count, one card anatomy: what is proposed · its evidence ·
+    // approve / reject. Dismiss carries the same weight as answer.
+    const KIND_HE = { developments: 'פיתוחים', relations: 'קשרים', inquiries: 'שאלות לרב', inbox: 'מחשבות' };
+
+    async function loadReviewCount() {
+      let data = null;
+      try { data = await j(await fetch('/api/review/queue')); } catch (e) { /* offline */ }
+      const cnt = $('reviewCnt');
+      if (!data) {
+        if (cnt) cnt.classList.add('zero');
+        $('reviewSummary').textContent = 'לא זמין כרגע';
+        return null;
+      }
+      if (cnt) { cnt.textContent = data.total; cnt.classList.toggle('zero', !data.total); }
+      const parts = Object.entries(data.counts || {}).filter(([, v]) => v > 0)
+        .map(([k, v]) => `${KIND_HE[k] || k} ${v}`);
+      $('reviewSummary').innerHTML = data.total
+        ? `<b>${data.total}</b> ממתינות: ${esc(parts.join(' · '))}`
+        : 'אין הכרעות ממתינות ✓';
+      return data;
+    }
+
+    function reviewCard(inner) { return `<div class="src" dir="auto">${inner}</div>`; }
+
+    async function openReview() {
+      document.body.classList.remove('drawer-open');
+      const data = await loadReviewCount();
+      if (!data) { toast('שולחן ההכרעות אינו זמין.'); return; }
+      const devRows = (data.developments || []).map(d => reviewCard(`
+        <div class="ref">◐ פיתוח מוצע <span class="badge proposed">proposed</span>
+          <span class="hint">(זרע של ${esc(d.author)})</span></div>
+        <div dir="auto">${esc(d.text)}</div>
+        ${d.grounded_in && d.grounded_in.length
+          ? `<div class="hint">מבוסס על: ${esc(d.grounded_in.join(', '))}</div>` : ''}
+        <div class="actions">
+          <button onclick="reviewDecideDev('${esc(d.id)}','approve')">✓ אשר — ייכנס למאגר</button>
+          <button class="secondary" onclick="reviewDecideDev('${esc(d.id)}','reject')">✗ דחה</button>
+          <button class="ghost" onclick="closeOverlay(); openThread('${esc(d.thread_id)}')">פתח בנושא ▸</button>
+        </div>`)).join('');
+      const relRows = (data.relations || []).map(r => reviewCard(`
+        <div class="ref">${EV_GLYPH[r.evidence] || '?'} קשר מוצע
+          <span class="badge proposed">${esc(r.rel_type)}</span>
+          <span class="hint">בטחון ${(r.confidence * 100).toFixed(0)}% · ${esc(r.author)}</span></div>
+        <div dir="auto"><span class="srcref" onclick='openReader(${attr(r.subject_label)})'>${esc(r.subject_label)}</span>
+          ⟵ ${esc(r.rel_type)} ⟶
+          <span class="srcref" onclick='openReader(${attr(r.object_label)})'>${esc(r.object_label)}</span></div>
+        ${r.note ? `<div class="hint" dir="auto">${esc(r.note)}</div>` : ''}
+        <div class="actions">
+          <button onclick="approveRelation('${esc(r.id)}')">✓ אשר — אתה הערב לקשר</button>
+          <button class="secondary" onclick="rejectRelation('${esc(r.id)}')">✗ דחה</button>
+        </div>`)).join('');
+      const inqRows = (data.inquiries || []).map(it => {
+        const parts = Object.entries(it.priority_parts || {}).map(([k, v]) => `${k}(${v})`).join(' + ');
+        const ask = it.kind === 'refused_question' && it.payload && it.payload.questions
+          ? `<button class="ghost" onclick='closeOverlay(); prefillAsk(${attr(it.payload.questions[0])})'>שאל שוב ↩</button>` : '';
+        return reviewCard(`
+          <div class="ref">？ ${esc(it.title)}</div>
+          <div class="hint">${esc(it.detail)}</div>
+          <div class="hint" style="font-family:monospace" title="החישוב גלוי — התור מרוויח את זמנך ביושר">priority ${it.priority.toFixed(1)} = ${esc(parts)}</div>
+          <div class="actions">
+            <button onclick='answerInquiry(${attr(it.id)}, ${attr(it.title)})'>ענה ✓ — רשום מה נוצר</button>
+            <button class="secondary" onclick='dismissInquiry(${attr(it.id)})'>דחה ✗</button>${ask}
+          </div>`);
+      }).join('');
+      const inboxRows = (data.inbox || []).map(it => reviewCard(`
+        <div class="ref">📥 מחשבה <span class="hint">(${esc(it.author)})</span></div>
+        <div dir="auto">${esc(it.text)}</div>
+        <div class="actions"><button class="ghost" onclick="closeOverlay(); openInbox()">מיין לנושא ▸</button></div>`)).join('');
+      const sec = (key, rows, emptyMsg) => `<div class="review-sec">
+        <h4>${esc(KIND_HE[key])} · ${(data.counts || {})[key] || 0}</h4>
+        ${rows || `<div class="hint">${esc(emptyMsg)}</div>`}</div>`;
+      const h = Object.entries(data.harvest || {});
+      const harvest = h.length
+        ? `<div class="hint" style="margin-bottom:10px">🌾 היום נענו → ${esc(h.map(([k, v]) => `${k}: ${v}`).join(' · '))}</div>` : '';
+      const empty = !data.total
+        ? `<div class="empty" style="margin:24px 0">אין הכרעות ממתינות — הכל נסקר ✓<br>
+             <span class="hint">כשהמודל יציע פיתוח, קשר, או שאלה — זה יופיע כאן ויחכה לך.</span></div>` : '';
+      mkOverlay(`<div class="reader-head" dir="rtl">
+          <span class="title">⚖️ הכרעות — מה שמחכה לאישורך</span>
+          <button class="ghost" title="חדש את שאלות לרב" onclick="generateInquiries()">↻ שאלות</button>
+          <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+        <div class="reader-body" dir="rtl" style="font-family:inherit; font-size:15px; line-height:1.6">
+          <div class="hint" style="margin-bottom:10px">שום דבר לא נכנס למאגר בלי הכרעה שלך.
+            אישור מוסיף ידע (ונרשם כשאלת־זהב); דחייה שוקלת בדיוק כמו אישור.</div>
+          ${harvest}${empty}
+          ${data.total ? sec('developments', devRows, 'אין פיתוחים ממתינים') : ''}
+          ${data.total ? sec('relations', relRows, 'אין קשרים ממתינים') : ''}
+          ${data.total ? sec('inquiries', inqRows, 'אין שאלות פתוחות') : ''}
+          ${data.total ? sec('inbox', inboxRows, 'אין מחשבות שממתינות למיון') : ''}
+        </div>`);
+    }
+    window.openReview = openReview;
+
+    async function reviewDecideDev(devId, action) {
+      const r = await fetch('/developments/' + devId + '/' + action, { method: 'POST' });
+      if (r.ok) {
+        toast(action === 'approve'
+          ? 'אושר ✓ — נכנס למאגר כ־derived ונוסף כשאלת־זהב.' : 'נדחה — שום דבר לא נכנס.');
+        openReview();
+      } else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
+    }
+    window.reviewDecideDev = reviewDecideDev;
+
+    function requireAuthor(then) {
+      const saved = (localStorage.getItem(AUTHOR_KEY) || '').trim();
+      if (saved) { then(saved); return; }
+      mkModal({
+        title: 'מי מכריע?', context: 'אישור נרשם על שמך — פעם אחת, ונזכור.',
+        fields: [{ id: 'author', label: 'השם שלך', placeholder: 'e.g. הרב רנדל' }],
+        submitLabel: 'המשך',
+        onSubmit: (v, err, close) => {
+          if (!v.author) { err('שם נדרש.'); return; }
+          localStorage.setItem(AUTHOR_KEY, v.author); close(); then(v.author);
+        },
+      });
+    }
+
+    async function approveRelation(id) {
+      requireAuthor(async (author) => {
+        const r = await fetch('/api/relations/' + id + '/approve', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ author }) });
+        if (r.ok) { toast('הקשר אושר ✓ — מעכשיו הוא מרחיב חיפושים.'); openReview(); }
+        else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
+      });
+    }
+    async function rejectRelation(id) {
+      const r = await fetch('/api/relations/' + id + '/reject', { method: 'POST' });
+      if (r.ok) { toast('הקשר נדחה — לא ישפיע על חיפושים.'); openReview(); }
+      else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
+    }
+    window.approveRelation = approveRelation; window.rejectRelation = rejectRelation;
+
     async function generateInquiries() {
       try { await fetch('/api/inquiries/generate', { method: 'POST' }); } catch (e) {}
-      loadInquiries();
+      openReview();
     }
-    async function answerInquiry(id) {
-      const resolution = (prompt('מה נוצר מהתשובה? (מזהה קשר/מונח/chunk + מילה)', '') || '').trim();
-      if (!resolution) return;
-      await fetch(`/api/inquiries/${id}/answer`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resolution }) });
-      loadInquiries();
+    function answerInquiry(id, title) {
+      mkModal({
+        title: 'ענה ✓ — מה נוצר מהתשובה?', context: title,
+        fields: [{ id: 'resolution', label: 'מה לימדת? (חיבור / מונח / פיתוח + מילה)',
+                   placeholder: 'e.g. חיבור תניא↔לקו"ת על אהבה', textarea: true }],
+        submitLabel: 'סמן כנענתה',
+        onSubmit: async (v, err, close) => {
+          if (!v.resolution) { err('רשום מה נוצר — כך הקציר נמדד.'); return; }
+          const r = await fetch(`/api/inquiries/${id}/answer`, { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolution: v.resolution }) });
+          if (r.ok) { close(); toast('נענתה ✓ — נוספה לקציר של היום.'); openReview(); }
+          else { const e = await j(r); err('שגיאה: ' + (e.detail || r.status)); }
+        },
+      });
     }
     async function dismissInquiry(id) {
       await fetch(`/api/inquiries/${id}/dismiss`, { method: 'POST' });
-      loadInquiries();
+      openReview();
     }
     function prefillAsk(q) { $('q').value = q; $('q').focus(); }
     window.generateInquiries = generateInquiries; window.answerInquiry = answerInquiry;
     window.dismissInquiry = dismissInquiry; window.prefillAsk = prefillAsk;
+    window.loadReviewCount = loadReviewCount;
+
+    // -- the Gold panel (שאלות זהב): the eval flywheel, visible (redesign R4) ----
+    // Every gated approval auto-drafts a regression example; this is where the
+    // scholar finally SEES the test set his teaching builds.
+    const ORIGIN_HE = { connection: 'חיבור', development: 'פיתוח', term: 'מונח', inquiry: 'שאלה שנענתה' };
+    async function openGold() {
+      let g;
+      try {
+        const r = await fetch('/api/goldset');
+        if (!r.ok) { toast('שאלות הזהב אינן זמינות בהתקנה זו.'); return; }
+        g = await r.json();
+      } catch (e) { toast('שאלות הזהב אינן זמינות.'); return; }
+      const chips = Object.entries(g.by_origin || {})
+        .map(([k, v]) => `<span class="kpi">${esc(ORIGIN_HE[k] || k)} <b>${v}</b></span>`).join('');
+      const rep = g.last_report;
+      const fmtPct = (x) => (x * 100).toFixed(0) + '%';
+      const report = rep
+        ? `<div class="review-sec"><h4>הריצה האחרונה · ${esc(rep.date.slice(0, 10))}</h4>
+             ${Object.entries(rep.hit || {}).map(([k, v]) =>
+               `<span class="kpi">hit@${esc(k)} <b>${fmtPct(v)}</b></span>`).join('')}
+             <span class="kpi">MRR <b>${rep.mrr.toFixed(2)}</b></span>
+             <span class="kpi">נענו <b>${fmtPct(rep.answer_rate)}</b></span>
+             <div class="hint">${rep.n_ranked} שאלות מדורגות · ${rep.n_gate_only} בודקות רק את שער הסירוב</div>
+           </div>`
+        : `<div class="review-sec"><h4>מדידה</h4>
+             <div class="hint">עדיין אין דוח. מריצים מהמסוף: <code>uv run maayan eval --captured</code> —
+             והתוצאה תופיע כאן.</div></div>`;
+      const rows = (g.examples || []).map(e => `
+        <div class="src" dir="auto" style="${e.retracted ? 'opacity:.45' : ''}">
+          <div class="ref">🏅 ${esc(e.question)}
+            <span class="badge gold">${esc(ORIGIN_HE[e.origin_kind] || e.origin_kind)}</span>
+            ${e.retracted ? '<span class="badge rejected">retracted</span>' : ''}</div>
+          <div class="hint">${e.expected_refs.length
+            ? 'צריך להעלות: ' + esc(e.expected_refs.join(', '))
+            : 'בודקת את שער הסירוב (אסור לענות)'}</div>
+        </div>`).join('') || '<div class="hint">עדיין אין שאלות זהב — הן נולדות מהאישורים שלך.</div>';
+      mkOverlay(`<div class="reader-head" dir="rtl">
+          <span class="title">🏅 שאלות זהב — המבחן שהלימוד שלך בונה</span>
+          <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+        <div class="reader-body" dir="rtl" style="font-family:inherit; font-size:15px; line-height:1.6">
+          <div class="hint" style="margin-bottom:10px">כל אישור שלך — חיבור, פיתוח, מונח, שאלה שנענתה —
+            הופך אוטומטית למבחן קבוע. כך יודעים שהלימוד באמת עוזר: מלמדים, מודדים, רואים את המספרים עולים.</div>
+          <span class="kpi">סה״כ <b>${g.total}</b></span>${chips}
+          <span class="kpi">שער־בלבד <b>${g.gate_only}</b></span>
+          ${report}
+          <div class="review-sec"><h4>הדוגמאות האחרונות</h4>${rows}</div>
+          <div class="hint">בצד שאלות הזהב שנקלטות מאליהן יש גם סטים שנערכים ביד
+            (<code>eval/goldset.yaml</code> ואחיו) — זהב אמיתי עורכים, לא מקליקים.</div>
+        </div>`);
+    }
+    window.openGold = openGold;
+
+    // -- the guide (G2): the walkthrough lives IN the app, offline ----------------
+    function openGuide() {
+      mkOverlay(`<div class="reader-head" dir="rtl">
+          <span class="title">? מדריך — איך המעיין גדל</span>
+          <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
+        <div class="reader-body" dir="rtl" style="font-family:inherit; font-size:15px; line-height:1.7">
+          <div class="review-sec"><h4>הלולאה — ארבעה צעדים</h4>
+            <div class="src"><b>1 · שאל</b> — כתוב שאלה (או 🎤 דבר). התשובה באה רק מהמקורות, עם ציטוטים —
+              או סירוב כן. שאלה לא שומרת כלום.</div>
+            <div class="src"><b>2 · לַמֵּד</b> — <b>חיבור:</b> סמן ✓ שני מקורות מתחת לתשובה וכתוב את הקשר ביניהם.
+              <b>🌱 זרע:</b> כתוב ידע משלך והמודל יפתח אותו. <b>📖 מונח:</b> הגדר שם קדוש / מונח.
+              <b>🎙 שיעור:</b> הקלט — תמלול יחכה לסקירתך.</div>
+            <div class="src"><b>3 · הכרע</b> — כל מה שהמודל מציע מחכה לך ב־⚖️ הכרעות.
+              אישור מכניס למאגר על שמך; דחייה — כלום לא נכנס. שום דבר לא עוקף אותך.</div>
+            <div class="src"><b>4 · רְאֵה</b> — הידע החדש עולה בתשובות הבאות עם תג
+              <span class="badge expert">expert</span>, כל אישור נוסף כ־🏅 שאלת־זהב (מבחן קבוע),
+              ו״בדוק שהוא עולה →״ מראה מיד שהחיפוש מוצא אותו.</div>
+          </div>
+          <div class="review-sec"><h4>מי ערב לכל פריט — סימני העדות</h4>
+            <div class="hint">● expert — אתה לימדת · ◆ curated — נאסף ביד · ⚙ deterministic — חושב מהטקסט
+              · ◐ derived — המודל הציע ואתה אישרת · ◌ bootstrap — טיוטת מודל שעוד מחכה לאישור</div>
+          </div>
+          <div class="review-sec"><h4>תגי מקור</h4>
+            <div class="hint"><span class="badge">sefaria</span> טקסט מודפס (לקריאה בלבד)
+              · <span class="badge expert">expert</span> החיבורים שלך
+              · <span class="badge derived">derived</span> פיתוח שאושר
+              · <span class="badge term">term</span> מילון
+              · <span class="badge shiur">shiur</span> משיעור מוקלט
+              — כל מה שאינו מודפס ניתן למחיקה (Retract) עם סיבה.</div>
+          </div>
+          <div class="review-sec"><h4>הכלל האחד</h4>
+            <div class="hint">שום דבר לא נכנס למאגר בלי הכרעה שלך — והמערכת לעולם לא עונה
+              מהזיכרון של המודל, רק מהמקורות שנשלפו.</div>
+          </div>
+        </div>`);
+    }
+    window.openGuide = openGuide;
+
+    // -- verify (R5): "did it learn?" — retrieval only, honest either way --------
+    async function verifyLearned(question, ref, statusId) {
+      const el = $(statusId); if (el) el.textContent = 'בודק…';
+      let v;
+      try {
+        const r = await fetch('/api/verify?question=' + encodeURIComponent(question)
+          + '&ref=' + encodeURIComponent(ref));
+        if (!r.ok) { if (el) el.textContent = 'הבדיקה אינה זמינה בהתקנה זו.'; return; }
+        v = await r.json();
+      } catch (e) { if (el) el.textContent = 'הבדיקה נכשלה.'; return; }
+      if (el) el.textContent = v.found
+        ? `✓ נלמד! עולה במקום ${v.rank} מתוך ${v.top.length} בחיפוש על השאלה הזו.`
+        : 'עדיין לא עולה בחיפוש הזה — נסה לנסח את התובנה קרוב יותר ללשון השאלה.';
+    }
+    window.verifyLearned = verifyLearned;
 
     async function loadStats() {
       try {
@@ -458,19 +760,47 @@
       renderTurns(d.turns);
     }
 
+    // The loop strip (G1): the four steps, taught where the work starts —
+    // an empty thread. Dismissible, remembered, reopenable from the ? guide.
+    const LOOPSTRIP_KEY = 'maayan.loopstrip.dismissed';
+    function loopStripHTML() {
+      if (localStorage.getItem(LOOPSTRIP_KEY)) return '';
+      return `<div class="loopstrip" dir="rtl">
+        <button class="ghost dismiss" onclick="dismissLoopStrip()" title="הסתר (יישאר במדריך ?)">✕</button>
+        <b>איך המעיין גדל</b> <span class="hint">— ארבעה צעדים, שוב ושוב:</span>
+        <div class="steps">
+          <div class="step"><b>1 · שאל</b><span class="hint">תשובה מצוטטת מהמקורות — או סירוב כן. כלום לא נשמר.</span></div>
+          <div class="step"><b>2 · לַמֵּד</b><span class="hint">סמן ✓ שני מקורות ולמד חיבור, או 🌱 זרע / 📖 מונח / 🎙 שיעור.</span></div>
+          <div class="step"><b>3 · הכרע</b><span class="hint">מה שהמודל מציע מחכה ב־⚖️ — אישור או דחייה שלך.</span></div>
+          <div class="step"><b>4 · רְאֵה</b><span class="hint">הידע עולה בתשובות הבאות, וכל אישור נהיה 🏅 שאלת־זהב.</span></div>
+        </div></div>`;
+    }
+    function dismissLoopStrip() {
+      localStorage.setItem(LOOPSTRIP_KEY, '1');
+      const el = document.querySelector('.loopstrip'); if (el) el.remove();
+    }
+    window.dismissLoopStrip = dismissLoopStrip;
+
     function renderTurns(turns) {
-      if (!turns.length) { $('turns').innerHTML = '<div class="empty">Ask a question or plant a seed to begin.</div>'; return; }
+      if (!turns.length) {
+        $('turns').innerHTML = '<div class="empty">שאל שאלה — או פתח 🌱 זרע ולַמֵּד ידע חדש.</div>'
+          + loopStripHTML();
+        return;
+      }
       $('turns').innerHTML = turns.map(t => {
         let extra = '';
         if (t.turn_type === 'seed' && t.is_seed) {
-          if (t.directive) extra += `<div class="hint">directive: ${esc(t.directive)}</div>`;
-          extra += `<div class="actions"><button class="ghost" onclick="developSeed('${t.record_id}')">Develop this →</button></div>`;
+          if (t.directive) extra += `<div class="hint">הנחיה לפיתוח: ${esc(t.directive)}</div>`;
+          extra += `<div class="actions"><button class="ghost" onclick="developSeed('${t.record_id}')"
+            title="המודל יציע פיתוח מצוטט — ואתה תכריע">פתח ▸ Develop</button></div>`;
         }
         if (t.turn_type === 'development') {
-          if (t.grounded_in && t.grounded_in.length) extra += `<div class="hint">grounded in: ${esc(t.grounded_in.join(', '))}</div>`;
+          if (t.grounded_in && t.grounded_in.length) extra += `<div class="hint">מבוסס על: ${esc(t.grounded_in.join(', '))}</div>`;
           if (t.status === 'proposed' && t.grounded)
-            extra += `<div class="actions"><button onclick="decide('${t.record_id}','approve')">Approve</button>`
-                   + `<button class="secondary" onclick="decide('${t.record_id}','reject')">Reject</button></div>`;
+            extra += `<div class="actions"><button onclick="decide('${t.record_id}','approve')"
+                        title="ייכנס למאגר כ־derived על שמך">✓ אשר</button>`
+                   + `<button class="secondary" onclick="decide('${t.record_id}','reject')"
+                        title="שום דבר לא ייכנס">✗ דחה</button></div>`;
         }
         const statusBadge = t.status ? `<span class="badge ${t.status}">${t.status}</span>` : '';
         return `<div class="turn ${t.turn_type}">
@@ -514,62 +844,106 @@
       // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
       const connect = sources.length >= 2 ? `
         <div class="connect">
-          <div class="hint">Teach a connection — tick two or more sources above (e.g. Tanya ↔ Likutei Torah), write the insight, Connect.</div>
-          <input id="connectBody" dir="auto" placeholder="Your insight linking the ticked sources…" />
+          <div class="hint"><b>לַמֵּד חיבור</b> — סמן ✓ שניים או יותר מהמקורות למעלה
+            (למשל תניא ↔ לקוטי תורה), כתוב את הקשר ביניהם, ולחץ. החיבור נשמר על שמך
+            ויעלה בשאלות הבאות.</div>
+          <input id="connectBody" dir="auto" placeholder="התובנה שמקשרת את המקורות המסומנים…" />
           <div class="row" style="margin-top:6px">
-            <input id="connectAuthor" placeholder="Your name (required)" />
-            <button onclick="connectSelected()">Connect selected →</button>
+            <input id="connectAuthor" placeholder="השם שלך (חובה — הידע נרשם עליך)" />
+            <button onclick="connectSelected()">חבר ✓ Connect →</button>
           </div>
           <span id="connectStatus" class="hint"></span>
+        </div>` : '';
+      // A refusal is not a dead end (C7): the corpus can't answer — so teach it.
+      // The question was already logged to שאלות לרב by the ask telemetry.
+      const teach = !data.grounded ? `
+        <div class="connect" style="border-color:var(--seed)">
+          <div class="hint">אין למעיין מקורות לשאלה זו — <b>עדיין</b>. השאלה נרשמה בשאלות לרב;
+            אפשר ללמד אותה עכשיו:</div>
+          <div class="actions">
+            <button class="secondary" onclick="teachFromRefusal()">🌱 לַמֵּד מזה — פתח זרע עם השאלה</button>
+            <button class="ghost" onclick="openGuide()">איך מלמדים? ▸</button>
+          </div>
         </div>` : '';
       // Chavrusa answers (Prompt 39) carry a link to the study trace — the stepper that
       // shows how the sugya was worked. A refusal has no trace (nothing was studied).
       const traceLink = data.trace_id
         ? `<div class="actions"><button class="ghost" onclick="openTrace('${esc(data.trace_id)}')"
              title="How the chavrusa studied this — search, open, follow, conclude">כיצד נלמד? ▸</button></div>` : '';
+      const readHint = data.grounded && sources.length
+        ? `<div class="hint">הקש על מקור לקריאה בהקשר · גליון ▸ מראה מה ידוע סביבו</div>` : '';
       $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer${data.trace_id ? ' · חברותא' : ''}</div>
-        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${traceLink}${srcs}${connect}</div>`;
+        <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
       const ca = $('connectAuthor');
       if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
       const cb = $('connectBody');                       // dictation + OCR on the connection insight
       if (cb) { cb.insertAdjacentElement('afterend', mkOcr(cb)); cb.insertAdjacentElement('afterend', mkMic(cb)); }
     }
 
+    // C7: turn a refusal into teaching — the question becomes the seed's directive.
+    function teachFromRefusal() {
+      const q = lastAnswer ? lastAnswer.question : '';
+      $('seedBox').classList.remove('hidden');
+      if (q && !$('directive').value) $('directive').value = q;
+      $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      $('seedBody').focus();
+      toast('כתוב את הידע שלך בזרע; השאלה כבר ממתינה כהנחיה לפיתוח.');
+    }
+    window.teachFromRefusal = teachFromRefusal;
+
     async function connectSelected() {
       const status = $('connectStatus');
       const picks = [...document.querySelectorAll('.srcpick:checked')];
       const refs = picks.map(el => lastAnswer.sources[+el.dataset.idx].ref);
-      if (refs.length < 2) { status.textContent = 'Tick at least two sources to connect.'; return; }
+      if (refs.length < 2) { status.textContent = 'סמן ✓ לפחות שני מקורות — חיבור צריך שני קצוות.'; return; }
       const author = $('connectAuthor').value.trim();
-      if (!author) { status.textContent = 'Author is required.'; $('connectAuthor').focus(); return; }
+      if (!author) { status.textContent = 'שם נדרש — החיבור נרשם עליך.'; $('connectAuthor').focus(); return; }
       const body = $('connectBody').value.trim();
-      if (!body) { status.textContent = 'Write the insight that links them.'; return; }
+      if (!body) { status.textContent = 'כתוב את התובנה שמקשרת ביניהם.'; return; }
       localStorage.setItem(AUTHOR_KEY, author);
       const r = await fetch('/annotate', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ session_id: lastAnswer.session_id, author, kind: 'connection', body, linked_refs: refs }) });
       if (r.ok) {
-        status.textContent = `Connected ✓ — saved to the Knowledge base (${refs.length} sources linked); it will surface on future questions.`;
+        // C4: confirm with consequences — what entered, that a gold example was
+        // captured, and a one-click retrieval check ("did it learn?").
+        const resp = await j(r);
+        const vref = 'Expert · connection · ' + String(resp.annotation_id).slice(0, 8);
+        status.innerHTML = `נשמר ✓ החיבור נכנס למאגר (${refs.length} מקורות מקושרים)`
+          + ` — וגם נוסף כ־🏅 שאלת־זהב (מבחן קבוע). `
+          + `<button class="ghost" onclick='verifyLearned(${attr(lastAnswer.question)}, ${attr(vref)}, "connectStatus2")'>בדוק שהוא עולה →</button>`
+          + `<span id="connectStatus2" class="hint"></span>`;
         $('connectBody').value = '';
         picks.forEach(el => { el.checked = false; });
-      } else { const e = await j(r); status.textContent = 'Error: ' + (e.detail || r.status); }
+        loadReviewCount();
+      } else { const e = await j(r); status.textContent = 'שגיאה: ' + (e.detail || r.status); }
     }
     window.connectSelected = connectSelected;
 
-    async function retractSource(i) {
+    function retractSource(i) {
       const src = lastAnswer && lastAnswer.sources[i];
       if (!src) return;
-      // Author is required + sticky (as Prompt 9); a reason is requested.
-      const author = (prompt('Retract “' + src.ref + '”.\nYour name (required):',
-        localStorage.getItem(AUTHOR_KEY) || '') || '').trim();
-      if (!author) return;
-      localStorage.setItem(AUTHOR_KEY, author);
-      const reason = (prompt('Why are you retracting it? (e.g. superseded / typo / wrong)', '') || '').trim();
-      const r = await fetch('/retract', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ target: src.ref, author, reason }) });
-      const status = $('connectStatus');
-      if (r.ok) {
-        if (status) status.textContent = `Retracted ✓ — “${src.ref}” left the corpus (it stays gone across a rebuild).`;
-      } else { const e = await j(r); alert('Could not retract: ' + (e.detail || r.status)); }
+      // The audited eraser deserves a real form (R6): target shown, reason recorded,
+      // author sticky. Cancel does nothing.
+      mkModal({
+        title: 'מחיקה מהמאגר · Retract',
+        context: '"' + src.ref + '"\nהמחיקה נרשמת (מי ולמה) ונשמרת גם אחרי בנייה מחדש. הטקסט המודפס לעולם אינו נמחק.',
+        fields: [
+          { id: 'author', label: 'השם שלך (חובה)', value: localStorage.getItem(AUTHOR_KEY) || '' },
+          { id: 'reason', label: 'למה? (e.g. הוחלף / טעות / שגוי)', placeholder: 'הסיבה נשמרת ביומן' },
+        ],
+        submitLabel: 'מחק ✕',
+        onSubmit: async (v, err, close) => {
+          if (!v.author) { err('שם נדרש — מחיקה נרשמת.'); return; }
+          localStorage.setItem(AUTHOR_KEY, v.author);
+          const r = await fetch('/retract', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ target: src.ref, author: v.author, reason: v.reason }) });
+          if (r.ok) {
+            close();
+            toast(`נמחק ✓ — "${src.ref}" יצא מהמאגר (וגם שאלת־הזהב שנולדה ממנו הוסרה).`);
+            loadStats();
+          } else { const e = await j(r); err('לא ניתן למחוק: ' + (e.detail || r.status)); }
+        },
+      });
     }
     window.retractSource = retractSource;
 
@@ -593,31 +967,32 @@
         $('q').value = '';
         await openThread(active);
         renderAnswerSources(data);
-      } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'Ask'; }
+      } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'שאל · Ask'; }
     }
 
     async function plantSeed() {
       const author = $('author').value.trim();
-      if (!author) { $('seedStatus').textContent = 'Author is required.'; $('author').focus(); return; }
+      if (!author) { $('seedStatus').textContent = 'שם נדרש — הזרע נרשם עליך.'; $('author').focus(); return; }
       const body = $('seedBody').value.trim();
-      if (!body) { $('seedStatus').textContent = 'Write the seed knowledge first.'; return; }
+      if (!body) { $('seedStatus').textContent = 'כתוב קודם את הידע עצמו.'; return; }
       if (!active) await newTopic(body.slice(0, 48));
       localStorage.setItem(AUTHOR_KEY, author);
       const r = await fetch('/threads/' + active + '/seed', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ author, kind: $('kind').value, body, directive: $('directive').value.trim() || null }) });
       if (r.ok) { $('seedBody').value = ''; $('directive').value = '';
-        $('seedStatus').textContent = 'Seed planted — click “Develop this”.'; await openThread(active);
-      } else { const e = await j(r); $('seedStatus').textContent = 'Error: ' + (e.detail || r.status); }
+        $('seedStatus').textContent = 'הזרע נשתל ✓ עכשיו: לחץ “פתח ▸ Develop” בשיחה — המודל יציע פיתוח, ואתה תכריע.';
+        await openThread(active);
+      } else { const e = await j(r); $('seedStatus').textContent = 'שגיאה: ' + (e.detail || r.status); }
     }
 
     const splitList = (v) => v.split(',').map(s => s.trim()).filter(Boolean);
 
     async function defineTerm() {
       const author = $('termAuthor').value.trim();
-      if (!author) { $('termStatus').textContent = 'Author is required.'; $('termAuthor').focus(); return; }
+      if (!author) { $('termStatus').textContent = 'שם נדרש — המונח נרשם עליך.'; $('termAuthor').focus(); return; }
       const canonical = $('termCanonical').value.trim();
       const definition = $('termDef').value.trim();
-      if (!canonical || !definition) { $('termStatus').textContent = 'Canonical form and definition are required.'; return; }
+      if (!canonical || !definition) { $('termStatus').textContent = 'צורה קנונית והגדרה — שתיהן נדרשות.'; return; }
       localStorage.setItem(AUTHOR_KEY, author);
       const gem = $('termGematria').value.trim();
       const body = {
@@ -628,23 +1003,28 @@
       };
       const r = await fetch('/terms', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (r.ok) { const t = await j(r);
-        $('termStatus').textContent = `Defined “${t.canonical}” — it will now surface in retrieval.`;
+        $('termStatus').textContent = `"${t.canonical}" הוגדר ✓ — נכנס למילון, יעלה בחיפושים, ונוסף כ־🏅 שאלת־זהב.`;
         ['termCanonical','termDef','termSurfaces','termRelated','termGematria'].forEach(id => $(id).value = '');
         $('termSacred').checked = false; await loadTerms();
-      } else { const e = await j(r); $('termStatus').textContent = 'Error: ' + (e.detail || r.status); }
+      } else { const e = await j(r); $('termStatus').textContent = 'שגיאה: ' + (e.detail || r.status); }
     }
 
     async function developSeed(seedId) {
+      toast('המודל מפתח את הזרע — מצוטט מהמקורות, או סירוב כן…');
       const r = await fetch('/threads/' + active + '/develop', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ seed_id: seedId }) });
-      if (r.ok) await openThread(active);
-      else { const e = await j(r); alert('Error: ' + (e.detail || r.status)); }
+      if (r.ok) { await openThread(active); loadReviewCount(); }
+      else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
     }
 
     async function decide(devId, action) {
       const r = await fetch('/developments/' + devId + '/' + action, { method:'POST' });
-      if (r.ok) await openThread(active);
-      else { const e = await j(r); alert('Error: ' + (e.detail || r.status)); }
+      if (r.ok) {
+        toast(action === 'approve'
+          ? 'אושר ✓ — נכנס למאגר כ־derived, ונוסף כ־🏅 שאלת־זהב.'
+          : 'נדחה — שום דבר לא נכנס למאגר.');
+        await openThread(active); loadReviewCount();
+      } else { const e = await j(r); toast('שגיאה: ' + (e.detail || r.status)); }
     }
     window.developSeed = developSeed; window.decide = decide;
 
@@ -708,16 +1088,33 @@
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
       a.download = 'composition.md'; a.click();
     }
-    async function composePromote(i) {
+    function composePromote(i) {
       if (!lastComposition) return;
       const author = ($('composeAuthor').value || localStorage.getItem(AUTHOR_KEY) || '').trim();
-      if (!author) { alert('Author is required.'); return; }
-      const insight = (prompt('Your insight linking this section’s sources:', '') || '').trim();
-      if (!insight) return;
-      const r = await fetch('/compositions/' + lastComposition.id + '/promote', { method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ section_index: i, author, insight }) });
-      if (r.ok) { $('composeStatus').textContent = 'Connection promoted to the corpus ✓'; loadStats(); }
-      else { const e = await j(r); alert('Could not promote: ' + (e.detail || r.status)); }
+      const s = lastComposition.sections[i];
+      mkModal({
+        title: 'קדם חיבור למאגר · Promote',
+        context: (s ? s.heading + '\n' : '') + 'הפרוזה של הסעיף לא נכנסת — רק החיבור בין מקורותיו, על שמך.',
+        fields: [
+          ...(author ? [] : [{ id: 'author', label: 'השם שלך (חובה)' }]),
+          { id: 'insight', label: 'התובנה שמקשרת את מקורות הסעיף', textarea: true },
+        ],
+        submitLabel: 'קדם →',
+        onSubmit: async (v, err, close) => {
+          const finalAuthor = author || v.author;
+          if (!finalAuthor) { err('שם נדרש.'); return; }
+          if (!v.insight) { err('כתוב את התובנה.'); return; }
+          localStorage.setItem(AUTHOR_KEY, finalAuthor);
+          const r = await fetch('/compositions/' + lastComposition.id + '/promote', { method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ section_index: i, author: finalAuthor, insight: v.insight }) });
+          if (r.ok) {
+            close();
+            $('composeStatus').textContent = 'החיבור קודם למאגר ✓ (ונוסף כשאלת־זהב)';
+            loadStats(); loadReviewCount();
+          } else { const e = await j(r); err('לא ניתן לקדם: ' + (e.detail || r.status)); }
+        },
+      });
     }
     window.composeFill = composeFill; window.composeReview = composeReview;
     window.composeExport = composeExport; window.composePromote = composePromote;
@@ -749,7 +1146,12 @@
     const savedAuthor = localStorage.getItem(AUTHOR_KEY) || '';
     $('author').value = savedAuthor; $('termAuthor').value = savedAuthor;
     $('composeAuthor').value = savedAuthor;
-    loadKinds(); loadThreads(); loadTerms(); loadStats(); loadInquiries();
+    $('reviewBtn').onclick = () => openReview();
+    $('goldBtn').onclick = () => openGold();
+    $('guideBtn').onclick = () => openGuide();
+    loadKinds(); loadThreads(); loadTerms(); loadStats(); loadReviewCount();
+    // First landing (no thread open yet): teach the loop where the work starts.
+    if (!active) $('turns').insertAdjacentHTML('beforeend', loopStripHTML());
 
     // -- PWA: register the service worker (no-op where unsupported) ----------
     if ('serviceWorker' in navigator) {
@@ -1308,20 +1710,22 @@
           <div dir="auto">${esc(it.text)}</div>
           <div class="meta">
             <span class="hint">${esc(it.author)}</span>
-            <select class="moveThread"><option value="">move to thread…</option>${threadOpts}</select>
-            <button class="ghost" data-move="${esc(it.id)}">Move →</button>
+            <select class="moveThread"><option value="">העבר לנושא…</option>${threadOpts}</select>
+            <button class="ghost" data-move="${esc(it.id)}">העבר 🌱</button>
           </div>
-        </div>`).join('') || '<div class="hint">Inbox empty — capture a thought above.</div>';
-      mkOverlay(`<div class="reader-head"><span class="title">📥 Quick-capture inbox</span>
+        </div>`).join('') || '<div class="hint">אין מחשבות ממתינות — קלוט אחת למעלה, ומיין כשנוח.</div>';
+      mkOverlay(`<div class="reader-head"><span class="title">📥 מחשבות — קלוט עכשיו, מיין אחר כך</span>
            <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
-         <div class="reader-body">
+         <div class="reader-body" style="font-family:inherit; font-size:15px; line-height:1.6">
+           <div class="hint" style="margin-bottom:8px">מחשבה שנקלטת כאן היא פתק פרטי — היא לא נכנסת למאגר.
+             כשתעביר אותה לנושא היא תהפוך לזרע 🌱 שמחכה להכרעתך.</div>
            <div class="inbox-item">
-             <label class="field with-mic"><span>Capture a thought</span>
+             <label class="field with-mic"><span>קלוט מחשבה</span>
                <button id="micInbox" type="button" class="mic" title="Dictate">🎤</button></label>
-             <textarea id="inboxText" rows="2" dir="auto" placeholder="A fleeting idea — triage into a thread later…"></textarea>
+             <textarea id="inboxText" rows="2" dir="auto" placeholder="רעיון חולף — תמיין לנושא אחר כך…"></textarea>
              <div class="meta">
-               <input id="inboxAuthor" placeholder="Your name (required)" value="${esc(author)}" />
-               <button id="inboxSaveBtn">Capture</button><span id="inboxStatus" class="hint"></span>
+               <input id="inboxAuthor" placeholder="השם שלך (חובה)" value="${esc(author)}" />
+               <button id="inboxSaveBtn">קלוט 📥</button><span id="inboxStatus" class="hint"></span>
              </div>
            </div>
            ${list}
@@ -1341,15 +1745,15 @@
       localStorage.setItem(AUTHOR_KEY, author);
       const r = await fetch('/api/inbox', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, author }) });
-      if (r.ok) { openInbox(); }                  // re-render with the new item parked
-      else { const e = await j(r); $('inboxStatus').textContent = 'Error: ' + ((e && e.detail) || r.status); }
+      if (r.ok) { loadReviewCount(); openInbox(); }   // re-render with the new item parked
+      else { const e = await j(r); $('inboxStatus').textContent = 'שגיאה: ' + ((e && e.detail) || r.status); }
     }
     async function moveInbox(itemId, threadId) {
-      if (!threadId) { toast('Pick a thread to move into.'); return; }
+      if (!threadId) { toast('בחר נושא להעביר אליו.'); return; }
       const r = await fetch('/api/inbox/' + itemId + '/move', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread_id: threadId }) });
-      if (r.ok) { toast('Moved to thread as a seed — develop it there.'); openInbox(); }
-      else { const e = await j(r); toast('Could not move: ' + ((e && e.detail) || r.status)); }
+      if (r.ok) { toast('עבר לנושא כזרע 🌱 — שם תלחץ “פתח ▸ Develop” ותכריע.'); loadReviewCount(); openInbox(); }
+      else { const e = await j(r); toast('לא ניתן להעביר: ' + ((e && e.detail) || r.status)); }
     }
     window.openInbox = openInbox;
     if ($('inboxBtn')) $('inboxBtn').onclick = openInbox;
@@ -1376,8 +1780,9 @@
       b.style.cssText = 'border:1px solid #e6e0d5; background:#fff; border-radius:7px; padding:5px 10px; cursor:pointer; font-size:13px;';
       return b;
     };
+    // The header is a flex row (nav buttons live at its end) — join it, don't float over it.
     const bar = document.createElement('div');
-    bar.style.cssText = 'position:absolute; top:14px; right:22px; display:flex; gap:10px; align-items:center; font-size:13px; color:#8a8275;';
+    bar.style.cssText = 'display:flex; gap:10px; align-items:center; font-size:13px; color:#8a8275; flex:0 0 auto;';
     const who = document.createElement('span');
     who.textContent = user.display_name + (user.role === 'admin' ? ' · admin' : '');
     bar.appendChild(who);
@@ -1386,7 +1791,7 @@
     lo.onclick = async function () { await fetch('/api/logout', { method: 'POST' }); window.location.href = '/login'; };
     bar.appendChild(lo);
     const header = document.querySelector('header');
-    if (header) { header.style.position = 'relative'; header.appendChild(bar); }
+    if (header) header.appendChild(bar);
 
     // 3) admin-only Users panel
     async function openUsers() {
