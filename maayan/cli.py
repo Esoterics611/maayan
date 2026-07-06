@@ -1907,6 +1907,8 @@ def ui() -> None:
         apparatus=apparatus,
         traces=_trace_store(settings),
         agent=build_agent_service(settings, retriever, rag, backend),
+        captured=_captured_store(settings),
+        retriever=retriever,
         settings=settings,
         ocr_lang=settings.ocr_lang,
         context_turns=settings.thread_context_turns,
@@ -1943,6 +1945,12 @@ def _trace_store(settings: Settings) -> Any:
     from maayan.agent.store import TraceStore
 
     return TraceStore(settings.db_path)
+
+
+def _captured_store(settings: Settings) -> Any:
+    from maayan.eval.captured import CapturedGoldsetStore
+
+    return CapturedGoldsetStore(settings.db_path)
 
 
 def _parse_endpoint(

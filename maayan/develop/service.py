@@ -161,6 +161,14 @@ class DevelopmentService:
     def get_development(self, development_id: str) -> Development | None:
         return self._store.get_development(development_id)
 
+    def list_developments(self, *, status: str | None = None) -> list[Development]:
+        """All developments (across threads), optionally filtered by status.
+
+        Feeds the Review workbench: `status="proposed"` is what awaits judgment.
+        """
+        devs = self._store.list_developments()
+        return [d for d in devs if status is None or d.status == status]
+
     def _require(self, development_id: str) -> Development:
         dev = self._store.get_development(development_id)
         if dev is None:

@@ -391,3 +391,100 @@ class MoveInboxRequest(BaseModel):
     thread_id: str
     kind: str = "addition"
     directive: str | None = None
+
+
+# -- the Review workbench (הכרעות): one queue for every gate ------------------
+class DevelopmentReviewOut(BaseModel):
+    """A proposed development awaiting judgment, listed across all threads."""
+
+    id: str
+    thread_id: str
+    seed_id: str
+    author: str
+    status: str
+    grounded: bool
+    text: str
+    cited_refs: list[str] = Field(default_factory=list)
+    grounded_in: list[str] = Field(default_factory=list)
+    created_at: str
+
+
+class RelationReviewOut(BaseModel):
+    """A proposed graph edge (e.g. a study-program draft) awaiting judgment."""
+
+    id: str
+    subject_label: str
+    object_label: str
+    rel_type: str
+    evidence: str
+    confidence: float
+    status: str
+    author: str
+    note: str | None = None
+    created_at: str
+
+
+class ReviewQueueResponse(BaseModel):
+    """Everything waiting for the scholar's click, in one place."""
+
+    developments: list[DevelopmentReviewOut] = Field(default_factory=list)
+    relations: list[RelationReviewOut] = Field(default_factory=list)
+    inquiries: list[InquiryOut] = Field(default_factory=list)
+    inbox: list[InboxItemOut] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    total: int = 0
+    # The day's harvest (answered inquiries by kind) — encouragement, not telemetry.
+    harvest: dict[str, int] = Field(default_factory=dict)
+
+
+class ApproveRelationRequest(BaseModel):
+    """Author for the attributed graph gate; omitted when auth supplies identity."""
+
+    author: str | None = None
+
+
+# -- the Gold panel (שאלות זהב): the eval flywheel, visible -------------------
+class GoldExampleOut(BaseModel):
+    """One captured regression example — an approval that became a permanent test."""
+
+    id: str
+    question: str
+    expected_refs: list[str] = Field(default_factory=list)
+    origin_kind: str
+    created_at: str
+    retracted: bool = False
+
+
+class GoldReportOut(BaseModel):
+    """The latest `eval --captured` run, surfaced read-only."""
+
+    date: str
+    n_ranked: int
+    n_gate_only: int
+    hit: dict[str, float] = Field(default_factory=dict)
+    recall: dict[str, float] = Field(default_factory=dict)
+    mrr: float = 0.0
+    answer_rate: float = 0.0
+
+
+class GoldsetResponse(BaseModel):
+    total: int
+    by_origin: dict[str, int] = Field(default_factory=dict)
+    gate_only: int = 0  # examples that test only the refusal gate (no expected refs)
+    examples: list[GoldExampleOut] = Field(default_factory=list)
+    last_report: GoldReportOut | None = None
+
+
+# -- verify (R5): retrieval-only "did it learn?" — never calls the model ------
+class VerifyHit(BaseModel):
+    ref: str
+    source: str
+    score: float
+
+
+class VerifyResponse(BaseModel):
+    question: str
+    ref: str
+    found: bool
+    rank: int | None = None  # 1-based position of `ref` among the results, when found
+    top: list[VerifyHit] = Field(default_factory=list)

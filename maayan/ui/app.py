@@ -33,8 +33,10 @@ from maayan.config import Settings
 from maayan.corpus.store import ChunkStore
 from maayan.develop.models import Development
 from maayan.develop.service import DevelopmentService
+from maayan.eval.captured import CapturedGoldsetStore, load_previous_report
 from maayan.generate.rag import Answer, RAGService
 from maayan.graph.apparatus import Apparatus, ApparatusService
+from maayan.graph.models import Relation
 from maayan.graph.store import GraphStore
 from maayan.inbox.models import InboxItem
 from maayan.inbox.service import InboxService
@@ -47,6 +49,7 @@ from maayan.lexicon.service import TermService
 from maayan.ocr.base import OCRer
 from maayan.retract.service import Retracting
 from maayan.retrieve.models import SearchResult
+from maayan.retrieve.retriever import Retrieving
 from maayan.stats.models import Stats
 from maayan.stats.service import Statsing
 from maayan.threads.flow import ask_in_thread
@@ -59,6 +62,7 @@ from maayan.ui.models import (
     AnnotateResponse,
     AnnotationOut,
     AnswerInquiryRequest,
+    ApproveRelationRequest,
     ApproveTranscriptRequest,
     ApproveTranscriptResponse,
     AskInThreadRequest,
@@ -70,8 +74,12 @@ from maayan.ui.models import (
     CreateThreadRequest,
     CreateUserRequest,
     DevelopmentResponse,
+    DevelopmentReviewOut,
     DevelopRequest,
     ExportResponse,
+    GoldExampleOut,
+    GoldReportOut,
+    GoldsetResponse,
     InboxItemOut,
     InquiriesResponse,
     InquiryOut,
@@ -82,8 +90,10 @@ from maayan.ui.models import (
     MoveInboxRequest,
     OcrResponse,
     PromoteRequest,
+    RelationReviewOut,
     RetractRequest,
     RetractResponse,
+    ReviewQueueResponse,
     SectionEntry,
     SectionOut,
     SectionsResponse,
@@ -101,6 +111,8 @@ from maayan.ui.models import (
     ThreadOut,
     TurnOut,
     UpdateSegmentRequest,
+    VerifyHit,
+    VerifyResponse,
     ViaOut,
 )
 from maayan.users.models import User, UserOut
@@ -125,6 +137,26 @@ def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
         audio_id=meta.get("audio_id") if is_shiur else None,
         start_s=meta.get("start_s") if is_shiur else None,
         via=via,
+    )
+
+
+def _relation_out(rel: Relation, graph: GraphStore | None) -> RelationReviewOut:
+    def label(ep: object) -> str:
+        ref = getattr(ep, "ref", None)
+        if ref is not None:
+            return str(ref)
+        concept_id = str(getattr(ep, "concept_id", ""))
+        if graph is not None:
+            concept = graph.get_concept(concept_id)
+            if concept is not None:
+                return concept.canonical
+        return concept_id
+
+    return RelationReviewOut(
+        id=rel.id, subject_label=label(rel.subject), object_label=label(rel.object),
+        rel_type=rel.rel_type, evidence=rel.evidence, confidence=rel.confidence,
+        status=rel.status, author=rel.author, note=rel.note,
+        created_at=rel.created_at.isoformat(),
     )
 
 
@@ -231,6 +263,8 @@ def create_app(
     apparatus: ApparatusService | None = None,
     traces: TraceStore | None = None,
     agent: AgentService | None = None,
+    captured: CapturedGoldsetStore | None = None,
+    retriever: Retrieving | None = None,
     settings: Settings | None = None,
     ocr_lang: str = "heb",
     context_turns: int = 6,
@@ -646,6 +680,123 @@ def create_app(
             return _inquiry_out(_inquiry_store().mark_dismissed(item_id))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # -- the Review workbench (הכרעות): one queue for every gate (UI redesign R3) --
+    # Kinds whose service isn't injected simply contribute nothing — inert, never 503,
+    # so the queue is always openable and honest about what it can see.
+    @app.get("/api/review/queue")
+    def review_queue() -> ReviewQueueResponse:
+        devs = [
+            DevelopmentReviewOut(
+                id=d.id, thread_id=d.thread_id, seed_id=d.seed_id, author=d.author,
+                status=d.status, grounded=d.grounded, text=d.text,
+                cited_refs=d.cited_refs, grounded_in=d.grounded_in,
+                created_at=d.timestamp.isoformat(),
+            )
+            for d in develop.list_developments(status="proposed")
+        ]
+        rels = (
+            [_relation_out(r, graph) for r in graph.list_relations(status="proposed")]
+            if graph is not None
+            else []
+        )
+        inq_items = (
+            [_inquiry_out(i) for i in inquiries.list(status="open")]
+            if inquiries is not None
+            else []
+        )
+        inbox_items = [_inbox_out(i) for i in inbox.list_open()] if inbox is not None else []
+        counts = {
+            "developments": len(devs), "relations": len(rels),
+            "inquiries": len(inq_items), "inbox": len(inbox_items),
+        }
+        return ReviewQueueResponse(
+            developments=devs, relations=rels, inquiries=inq_items, inbox=inbox_items,
+            counts=counts, total=sum(counts.values()),
+            harvest=inquiries.harvest_today() if inquiries is not None else {},
+        )
+
+    # First UI gate for study-program output: proposed graph edges, approved/rejected
+    # here instead of `maayan graph approve` in a terminal. The gate stays attributed.
+    @app.post("/api/relations/{relation_id}/approve")
+    def approve_relation(
+        relation_id: str, req: ApproveRelationRequest, request: Request
+    ) -> RelationReviewOut:
+        if graph is None:  # graph wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="graph not configured")
+        user: User | None = getattr(request.state, "user", None)
+        author = (user.display_name if user is not None else (req.author or "")).strip()
+        if not author:
+            raise HTTPException(status_code=400, detail="author is required")
+        try:
+            rel = graph.approve(relation_id, author=author)
+        except ValueError as exc:
+            code = 404 if "no relation" in str(exc).lower() else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        return _relation_out(rel, graph)
+
+    @app.post("/api/relations/{relation_id}/reject")
+    def reject_relation(relation_id: str) -> RelationReviewOut:
+        if graph is None:  # graph wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="graph not configured")
+        rel = graph.get_relation(relation_id)
+        if rel is None:
+            raise HTTPException(status_code=404, detail="Relation not found")
+        graph.mark_retracted(relation_id)  # mirrors `maayan graph retract`
+        return _relation_out(graph.get_relation(relation_id) or rel, graph)
+
+    # -- the Gold panel (שאלות זהב): the eval flywheel, read-only (UI redesign R4) --
+    @app.get("/api/goldset")
+    def goldset() -> GoldsetResponse:
+        if captured is None:  # flywheel wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="captured goldset not configured")
+        examples = captured.list_examples(include_retracted=True)
+        live = [e for e in examples if not e.retracted]
+        by_origin: dict[str, int] = {}
+        for e in live:
+            by_origin[e.origin.kind] = by_origin.get(e.origin.kind, 0) + 1
+        report: GoldReportOut | None = None
+        if settings is not None:
+            rec = load_previous_report(settings.captured_reports_dir)
+            if rec is not None:
+                report = GoldReportOut(
+                    date=rec.date, n_ranked=rec.n_ranked, n_gate_only=rec.n_gate_only,
+                    hit=rec.hit, recall=rec.recall, mrr=rec.mrr, answer_rate=rec.answer_rate,
+                )
+        newest_first = sorted(examples, key=lambda e: e.created_at, reverse=True)[:50]
+        return GoldsetResponse(
+            total=len(live),
+            by_origin=by_origin,
+            gate_only=sum(1 for e in live if not e.expected_refs),
+            examples=[
+                GoldExampleOut(
+                    id=e.id, question=e.question, expected_refs=e.expected_refs,
+                    origin_kind=e.origin.kind, created_at=e.created_at.isoformat(),
+                    retracted=e.retracted,
+                )
+                for e in newest_first
+            ],
+            last_report=report,
+        )
+
+    # -- verify (R5): "did it learn?" — retrieval only, never a model call ----------
+    @app.get("/api/verify")
+    def verify_learned(question: str, ref: str = "", k: int | None = None) -> VerifyResponse:
+        if retriever is None:  # retriever wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="verify not configured")
+        retrieval = retriever.retrieve(question, k=k)
+        rank: int | None = None
+        if ref:
+            for i, hit in enumerate(retrieval.results):
+                # Prefix-match so "Expert · connection · ab12cd34" finds its chunk ref.
+                if hit.ref == ref or hit.ref.startswith(ref):
+                    rank = i + 1
+                    break
+        return VerifyResponse(
+            question=question, ref=ref, found=rank is not None, rank=rank,
+            top=[VerifyHit(ref=h.ref, source=h.source, score=h.score)
+                 for h in retrieval.results[:8]],
+        )
 
     # -- composition (brief → outline → fill → review → export) -------------
     @app.post("/compose")
