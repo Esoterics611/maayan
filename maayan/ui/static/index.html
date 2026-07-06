@@ -389,6 +389,25 @@
       }
       return r.json();
     }
+    // Guard slow actions (approve / develop / connect / seed …): show a pending state on the
+    // button, block duplicate clicks while the request is in flight (so a double-click can't
+    // fire two approvals / two model calls), and surface failures so the user can retry.
+    async function withBusy(btn, fn) {
+      if (!btn || btn.dataset.busy === '1') return;   // ignore re-entrant clicks
+      btn.dataset.busy = '1';
+      const prevHTML = btn.innerHTML, wasDisabled = btn.disabled;
+      btn.disabled = true; btn.innerHTML = '⏳ ' + prevHTML;
+      try {
+        await fn();
+      } catch (e) {
+        toast('שגיאה: ' + (e && e.message ? e.message : 'הפעולה נכשלה — נסה שוב'));
+      } finally {
+        // On success the container usually re-renders (button detached) — nothing to restore.
+        // Otherwise (validation/early-return/error) re-enable so the user can retry.
+        if (btn.isConnected) { btn.disabled = wasDisabled; btn.innerHTML = prevHTML; btn.dataset.busy = ''; }
+      }
+    }
+    window.withBusy = withBusy;
     // The one evidence-badge grammar (UI spec Rule 2) — identical everywhere.
     const EV_GLYPH = {expert:'●', curated:'◆', deterministic:'⚙',
                       derived_approved:'◐', derived_bootstrap:'◌'};
@@ -494,8 +513,8 @@
         ${d.grounded_in && d.grounded_in.length
           ? `<div class="hint">מבוסס על: ${esc(d.grounded_in.join(', '))}</div>` : ''}
         <div class="actions">
-          <button onclick="reviewDecideDev('${esc(d.id)}','approve')">✓ אשר — ייכנס למאגר</button>
-          <button class="secondary" onclick="reviewDecideDev('${esc(d.id)}','reject')">✗ דחה</button>
+          <button onclick="withBusy(this, () => reviewDecideDev('${esc(d.id)}','approve'))">✓ אשר — ייכנס למאגר</button>
+          <button class="secondary" onclick="withBusy(this, () => reviewDecideDev('${esc(d.id)}','reject'))">✗ דחה</button>
           <button class="ghost" onclick="closeOverlay(); openThread('${esc(d.thread_id)}')">פתח בנושא ▸</button>
         </div>`)).join('');
       const relRows = (data.relations || []).map(r => reviewCard(`
@@ -507,8 +526,8 @@
           <span class="srcref" onclick='openReader(${attr(r.object_label)})'>${esc(r.object_label)}</span></div>
         ${r.note ? `<div class="hint" dir="auto">${esc(r.note)}</div>` : ''}
         <div class="actions">
-          <button onclick="approveRelation('${esc(r.id)}')">✓ אשר — אתה הערב לקשר</button>
-          <button class="secondary" onclick="rejectRelation('${esc(r.id)}')">✗ דחה</button>
+          <button onclick="withBusy(this, () => approveRelation('${esc(r.id)}'))">✓ אשר — אתה הערב לקשר</button>
+          <button class="secondary" onclick="withBusy(this, () => rejectRelation('${esc(r.id)}'))">✗ דחה</button>
         </div>`)).join('');
       const inqRows = (data.inquiries || []).map(it => {
         const parts = Object.entries(it.priority_parts || {}).map(([k, v]) => `${k}(${v})`).join(' + ');
@@ -810,15 +829,15 @@
         let extra = '';
         if (t.turn_type === 'seed' && t.is_seed) {
           if (t.directive) extra += `<div class="hint">הנחיה לפיתוח: ${esc(t.directive)}</div>`;
-          extra += `<div class="actions"><button class="ghost" onclick="developSeed('${t.record_id}')"
+          extra += `<div class="actions"><button class="ghost" onclick="withBusy(this, () => developSeed('${t.record_id}'))"
             title="המודל יציע פיתוח מצוטט — ואתה תכריע">פתח ▸ Develop</button></div>`;
         }
         if (t.turn_type === 'development') {
           if (t.grounded_in && t.grounded_in.length) extra += `<div class="hint">מבוסס על: ${esc(t.grounded_in.join(', '))}</div>`;
           if (t.status === 'proposed' && t.grounded)
-            extra += `<div class="actions"><button onclick="decide('${t.record_id}','approve')"
+            extra += `<div class="actions"><button onclick="withBusy(this, () => decide('${t.record_id}','approve'))"
                         title="ייכנס למאגר כ־derived על שמך">✓ אשר</button>`
-                   + `<button class="secondary" onclick="decide('${t.record_id}','reject')"
+                   + `<button class="secondary" onclick="withBusy(this, () => decide('${t.record_id}','reject'))"
                         title="שום דבר לא ייכנס">✗ דחה</button></div>`;
         }
         const statusBadge = t.status ? `<span class="badge ${t.status}">${t.status}</span>` : '';
@@ -869,7 +888,7 @@
           <input id="connectBody" dir="auto" placeholder="התובנה שמקשרת את המקורות המסומנים…" />
           <div class="row" style="margin-top:6px">
             <input id="connectAuthor" placeholder="השם שלך (חובה — הידע נרשם עליך)" />
-            <button onclick="connectSelected()">חבר ✓ Connect →</button>
+            <button onclick="withBusy(this, () => connectSelected())">חבר ✓ Connect →</button>
           </div>
           <span id="connectStatus" class="hint"></span>
         </div>` : '';
@@ -953,7 +972,7 @@
           ? `<div class="hint">↔ ${esc(c.linked_refs.join(' · '))}</div>` : '';
         const dev = c.opens_aspect ? '<span class="hint">🌱 זרע</span>'
           : `<button class="ghost" title="הפוך את התרומה לזרע ופתח לפיתוח"
-               onclick="developContribution(${i})">🌱 פתח כזרע</button>`;
+               onclick="withBusy(this, () => developContribution(${i}))">🌱 פתח כזרע</button>`;
         return `<div style="border:1px solid var(--line); border-radius:6px; padding:6px; margin-top:6px">
           <div class="row" style="justify-content:space-between; gap:6px; align-items:center">
             <span class="badge">${esc(c.kind)}</span>${dev}</div>
@@ -990,7 +1009,7 @@
         status.innerHTML = `נשמר ✓ החיבור נכנס למאגר (${refs.length} מקורות מקושרים)`
           + ` — וגם נוסף כ־🏅 שאלת־זהב (מבחן קבוע).<br>`
           + `<button class="ghost" onclick='verifyLearned(${attr(lastAnswer.question)}, ${attr(vref)}, "connectStatus2")'>בדוק שהוא עולה →</button>`
-          + ` <button class="secondary" onclick='seedFromConnection()' title="הפוך את החיבור לזרע שהמודל יפתח, ואתה תכריע">🌱 פתח כזרע — Develop it →</button>`
+          + ` <button class="secondary" onclick='withBusy(this, () => seedFromConnection())' title="הפוך את החיבור לזרע שהמודל יפתח, ואתה תכריע">🌱 פתח כזרע — Develop it →</button>`
           + `<span id="connectStatus2" class="hint"></span>`;
         $('connectBody').value = '';
         picks.forEach(el => { el.checked = false; });
