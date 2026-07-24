@@ -18,7 +18,7 @@ On the authored gold set (42 positive questions, 10 negative), before → after:
 | | answers positives | refuses negatives | hit@10 | recall@10 | MRR |
 |---|---|---|---|---|---|
 | **before** | 1.00 | **0.30** | 0.524 | 0.484 | 0.274 |
-| **after** | 1.00 | **0.80** | **0.857** | **0.810** | **0.559** |
+| **after** | 1.00 | **0.80** | **0.857** | **0.810** | **0.574** |
 
 On twelve blatantly off-topic control queries (never in any gold file), refusal went
 **0.67 → 1.00**. Answer rate on real questions never moved off 1.00 — the system did
@@ -93,7 +93,21 @@ the study-program drafter all ran weaker retrieval under the same config, silent
 embedder uses a different code path, so nothing surfaced it — the reranker is off by
 default, so no test and no default path ever ran it.
 
-### 5. What was fine
+### 5. One passage could occupy two grounding slots
+
+791 refs exist twice — the Hebrew source and its English translation share the
+citation, by design. So a top-8 grounding set could spend two slots on one passage and
+produce an answer citing it as both [S3] and [S5], while a distinct passage went
+unretrieved. Measured: 3% of all grounding slots, affecting 7 of 42 questions.
+
+`DEDUPE_REFS` keeps the higher-scoring copy, which is self-adapting (an English
+question keeps the English chunk, a Hebrew one the Hebrew) with no language rule
+hardcoded. It needs fetch headroom to be worth anything: deduping a pool of exactly
+`top_k` merely *shortens* the result set — measured at 8.00 → 7.76 results with the
+distinct-passage count flat. With headroom the grounding set is 8.00 results and 8.00
+distinct passages, and hit@3 goes 0.714 → 0.738, MRR 0.559 → 0.574.
+
+### 6. What was fine
 
 - **Corpus coverage.** Sefaria: 3,346/3,346 segments, exact per book. Likutei Torah:
   all 41 top-level sections the Chabad Library root lists. Store 8,764 == Qdrant 8,764.
@@ -124,8 +138,8 @@ ref, the absolute gate signals, and the decision with its threshold.
 Recorded on the folded index, `GATE_SIGNAL=hybrid_pool`, threshold 0.795:
 
 ```
-maayan eval        hit@1 0.381  hit@3 0.714  hit@5 0.786  hit@10 0.857
-                   recall@10 0.810   MRR 0.559
+maayan eval        hit@1 0.381  hit@3 0.738  hit@5 0.786  hit@10 0.857
+                   recall@10 0.810   MRR 0.574
                    answered 1.000 (of 42 positives)   refused 0.800 (of 10 negatives)
 
 maayan eval --lexical   precision@1 0.800  precision@3 0.693  precision@10 0.580
@@ -143,6 +157,7 @@ maayan eval --lexical   precision@1 0.800  precision@3 0.693  precision@10 0.580
 | `GATE_HYBRID_THRESHOLD` | `0.795` | Threshold for `hybrid_pool`. **Not** on the cosine scale. |
 | `GATE_SPARSE_WEIGHT` | `3.0` | Puts sparse (~0.05–0.15) on par with cosine (~0.40–0.65). |
 | `GATE_POOL` | `10` | Depth the mean signals average over. |
+| `DEDUPE_REFS` | `true` | Finding #5. One grounding slot per distinct passage. |
 | `SCORE_THRESHOLD` | `0.45` | **Used only when `GATE_SIGNAL=dense_top`.** |
 
 Each gate carries its own threshold and `Settings.effective_score_threshold` is the

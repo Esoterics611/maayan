@@ -86,6 +86,7 @@ def build_retriever(
         hybrid=True if hybrid is None else hybrid,
         gate=build_relevance_gate(settings),
         gate_pool=settings.gate_pool,
+        dedupe_refs=settings.dedupe_refs,
     )
 
     retriever: Retrieving = base

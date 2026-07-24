@@ -173,6 +173,16 @@ class Settings(BaseSettings):
         if self.gate_signal == "hybrid_pool":
             return self.gate_hybrid_threshold
         return self.score_threshold
+    dedupe_refs: bool = Field(
+        default=True,
+        description=(
+            "Keep only the best-scoring hit per ref. 791 refs in this corpus exist twice "
+            "(Hebrew source + English translation share the citation), so without this a "
+            "grounding set can spend two top_k slots on one passage and cite it as both "
+            "[S3] and [S5]. Keeps the higher-scoring copy, so it self-adapts to the "
+            "question's language."
+        ),
+    )
     inspect_show: int = Field(
         default=8, description="Hits per stage listed by the retrieval inspector (display only)."
     )

@@ -125,3 +125,49 @@ def test_expert_boost_scales_expert_scores() -> None:
     assert expert_boosted > expert_base
     # With a large boost, the expert chunk should surface first.
     assert boosted[0].source == "expert"
+
+
+def test_dedupe_keeps_the_best_scoring_copy_of_a_shared_ref() -> None:
+    # 791 refs in the real corpus exist twice: the Hebrew source and its English
+    # translation share the citation. Without dedupe both can occupy grounding slots.
+    emb = HashingEmbedder(dim=DIM)
+    chunks = [
+        _chunk("Tanya 1:1", "בחירה חופשית של האדם", lang="he"),
+        _chunk("Tanya 1:1", "the free choice of a person", lang="en"),
+        _chunk("Tanya 1:2", "עבודת התפילה והכוונה", lang="he"),
+    ]
+    idx = _seeded_index(chunks, emb)
+
+    plain = Retriever(idx, emb, top_k=3, dedupe_refs=False).search("בחירה חופשית")
+    assert [r.ref for r in plain].count("Tanya 1:1") == 2  # the same place, twice
+
+    deduped = Retriever(idx, emb, top_k=3, dedupe_refs=True).search("בחירה חופשית")
+    refs = [r.ref for r in deduped]
+    assert len(refs) == len(set(refs)), "every grounding slot must be a distinct passage"
+    # The surviving copy is the higher-scoring one — so a Hebrew query keeps Hebrew
+    # and an English query keeps English, with no language rule hardcoded.
+    kept = next(r for r in deduped if r.ref == "Tanya 1:1")
+    assert kept.lang == "he"
+    english = Retriever(idx, emb, top_k=3, dedupe_refs=True).search("the free choice")
+    assert next(r for r in english if r.ref == "Tanya 1:1").lang == "en"
+
+
+def test_dedupe_backfills_the_freed_slot_instead_of_shortening() -> None:
+    """Dropping a duplicate must free the slot for the next distinct passage.
+
+    Without extra fetch headroom, deduping a pool of exactly top_k just returns fewer
+    results — measured on the live corpus as 8.00 -> 7.76 with no gain in distinct
+    passages, i.e. it bought nothing.
+    """
+    emb = HashingEmbedder(dim=DIM)
+    shared = "בחירה חופשית של האדם"
+    chunks = [
+        _chunk("Tanya 1:1", shared, lang="he"),
+        _chunk("Tanya 1:1", shared, lang="en"),
+        _chunk("Tanya 1:2", shared, lang="he"),
+        _chunk("Tanya 1:3", shared, lang="he"),
+    ]
+    idx = _seeded_index(chunks, emb)
+    results = Retriever(idx, emb, top_k=3, dedupe_refs=True).search("בחירה חופשית")
+    assert len(results) == 3, "the freed slot should be backfilled, not dropped"
+    assert len({r.ref for r in results}) == 3

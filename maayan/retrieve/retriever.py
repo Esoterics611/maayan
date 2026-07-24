@@ -67,6 +67,29 @@ def _to_search_result(point: models.ScoredPoint) -> SearchResult:
     )
 
 
+def _dedupe_by_ref(results: list[SearchResult]) -> list[SearchResult]:
+    """Keep only the best-scoring hit per `ref`, preserving rank order.
+
+    791 refs in this corpus exist twice — the Hebrew source and its English
+    translation share the citation, by design. Retrieval can therefore spend two of
+    `top_k` grounding slots on the same passage, which produces an answer citing
+    [S3] and [S5] for one place and starves a distinct passage of its slot. Measured
+    on the gold set: 3% of all slots, affecting 7 of 42 questions.
+
+    Keeping the HIGHER-scoring copy is language-neutral and self-adapting: an English
+    question scores the English chunk higher and keeps it, a Hebrew question the
+    Hebrew one. Input must already be ranked best-first.
+    """
+    seen: set[str] = set()
+    kept: list[SearchResult] = []
+    for result in results:
+        if result.ref in seen:
+            continue
+        seen.add(result.ref)
+        kept.append(result)
+    return kept
+
+
 def _rank_key(result: SearchResult) -> tuple[float, str]:
     """Deterministic total order for ranking: score desc, then ref asc.
 
@@ -99,8 +122,10 @@ class Retriever:
         hybrid: bool = True,
         gate: RelevanceGate | None = None,
         gate_pool: int = 10,
+        dedupe_refs: bool = False,
     ) -> None:
         self._gate = gate
+        self._dedupe_refs = dedupe_refs
         self._gate_pool = gate_pool
         self._index = index
         self._embedder = embedder
@@ -125,8 +150,14 @@ class Retriever:
     ) -> RetrievalResult:
         """Hybrid ranking + an absolute relevance score (top dense cosine) for gating."""
         final_k = k or self._top_k
-        # Fetch a larger candidate pool when a reranker will reorder it.
-        pool = max(final_k, self._rerank_candidates) if self._reranker else final_k
+        # Fetch a larger candidate pool when a reranker will reorder it, and when
+        # deduping — otherwise dropping a duplicate just SHORTENS the grounding set
+        # instead of freeing the slot for the next distinct passage. (Measured: without
+        # headroom, dedupe took the mean result count from 8.00 to 7.76 and left the
+        # distinct-passage count flat, i.e. it bought nothing.)
+        pool = final_k * 2 if self._dedupe_refs else final_k
+        if self._reranker:
+            pool = max(pool, self._rerank_candidates)
 
         emb = self._embedder.embed_query(query)
         flt = _build_filter(book, source, langs)
@@ -152,6 +183,8 @@ class Retriever:
         signals = self._gate_signals(emb, flt, results, rerank_top)
         gate = self._gate
         relevance = gate.relevance(signals) if gate is not None else signals.dense_top
+        if self._dedupe_refs:
+            results = _dedupe_by_ref(results)
         return RetrievalResult(
             results=results[:final_k], relevance=relevance, signals=signals
         )
