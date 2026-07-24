@@ -356,6 +356,20 @@ def create_app(
     def index() -> FileResponse:
         return FileResponse(_STATIC / "index.html")
 
+    # The shell's CSS and JS, split out of index.html so they are separately
+    # editable and cacheable. Served the same way as every other static asset.
+    @app.get("/styles.css")
+    def styles() -> FileResponse:
+        return FileResponse(_STATIC / "styles.css", media_type="text/css")
+
+    @app.get("/app.js")
+    def app_js() -> FileResponse:
+        return FileResponse(_STATIC / "app.js", media_type="text/javascript")
+
+    @app.get("/auth.js")
+    def auth_js() -> FileResponse:
+        return FileResponse(_STATIC / "auth.js", media_type="text/javascript")
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}

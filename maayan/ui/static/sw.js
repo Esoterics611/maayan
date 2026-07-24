@@ -9,8 +9,13 @@
  *   - The app shell (navigations) is network-first, falling back to a cached shell
  *     when offline so the installed app still opens.
  */
-const CACHE = "maayan-v1";
+const CACHE = "maayan-v2";
 const STATIC = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+// The shell's CSS/JS, split out of index.html. These used to be inline, so a cached
+// shell was self-contained; now the shell is useless offline without them. They are
+// network-FIRST with a cache fallback (not cache-first like STATIC): they change on
+// every UI edit, and serving a stale app.js would be far worse than a slow one.
+const SHELL_ASSETS = ["/styles.css", "/app.js", "/auth.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -52,6 +57,23 @@ self.addEventListener("fetch", (event) => {
             return res;
           }),
       ),
+    );
+    return;
+  }
+
+  // Shell CSS/JS: network-first so an edit is picked up immediately, cached so the
+  // installed app still renders offline.
+  if (SHELL_ASSETS.includes(url.pathname)) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req).then((hit) => hit || Response.error())),
     );
     return;
   }

@@ -11,6 +11,7 @@ from maayan.capture.models import Annotation, Session
 from maayan.generate.rag import Answer
 from maayan.retrieve.models import SearchResult
 from maayan.ui.app import create_app
+from tests.conftest import ui_shell
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -247,7 +248,7 @@ def test_icons_served() -> None:
 
 def test_index_references_pwa_and_mobile_chrome() -> None:
     client, _, _ = _client()
-    html = client.get("/").text
+    html = ui_shell(client)
     assert "/manifest.webmanifest" in html
     assert "/sw.js" in html
     assert 'id="tabbar"' in html  # the bottom mobile nav
@@ -258,7 +259,7 @@ def test_voice_dictation_controls_present() -> None:
     # Prompt 24 is browser-API UI; we assert the affordances + fallback branch ship,
     # not that real speech recognition runs.
     client, _, _ = _client()
-    html = client.get("/").text
+    html = ui_shell(client)
     # A mic button next to each static capture field, plus the language toggle.
     for el_id in ('id="micQ"', 'id="micSeed"', 'id="micTerm"', 'id="voiceLang"'):
         assert el_id in html, el_id
@@ -280,7 +281,7 @@ def test_beyond_typing_controls_present() -> None:
     # Prompt 30 is browser-API UI (OCR upload, selection menu, inbox overlay); assert
     # the affordances + wiring ship, not that real OCR/selection runs.
     client, _, _ = _client()
-    html = client.get("/").text
+    html = ui_shell(client)
     # OCR camera buttons next to the seed + term capture fields, plus the reusable builder.
     for el_id in ('id="ocrSeed"', 'id="ocrTerm"', 'id="inboxBtn"', 'id="selMenu"'):
         assert el_id in html, el_id
@@ -295,7 +296,7 @@ def test_beyond_typing_controls_present() -> None:
 def test_reading_experience_controls_present() -> None:
     # Prompt 29 reader/library + reading modes ship in the page (browser-driven UI).
     client, _, _ = _client()
-    html = client.get("/").text
+    html = ui_shell(client)
     assert "openReader" in html        # source-in-context reader
     assert "openLibrary" in html       # sefer browser (Library tab)
     assert "maayan.readmode" in html   # reading mode persisted in localStorage
@@ -351,7 +352,7 @@ def test_ask_agent_branch_studies_and_returns_trace_id() -> None:
 def test_chavrusa_and_retraction_affordances_present() -> None:
     # The חברותא toggle, the trace viewer, and the retraction-ledger click-through all ship.
     client, _, _ = _client()
-    html = client.get("/").text
+    html = ui_shell(client)
     assert 'id="chavrusaToggle"' in html and "chavrusaOn" in html
     assert "openTrace" in html and "/api/traces/" in html
     assert "openRetractions" in html and "/retractions" in html

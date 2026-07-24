@@ -10,6 +10,17 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# The UI shell used to be a single index.html with inline <style>/<script>. A1 split
+# it into index.html + styles.css + app.js + auth.js. A test asserting that some
+# affordance SHIPS should look at the whole shell — which of those files a given
+# marker landed in is an implementation detail of the split, not behavior.
+UI_SHELL_PATHS = ("/", "/app.js", "/auth.js", "/styles.css")
+
+
+def ui_shell(client: Any) -> str:
+    """Concatenate every part of the served UI shell into one searchable string."""
+    return "\n".join(client.get(path).text for path in UI_SHELL_PATHS)
+
 
 def load_fixture(name: str) -> Any:
     with open(FIXTURES / name, encoding="utf-8") as fh:

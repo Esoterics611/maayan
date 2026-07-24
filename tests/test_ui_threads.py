@@ -22,6 +22,7 @@ from maayan.retrieve.models import SearchResult
 from maayan.threads.service import ThreadService
 from maayan.threads.store import ThreadStore
 from maayan.ui.app import create_app
+from tests.conftest import ui_shell
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -353,7 +354,7 @@ def test_connect_sources_links_refs_across_books() -> None:
 
 
 def test_index_html_has_connect_affordance() -> None:
-    html = _client().get("/").text
+    html = ui_shell(_client())
     for marker in ("connectSelected", "srcpick", "Connect →"):
         assert marker in html, f"missing connect-sources markup: {marker}"
 
