@@ -185,3 +185,11 @@ body[data-read-mode="dark"] .reader-seg .seg-ref { color:#a59b88; }
   .composer .row #q { flex:1 1 100%; }
   .tabbar { display:flex; }
 }
+
+/* Inline [S#] citation links + the flash that confirms where they landed (R7). */
+a.cite{color:#6b4f2a;text-decoration:none;font-weight:650;padding:0 .1em;
+  border-bottom:1px dotted #6b4f2a;cursor:pointer}
+a.cite:hover{background:#f3e9d8}
+@keyframes citeFlash{from{background:#f7e9c8}to{background:transparent}}
+.cite-flash{animation:citeFlash 1.4s ease-out}
+@media (prefers-reduced-motion:reduce){.cite-flash{animation:none;outline:2px solid #c9a227}}

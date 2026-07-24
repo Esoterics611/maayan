@@ -188,3 +188,34 @@ def test_raw_is_never_applied_to_a_bare_property_access() -> None:
         for m in re.finditer(r"raw\(\s*[A-Za-z_$][\w$]*\s*\.\s*[\w$]+\s*\)", APP_JS)
     ]
     assert not offenders, f"raw() applied straight to fetched data: {offenders}"
+
+
+# -- inline [S#] citation links (UI_REDESIGN R7) -------------------------------
+def test_citation_linking_runs_on_already_escaped_text() -> None:
+    """Order matters: escape first, then match markers in the escaped string.
+
+    If the marker replacement ran on RAW model output, a model writing
+    `[S1]<img onerror=…>` would inject markup, because the replacement's own output
+    is trusted HTML that then bypasses escaping.
+    """
+    # Every CALL site (the definition's own signature aside) must pass escaped text.
+    calls = [
+        m.group(1)
+        for m in re.finditer(r"linkCitations\((.*?)\)\s*\}", APP_JS)
+        if not m.group(0).startswith("linkCitations(escapedAnswer")
+    ]
+    assert calls, "linkCitations is no longer called from the answer template"
+    for args in calls:
+        assert args.startswith("esc("), (
+            f"linkCitations must receive ESCAPED text, got: {args}"
+        )
+
+
+def test_citation_marker_pattern_is_bounded_and_range_checked() -> None:
+    start = APP_JS.index("function linkCitations")
+    body = APP_JS[start : APP_JS.index("function wireCitationLinks")]
+    # Bounded digits: no catastrophic input, no absurd indices.
+    assert r"\[S(\d{1,3})\]" in body
+    # A marker with no matching source stays plain text rather than becoming a dead link.
+    assert "return whole" in body
+    assert "n <= sourceCount" in body

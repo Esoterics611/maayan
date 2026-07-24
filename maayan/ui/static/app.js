@@ -594,6 +594,40 @@ function downloadTurn(i) { const t = lastTurns[i]; if (t) { const p = _turnPaylo
 function printTurn(i) { const t = lastTurns[i]; if (t) { const p = _turnPayload(t); printRtl(p.title, p.text, p.refs, p.meta); } }
 window.downloadTurn = downloadTurn; window.printTurn = printTurn;
 
+// Inline [S#] markers become links to their source card (UI_REDESIGN R7).
+//
+// SAFETY: the answer is escaped FIRST and the markers are matched in the ESCAPED
+// string, so the only markup introduced here is ours. A model writing
+// "[S1]<script>…" cannot inject anything — its angle brackets are already entities
+// by the time this runs. A marker with no matching source is left as plain text
+// rather than turned into a dead link, so a model over-citing is visible, not hidden.
+function linkCitations(escapedAnswer, sourceCount) {
+  return escapedAnswer.replace(/\[S(\d{1,3})\]/g, (whole, digits) => {
+    const n = Number(digits);
+    if (!(n >= 1 && n <= sourceCount)) return whole;
+    return `<a class="cite" href="#src-${n}" data-src="${n}" title="קפוץ למקור">[S${n}]</a>`;
+  });
+}
+
+// Delegated once, at the container: the answer body is re-rendered constantly, and
+// per-render listeners would leak.
+function wireCitationLinks() {
+  const host = $('answerSources');
+  if (!host || host.dataset.citeWired) return;
+  host.dataset.citeWired = '1';
+  host.addEventListener('click', (ev) => {
+    const link = ev.target.closest && ev.target.closest('a.cite');
+    if (!link) return;
+    ev.preventDefault();
+    const card = $('src-' + link.dataset.src);
+    if (!card) return;
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    card.classList.remove('cite-flash');
+    void card.offsetWidth;              // restart the animation on a repeat click
+    card.classList.add('cite-flash');
+  });
+}
+
 function renderAnswerSources(data) {
   lastAnswer = data;
   const cls = data.grounded ? '' : ' refused';
@@ -620,7 +654,7 @@ function renderAnswerSources(data) {
     // The margins affordance (Prompt 36): the daf's apparatus for this source.
     const margins = `<button class="ghost" title="הגליון — מה ידוע סביב המקור"
         onclick='openMargins(${attr(s.ref)})'>גליון ▸</button>`;
-    return `<div class="src ${esc(s.source)}">
+    return `<div class="src ${esc(s.source)}" id="src-${i + 1}">
       <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
         <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${margins}${retract}</div>
       ${via}<div dir="auto">${esc(s.text)}</div></div>`;
@@ -660,7 +694,8 @@ function renderAnswerSources(data) {
       + `<button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadAnswer()">⬇︎ הורד .md</button>`
       + `<button class="ghost" title="הדפס או שמור כ־PDF / שתף" onclick="printAnswer()">🖨 הדפס / שתף</button></div>` : '';
   $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer${data.trace_id ? ' · חברותא' : ''}</div>
-    <div class="body${cls}" dir="auto">${esc(data.answer)}</div>${share}${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
+    <div class="body${cls}" dir="auto">${linkCitations(esc(data.answer), sources.length)}</div>${share}${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
+  wireCitationLinks();
   const ca = $('connectAuthor');
   if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
   const cb = $('connectBody');                       // dictation + OCR on the connection insight
