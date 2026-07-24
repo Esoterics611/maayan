@@ -37,7 +37,7 @@ def build_study_program_runner(
     backend = backend or build_generation_backend(draft_settings)
     chunks = ChunkStore(settings.db_path)
     drafter = ProgramDrafter(
-        build_retriever(settings, embedder=embedder),
+        build_retriever(settings, embedder=embedder, backend=backend),
         backend,
         chunks,
         SystemClock(),

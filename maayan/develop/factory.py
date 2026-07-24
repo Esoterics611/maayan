@@ -22,8 +22,8 @@ def build_development_service(
 ) -> DevelopmentService:
     """Assemble a DevelopmentService wired to the same stores + collection as the rest."""
     embedder = embedder or build_embedder(settings)  # shared with the retriever + indexing
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
+    retriever = build_retriever(settings, embedder=embedder, backend=backend)
     index = QdrantIndex(
         build_qdrant_client(settings), settings.collection_name, embedder.dim
     )
@@ -55,8 +55,8 @@ def build_develop_eval_setup(
     can start a thread per seed.
     """
     embedder = embedder or build_embedder(settings)
-    retriever = build_retriever(settings, embedder=embedder)
     backend = build_generation_backend(settings)
+    retriever = build_retriever(settings, embedder=embedder, backend=backend)
     index = QdrantIndex(
         build_qdrant_client(settings), settings.collection_name, embedder.dim
     )

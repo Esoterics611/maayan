@@ -56,7 +56,7 @@ def build_lexicon_populator(
         draft_settings = settings.model_copy(update={field: settings.lexicon_draft_model})
     backend = backend or build_generation_backend(draft_settings)
     drafter = LexiconDrafter(
-        build_retriever(settings, embedder=embedder),
+        build_retriever(settings, embedder=embedder, backend=backend),
         backend,
         SystemClock(),
         model=draft_settings.generation_model,

@@ -21,11 +21,17 @@ def build_composition_service(
 
     The retriever (for `fill` + auto-outline) and the capture service (for
     `promote_connection`) share the one embedder, so `maayan ui` builds it once.
+
+    The backend is passed to `build_retriever` as well as to the service: with
+    `query_expand_enabled` on, that is what lets `fill` use the SAME expansion (LLM
+    reformulations + HyDE) that `ask` gets. Without it the flag silently means
+    something weaker here than it does there (R3).
     """
     embedder = embedder or build_embedder(settings)
+    backend = build_generation_backend(settings)
     return CompositionService(
-        build_retriever(settings, embedder=embedder),
-        build_generation_backend(settings),
+        build_retriever(settings, embedder=embedder, backend=backend),
+        backend,
         CompositionStore(settings.db_path),
         build_thread_service(settings),
         SystemClock(),
