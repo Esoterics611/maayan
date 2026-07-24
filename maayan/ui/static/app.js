@@ -5,6 +5,29 @@ let lastAnswer = null;  // last answer (sources + session_id) for "Connect these
 let chavrusaOn = false; // חברותא mode: route Ask through the bounded study loop (Prompt 39)
 
 const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
+
+// --- HTML building that escapes by DEFAULT -----------------------------------
+// This UI builds markup by string concatenation and assigns it to innerHTML, so
+// every interpolation is an injection site and safety rests on remembering esc()
+// at ~120 call sites. `html` inverts that: interpolations are escaped unless the
+// value is explicitly marked as trusted markup with `raw()`. Forgetting is now
+// safe-by-default; only an explicit `raw()` can introduce a hole, and `raw()` is
+// greppable in a way that a *missing* esc() never was.
+//
+//   html`<div title="${user.name}">${user.bio}</div>`   // both escaped
+//   html`<div>${raw(alreadyBuiltMarkup)}</div>`         // opt in, on purpose
+//
+// Arrays are joined, so `${rows.map(r => html`<li>…</li>`)}` works without .join('').
+const raw = (value) => ({ __html: value == null ? '' : String(value) });
+const _render = (v) => {
+  if (v == null || v === false) return '';
+  if (v.__html !== undefined) return v.__html;       // raw(), or a nested html``
+  if (Array.isArray(v)) return v.map(_render).join('');
+  return esc(v);
+};
+const html = (strings, ...values) =>
+  raw(strings.reduce((out, s, i) => out + _render(values[i - 1]) + s));
+
 const j = (r) => r.json();
 // POST JSON and surface HTTP errors instead of silently parsing a 500/502 body as if
 // it were an answer. Throws Error(detail) on !ok so callers can show a retryable notice.
@@ -43,14 +66,14 @@ const EV_GLYPH = {expert:'●', curated:'◆', deterministic:'⚙',
 
 async function loadKinds() {
   try { const ks = await j(await fetch('/kinds'));
-    $('kind').innerHTML = ks.map(k => `<option>${k}</option>`).join('');
+    $('kind').innerHTML = ks.map(k => `<option>${esc(k)}</option>`).join('');
   } catch (e) { $('kind').innerHTML = '<option>connection</option>'; }
 }
 
 async function loadThreads() {
   const ts = await j(await fetch('/threads'));
   $('threadList').innerHTML = ts.length ? ts.map(t =>
-    `<div class="thread-item ${t.id === active ? 'active' : ''}" data-id="${t.id}">${esc(t.title)}</div>`
+    `<div class="thread-item ${t.id === active ? 'active' : ''}" data-id="${esc(t.id)}">${esc(t.title)}</div>`
   ).join('') : '<div class="hint">No topics yet.</div>';
   [...document.querySelectorAll('#threadList .thread-item')].forEach(el =>
     el.onclick = () => openThread(el.dataset.id));
@@ -124,7 +147,7 @@ async function loadReviewCount() {
   const parts = Object.entries(data.counts || {}).filter(([, v]) => v > 0)
     .map(([k, v]) => `${KIND_HE[k] || k} ${v}`);
   $('reviewSummary').innerHTML = data.total
-    ? `<b>${data.total}</b> ממתינות: ${esc(parts.join(' · '))}`
+    ? `<b>${esc(data.total)}</b> ממתינות: ${esc(parts.join(' · '))}`
     : 'אין הכרעות ממתינות ✓';
   return data;
 }
@@ -283,13 +306,17 @@ async function openGold() {
     .map(([k, v]) => `<span class="kpi">${esc(ORIGIN_HE[k] || k)} <b>${v}</b></span>`).join('');
   const rep = g.last_report;
   const fmtPct = (x) => (x * 100).toFixed(0) + '%';
+  // Hoisted out of the template below so each interpolation is a plain value whose
+  // escaping is visible at a glance (and checkable by tests/test_ui_xss.py).
+  const hitKpis = Object.entries(rep && rep.hit || {})
+    .map(([k, v]) => `<span class="kpi">hit@${esc(k)} <b>${fmtPct(v)}</b></span>`)
+    .join('');
   const report = rep
     ? `<div class="review-sec"><h4>הריצה האחרונה · ${esc(rep.date.slice(0, 10))}</h4>
-         ${Object.entries(rep.hit || {}).map(([k, v]) =>
-           `<span class="kpi">hit@${esc(k)} <b>${fmtPct(v)}</b></span>`).join('')}
+         ${hitKpis}
          <span class="kpi">MRR <b>${rep.mrr.toFixed(2)}</b></span>
          <span class="kpi">נענו <b>${fmtPct(rep.answer_rate)}</b></span>
-         <div class="hint">${rep.n_ranked} שאלות מדורגות · ${rep.n_gate_only} בודקות רק את שער הסירוב</div>
+         <div class="hint">${esc(rep.n_ranked)} שאלות מדורגות · ${esc(rep.n_gate_only)} בודקות רק את שער הסירוב</div>
        </div>`
     : `<div class="review-sec"><h4>מדידה</h4>
          <div class="hint">עדיין אין דוח. מריצים מהמסוף: <code>uv run maayan eval --captured</code> —
@@ -309,8 +336,8 @@ async function openGold() {
     <div class="reader-body" dir="rtl" style="font-family:inherit; font-size:15px; line-height:1.6">
       <div class="hint" style="margin-bottom:10px">כל אישור שלך — חיבור, פיתוח, מונח, שאלה שנענתה —
         הופך אוטומטית למבחן קבוע. כך יודעים שהלימוד באמת עוזר: מלמדים, מודדים, רואים את המספרים עולים.</div>
-      <span class="kpi">סה״כ <b>${g.total}</b></span>${chips}
-      <span class="kpi">שער־בלבד <b>${g.gate_only}</b></span>
+      <span class="kpi">סה״כ <b>${esc(g.total)}</b></span>${chips}
+      <span class="kpi">שער־בלבד <b>${esc(g.gate_only)}</b></span>
       ${report}
       <div class="review-sec"><h4>הדוגמאות האחרונות</h4>${rows}</div>
       <div class="hint">בצד שאלות הזהב שנקלטות מאליהן יש גם סטים שנערכים ביד
@@ -380,14 +407,14 @@ async function loadStats() {
       .map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '—';
     const dev = s.developments_by_status || {};
     $('statsPanel').innerHTML =
-      `<div><b>${s.total_chunks}</b> live chunks`
+      `<div><b>${esc(s.total_chunks)}</b> live chunks`
       + (s.qdrant_points != null ? ` · ${s.qdrant_points} indexed` : '') + `</div>`
       + `<div>${bySrc}</div>`
       + `<div>devs: ${(dev.approved||0)} approved · ${(dev.proposed||0)} proposed`
       + ` · ${(dev.retracted||0)} retracted</div>`
       + `<div><span class="srcref" title="What left the corpus, and why"
-           onclick="openRetractions()">${s.retractions} retraction(s)</span>`
-      + ` · ${s.threads} thread(s) · ${s.terms} term(s)</div>`;
+           onclick="openRetractions()">${esc(s.retractions)} retraction(s)</span>`
+      + ` · ${esc(s.threads)} thread(s) · ${esc(s.terms)} term(s)</div>`;
   } catch (e) { $('statsPanel').innerHTML = '<div class="hint">stats unavailable</div>'; }
 }
 window.loadStats = loadStats;
@@ -459,24 +486,24 @@ function renderTurns(turns) {
     let extra = '';
     if (t.turn_type === 'seed' && t.is_seed) {
       if (t.directive) extra += `<div class="hint">הנחיה לפיתוח: ${esc(t.directive)}</div>`;
-      extra += `<div class="actions"><button class="ghost" onclick="withBusy(this, () => developSeed('${t.record_id}'))"
+      extra += `<div class="actions"><button class="ghost" onclick="withBusy(this, () => developSeed('${esc(t.record_id)}'))"
         title="המודל יציע פיתוח מצוטט — ואתה תכריע">פתח ▸ Develop</button></div>`;
     }
     if (t.turn_type === 'development') {
       if (t.grounded_in && t.grounded_in.length) extra += `<div class="hint">מבוסס על: ${esc(t.grounded_in.join(', '))}</div>`;
       if (t.status === 'proposed' && t.grounded)
-        extra += `<div class="actions"><button onclick="withBusy(this, () => decide('${t.record_id}','approve'))"
+        extra += `<div class="actions"><button onclick="withBusy(this, () => decide('${esc(t.record_id)}','approve'))"
                     title="ייכנס למאגר כ־derived על שמך">✓ אשר</button>`
-               + `<button class="secondary" onclick="withBusy(this, () => decide('${t.record_id}','reject'))"
+               + `<button class="secondary" onclick="withBusy(this, () => decide('${esc(t.record_id)}','reject'))"
                     title="שום דבר לא ייכנס">✗ דחה</button></div>`;
     }
     if (['ask', 'development', 'seed'].includes(t.turn_type) && t.text) {
       extra += `<div class="actions"><button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadTurn(${i})">⬇︎ .md</button>`
              + `<button class="ghost" title="הדפס / שמור כ־PDF / שתף" onclick="printTurn(${i})">🖨 שתף</button></div>`;
     }
-    const statusBadge = t.status ? `<span class="badge ${t.status}">${t.status}</span>` : '';
-    return `<div class="turn ${t.turn_type}">
-      <div class="who">${t.turn_type} · ${esc(t.author)}${statusBadge}</div>
+    const statusBadge = t.status ? `<span class="badge ${esc(t.status)}">${esc(t.status)}</span>` : '';
+    return `<div class="turn ${esc(t.turn_type)}">
+      <div class="who">${esc(t.turn_type)} · ${esc(t.author)}${statusBadge}</div>
       <div class="body" dir="auto">${esc(t.text)}</div>${extra}</div>`;
   }).join('');
   $('turns').scrollTop = $('turns').scrollHeight;
@@ -554,7 +581,7 @@ function renderAnswerSources(data) {
     // A cited shiur source can play from its moment in the recording.
     const play = (s.source === 'shiur' && s.audio_id)
       ? `<button class="ghost" title="Play from here"
-            onclick="playCitation('${esc(s.audio_id)}', ${s.start_s || 0})">▶ ${fmtTs(s.start_s || 0)}</button>` : '';
+            onclick="playCitation('${esc(s.audio_id)}', ${esc(s.start_s || 0)})">▶ ${fmtTs(s.start_s || 0)}</button>` : '';
     // Only layered knowledge (expert/derived/term/shiur) is retractable; printed text never is.
     const retract = ['expert', 'derived', 'term', 'shiur'].includes(s.source)
       ? `<button class="ghost" style="color:#a33;margin-left:auto"
@@ -568,7 +595,7 @@ function renderAnswerSources(data) {
     // The margins affordance (Prompt 36): the daf's apparatus for this source.
     const margins = `<button class="ghost" title="הגליון — מה ידוע סביב המקור"
         onclick='openMargins(${attr(s.ref)})'>גליון ▸</button>`;
-    return `<div class="src ${s.source}">
+    return `<div class="src ${esc(s.source)}">
       <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
         <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${margins}${retract}</div>
       ${via}<div dir="auto">${esc(s.text)}</div></div>`;
@@ -855,7 +882,7 @@ function renderComposition(c) {
     <button class="secondary" onclick="composeReview('approve')">Approve</button>
     <button class="secondary" onclick="composeReview('reject')">Reject</button>
     <button class="secondary" onclick="composeExport()">Export ⤓</button>
-    <span class="hint">status: ${esc(c.status)} · ${c.supported_sections} grounded · ${c.gap_sections} gap(s)</span>
+    <span class="hint">status: ${esc(c.status)} · ${esc(c.supported_sections)} grounded · ${esc(c.gap_sections)} gap(s)</span>
   </div>`;
   $('composeDoc').innerHTML = rows + actions;
 }
@@ -1127,7 +1154,7 @@ function renderTranscript(tr) {
       + `${esc(sg.surface)} → ${esc(sg.canonical)}</button>`).join(' ');
     return `<div class="src">
       <div class="ref">
-        <button class="ghost" onclick="seekAudio(${s.start_s})" title="Play from here">▶ ${fmtTs(s.start_s)}</button>
+        <button class="ghost" onclick="seekAudio(${esc(s.start_s)})" title="Play from here">▶ ${fmtTs(s.start_s)}</button>
         <span class="hint">–${fmtTs(s.end_s)}</span>
       </div>
       <textarea id="seg-${i}" rows="2" dir="auto" onchange="saveSegment(${i})">${esc(text)}</textarea>
@@ -1337,7 +1364,7 @@ async function openMargins(ref) {
   const sheet = document.createElement('div');
   sheet.className = 'margins-sheet'; sheet.id = 'marginsSheet';
   sheet.innerHTML = `<div class="margins-head" dir="rtl">
-      <span style="font-weight:650" dir="auto">גליון · ${a.total} — ${esc(a.ref)}</span>
+      <span style="font-weight:650" dir="auto">גליון · ${esc(a.total)} — ${esc(a.ref)}</span>
       <button class="ghost" onclick="closeMargins()" title="Close">✕</button></div>
     <div class="margins-body" dir="rtl">${body}</div>`;
   document.body.appendChild(sheet);
@@ -1376,7 +1403,7 @@ async function openTrace(id) {
       <span class="title" dir="auto">כיצד נלמד? — ${esc(t.question)}</span>
       <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
     <div class="reader-body" dir="rtl">${steps}${forced}
-      <div class="hint">budgets: hops ${b.hops_used}/${b.hops_max} · chunks ${b.chunks_used}/${b.chunks_max} · calls ${b.calls_used}/${b.calls_max}</div>
+      <div class="hint">budgets: hops ${esc(b.hops_used)}/${esc(b.hops_max)} · chunks ${esc(b.chunks_used)}/${esc(b.chunks_max)} · calls ${esc(b.calls_used)}/${esc(b.calls_max)}</div>
     </div>`);
 }
 window.openTrace = openTrace;
@@ -1389,7 +1416,7 @@ async function openLibrary() {
   const items = (lib.entries || []).map(e =>
     `<div class="lib-item" onclick='openBook(${attr(e.book)})'>
        <b dir="auto">${esc(e.book)}</b> <span class="badge ${esc(e.source)}">${esc(e.source)}</span>
-       <span class="hint">· ${e.count}</span></div>`).join('') || '<div class="hint">Nothing indexed yet.</div>';
+       <span class="hint">· ${esc(e.count)}</span></div>`).join('') || '<div class="hint">Nothing indexed yet.</div>';
   mkOverlay(`<div class="reader-head"><span class="title">Library</span>
      <button class="ghost" onclick="closeOverlay()" title="Close">✕</button></div>
      <div class="lib-body">${items}</div>`);
