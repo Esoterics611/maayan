@@ -31,7 +31,7 @@ def build_composition_service(
     embedder = embedder or build_embedder(settings)
     backend = build_generation_backend(settings)
     return CompositionService(
-        build_retriever(settings, embedder=embedder, backend=backend),
+        build_retriever(settings, surface="compose", embedder=embedder, backend=backend),
         backend,
         CompositionStore(settings.db_path),
         build_thread_service(settings),

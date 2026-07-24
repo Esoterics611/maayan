@@ -509,11 +509,11 @@ def ask(
     use_verify = settings.answer_verify_enabled if verify is None else verify
     use_agent = settings.agent_enabled if agent is None else agent
     retriever = build_retriever(
-        settings, embedder=embedder, expand=use_expand, graph=graph,
+        settings, surface="ask", embedder=embedder, expand=use_expand, graph=graph,
         backend=backend if use_expand else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.effective_score_threshold,
+        retriever, backend, score_threshold=settings.surface_threshold("ask"),
         reasoning=use_reasoning, verify=use_verify,
         parent_context=build_parent_context(settings),
         parent_context_chars=settings.parent_context_chars,
@@ -1377,11 +1377,11 @@ def bench(
     embedder = build_embedder(settings)
     backend = build_generation_backend(settings)
     retriever = build_retriever(
-        settings, embedder=embedder, expand=settings.query_expand_enabled, graph=graph,
-        backend=backend if settings.query_expand_enabled else None,
+        settings, surface="ask", embedder=embedder, expand=settings.query_expand_enabled,
+        graph=graph, backend=backend if settings.query_expand_enabled else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.effective_score_threshold,
+        retriever, backend, score_threshold=settings.surface_threshold("ask"),
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
     )
     report = run_benchmark(
@@ -1608,11 +1608,11 @@ def evaluate(
         embedder = build_embedder(settings)
         backend = build_generation_backend(settings)
         retriever = build_retriever(
-            settings, embedder=embedder, expand=settings.query_expand_enabled,
+            settings, surface="ask", embedder=embedder, expand=settings.query_expand_enabled,
             backend=backend if settings.query_expand_enabled else None,
         )
         rag = RAGService(
-            retriever, backend, score_threshold=settings.effective_score_threshold,
+            retriever, backend, score_threshold=settings.surface_threshold("ask"),
             reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
         )
         a_report = run_answer_eval(rag, build_answer_judge(settings), a_examples)
@@ -2061,11 +2061,11 @@ def ui() -> None:
     embedder = build_embedder(settings)  # built once, shared across services
     backend = build_generation_backend(settings)
     retriever = build_retriever(
-        settings, embedder=embedder, expand=settings.query_expand_enabled,
+        settings, surface="ask", embedder=embedder, expand=settings.query_expand_enabled,
         backend=backend if settings.query_expand_enabled else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.effective_score_threshold,
+        retriever, backend, score_threshold=settings.surface_threshold("ask"),
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
         parent_context=build_parent_context(settings),
         parent_context_chars=settings.parent_context_chars,

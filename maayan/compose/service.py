@@ -258,7 +258,7 @@ class CompositionService:
             source=brief.source_scope.source,
         )
         sources = retrieval.results
-        threshold = self._settings.effective_score_threshold
+        threshold = self._settings.surface_threshold("compose")
         supported = bool(sources) and retrieval.relevance >= threshold
 
         # Per-section gate trace (R1): makes an intermittent "corpus silent" refusal

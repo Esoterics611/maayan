@@ -91,3 +91,58 @@ def test_effective_threshold_follows_the_gate_so_scales_are_never_crossed() -> N
 
     dense = Settings(gate_signal="dense_top", score_threshold=0.45, gate_hybrid_threshold=0.795)
     assert dense.effective_score_threshold == 0.45
+
+
+# -- per-surface thresholds (A7) ----------------------------------------------
+def test_surfaces_share_the_global_threshold_by_default() -> None:
+    """Overrides are opt-in: unset, every surface behaves identically."""
+    s = Settings(gate_signal="hybrid_pool", gate_hybrid_threshold=0.795)
+    for surface in (None, "ask", "compose", "develop", "unknown-surface"):
+        assert s.surface_threshold(surface) == 0.795
+
+
+def test_a_surface_override_applies_only_to_that_surface() -> None:
+    s = Settings(
+        gate_signal="hybrid_pool", gate_hybrid_threshold=0.795,
+        compose_score_threshold=0.85,
+    )
+    assert s.surface_threshold("compose") == 0.85   # stricter: thin section -> honest gap
+    assert s.surface_threshold("ask") == 0.795
+    assert s.surface_threshold(None) == 0.795
+
+
+def test_surface_override_of_zero_is_honored_not_treated_as_unset() -> None:
+    """0.0 is a meaningful threshold (answer whenever anything was retrieved)."""
+    s = Settings(ask_score_threshold=0.0, gate_hybrid_threshold=0.795)
+    assert s.surface_threshold("ask") == 0.0
+
+
+def test_surface_override_follows_the_configured_signal_scale() -> None:
+    """The override replaces whichever threshold the gate signal selected."""
+    hybrid = Settings(gate_signal="hybrid_pool", develop_score_threshold=0.9)
+    assert hybrid.surface_threshold("develop") == 0.9
+    dense = Settings(gate_signal="dense_top", score_threshold=0.45, develop_score_threshold=0.6)
+    assert dense.surface_threshold("develop") == 0.6
+    # ...and a surface with no override still tracks its signal's own threshold.
+    assert dense.surface_threshold("ask") == 0.45
+
+
+def test_built_gate_carries_the_surface_threshold() -> None:
+    from maayan.retrieve.factory import build_relevance_gate
+
+    s = Settings(gate_signal="hybrid_pool", gate_hybrid_threshold=0.795,
+                 compose_score_threshold=0.85)
+    assert build_relevance_gate(s, surface="compose").threshold == 0.85
+    assert build_relevance_gate(s, surface="ask").threshold == 0.795
+    assert build_relevance_gate(s).threshold == 0.795
+
+
+def test_a_stricter_compose_surface_actually_refuses_what_ask_would_answer() -> None:
+    """The point of the knob: the same retrieval, two decisions."""
+    from maayan.retrieve.factory import build_relevance_gate
+
+    s = Settings(gate_signal="hybrid_pool", gate_hybrid_threshold=0.795,
+                 compose_score_threshold=0.99, gate_sparse_weight=3.0)
+    signals = ON_TOPIC  # relevance ~0.94
+    assert build_relevance_gate(s, surface="ask").evaluate(signals).answered is True
+    assert build_relevance_gate(s, surface="compose").evaluate(signals).answered is False

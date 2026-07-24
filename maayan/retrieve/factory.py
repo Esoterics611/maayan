@@ -28,14 +28,20 @@ from maayan.retrieve.reranker import Reranker
 from maayan.retrieve.retriever import MultiQueryRetriever, Retriever, Retrieving
 
 
-def build_relevance_gate(settings: Settings) -> RelevanceGate:
-    """The configured default-deny gate. One construction point for every surface."""
+def build_relevance_gate(settings: Settings, *, surface: str | None = None) -> RelevanceGate:
+    """The configured default-deny gate. One construction point for every surface.
+
+    `surface` ("ask" / "compose" / "develop") selects a per-surface threshold override
+    when one is configured; without it every surface gets the global threshold, which
+    is the default.
+    """
+    threshold = settings.surface_threshold(surface)
     return build_gate(
         settings.gate_signal,
-        # The RAW per-signal thresholds: `build_gate` selects between them, so passing
-        # `effective_score_threshold` here would be circular.
-        score_threshold=settings.score_threshold,
-        hybrid_threshold=settings.gate_hybrid_threshold,
+        # `surface_threshold` already resolved which signal's scale applies, so hand
+        # the SAME number to both slots — `build_gate` will pick the one it needs.
+        score_threshold=threshold,
+        hybrid_threshold=threshold,
         sparse_weight=settings.gate_sparse_weight,
     )
 
@@ -43,6 +49,7 @@ def build_relevance_gate(settings: Settings) -> RelevanceGate:
 def build_retriever(
     settings: Settings,
     *,
+    surface: str | None = None,
     embedder: Embedder | None = None,
     hybrid: bool | None = None,
     rerank: bool | None = None,
@@ -84,7 +91,7 @@ def build_retriever(
         shiur_boost=settings.shiur_boost,
         summary_boost=settings.summary_boost,
         hybrid=True if hybrid is None else hybrid,
-        gate=build_relevance_gate(settings),
+        gate=build_relevance_gate(settings, surface=surface),
         gate_pool=settings.gate_pool,
         dedupe_refs=settings.dedupe_refs,
     )
@@ -120,7 +127,7 @@ def build_retriever(
             retriever,
             GraphStore(settings.db_path),
             ChunkStore(settings.db_path),
-            score_threshold=settings.effective_score_threshold,
+            score_threshold=settings.surface_threshold(surface),
             seeds=settings.graph_expand_seeds,
             limit=settings.graph_expand_limit,
             reranker=reranker,

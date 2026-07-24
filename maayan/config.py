@@ -176,6 +176,37 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Per-surface gate overrides. Blank (None) → the global threshold, so by default
+    # every surface behaves identically and nothing changes. They exist because the
+    # surfaces ask retrieval for different things: `ask` answers one question from the
+    # best sources; `compose` fills a whole outline section by section, where a thin
+    # section should become an honest gap rather than thin prose; `develop` proposes
+    # NEW knowledge for a human to approve, where a bad proposal costs review time.
+    # Tune with `maayan eval` per surface — do not guess.
+    ask_score_threshold: float | None = Field(
+        default=None, description="Gate threshold for `ask`. Blank → the global one."
+    )
+    compose_score_threshold: float | None = Field(
+        default=None, description="Gate threshold for compose `fill`. Blank → the global one."
+    )
+    develop_score_threshold: float | None = Field(
+        default=None, description="Gate threshold for `develop`. Blank → the global one."
+    )
+
+    def surface_threshold(self, surface: str | None = None) -> float:
+        """The gate threshold for one surface, falling back to the global one.
+
+        THE accessor for the answer/refuse comparison. Callers must never read
+        `score_threshold` or `gate_hybrid_threshold` directly: which of those applies
+        depends on `gate_signal`, and they are on different scales.
+        """
+        override = {
+            "ask": self.ask_score_threshold,
+            "compose": self.compose_score_threshold,
+            "develop": self.develop_score_threshold,
+        }.get(surface or "")
+        return self.effective_score_threshold if override is None else override
+
     @property
     def effective_score_threshold(self) -> float:
         """The threshold that matches the configured gate signal.
