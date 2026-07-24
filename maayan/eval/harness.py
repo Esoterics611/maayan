@@ -181,9 +181,23 @@ def format_comparison(reports: list[EvalReport], k: int) -> str:
 
 
 def default_variants() -> list[VariantConfig]:
-    """Variants that need no extra downloads (same bge-m3 embedder)."""
+    """Variants that need no extra downloads (same bge-m3 embedder).
+
+    dense-only is here because it is a genuine contender, not a strawman: on this
+    corpus it ranks the single best hit higher than hybrid (MRR) while hybrid finds
+    more of the relevant set (hit@10, recall@10). Which one wins depends on whether
+    you are optimizing the top result or the grounding set, so both stay measured.
+    """
     return [
         VariantConfig(name="hybrid k=10", hybrid=True, top_k=10),
         VariantConfig(name="hybrid k=5", hybrid=True, top_k=5),
         VariantConfig(name="dense-only k=10", hybrid=False, top_k=10),
+    ]
+
+
+def rerank_variants() -> list[VariantConfig]:
+    """Hybrid with and without the cross-encoder — downloads bge-reranker-v2-m3."""
+    return [
+        VariantConfig(name="hybrid k=10", hybrid=True, top_k=10, rerank=False),
+        VariantConfig(name="hybrid k=10 + rerank", hybrid=True, top_k=10, rerank=True),
     ]

@@ -1465,6 +1465,11 @@ def evaluate(
         False, "--rebuild",
         help="With --lexical: regenerate the case file from the current corpus.",
     ),
+    rerank: bool = typer.Option(
+        False, "--rerank",
+        help="With --compare: hybrid with vs without the cross-encoder reranker "
+        "(downloads bge-reranker-v2-m3).",
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
     """Score retrieval (hit@k, recall@k, MRR), or the develop / cross-text / answer step."""
@@ -1604,6 +1609,7 @@ def evaluate(
         default_variants,
         format_comparison,
         format_report,
+        rerank_variants,
         run_comparison,
         run_eval,
     )
@@ -1620,7 +1626,7 @@ def evaluate(
         embedder = build_embedder(settings)  # built once, shared across same-model variants
         reports = run_comparison(
             settings,
-            default_variants(),
+            rerank_variants() if rerank else default_variants(),
             examples,
             settings.eval_ks,
             score_threshold=settings.effective_score_threshold,
