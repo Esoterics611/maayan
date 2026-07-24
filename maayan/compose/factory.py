@@ -10,6 +10,7 @@ from maayan.config import Settings
 from maayan.embed.base import Embedder
 from maayan.embed.factory import build_embedder
 from maayan.generate.factory import build_generation_backend
+from maayan.generate.parent import build_parent_context
 from maayan.retrieve.factory import build_retriever
 from maayan.threads.factory import build_thread_service
 
@@ -37,4 +38,5 @@ def build_composition_service(
         SystemClock(),
         settings,
         build_capture_service(settings, embedder=embedder),
+        parent_context=build_parent_context(settings),
     )

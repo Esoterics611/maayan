@@ -211,3 +211,78 @@ def test_fill_unknown_composition_raises() -> None:
     h = _harness(FakeRetriever({}), RecordingBackend())
     with pytest.raises(ValueError, match="not found"):
         h.svc.fill("nope")
+
+
+# -- (f) parent-context windows in the fill path (R7) -------------------------
+class _StubWindows:
+    """Returns a fixed window per ref, and records what it was asked for."""
+
+    def __init__(self, windows: dict[str, str]) -> None:
+        self._windows = windows
+        self.calls: list[tuple[str, int]] = []
+
+    def window(self, ref: str, lang: str, *, max_chars: int) -> str:
+        self.calls.append((ref, max_chars))
+        return self._windows.get(ref, "")
+
+
+def _parent_harness(chars: int, windows: _StubWindows) -> Harness:
+    retriever = FakeRetriever({"q": ([_sr("Tanya 1:1", "the hit")], 0.9)})
+    backend = RecordingBackend()
+    store = CompositionStore(":memory:")
+    settings = Settings(
+        score_threshold=0.4, compose_section_top_k=5, parent_context_chars=chars
+    )
+    svc = CompositionService(
+        retriever, backend, store, ThreadService(ThreadStore(":memory:"), FakeClock()),
+        FakeClock(), settings, parent_context=windows,
+    )
+    return Harness(svc, store, retriever, backend)
+
+
+def test_fill_attaches_parent_context_to_the_section_prompt() -> None:
+    windows = _StubWindows({"Tanya 1:1": "the surrounding flow"})
+    h = _parent_harness(600, windows)
+    brief = _seed_brief(h.store)
+    _seed_composition(h.store, brief, ["q"])
+
+    h.svc.fill("c-1")
+
+    assert windows.calls == [("Tanya 1:1", 600)]
+    prompt = h.backend.calls[-1][1][0].content
+    assert "the surrounding flow" in prompt
+    # The window is context only — the citation stays the retrieved passage.
+    assert "the hit" in prompt
+
+
+def test_parent_context_is_off_by_default_and_when_budget_is_zero() -> None:
+    windows = _StubWindows({"Tanya 1:1": "the surrounding flow"})
+    h = _parent_harness(0, windows)
+    brief = _seed_brief(h.store)
+    _seed_composition(h.store, brief, ["q"])
+
+    h.svc.fill("c-1")
+
+    assert windows.calls == []
+    assert "the surrounding flow" not in h.backend.calls[-1][1][0].content
+
+
+def test_parent_context_never_runs_for_a_gapped_section() -> None:
+    """It attaches AFTER the gate, so a refusal costs no window lookup — and no model call."""
+    retriever = FakeRetriever({"q-gap": ([_sr("Tanya 1:1")], 0.1)})
+    windows = _StubWindows({"Tanya 1:1": "flow"})
+    store = CompositionStore(":memory:")
+    backend = RecordingBackend()
+    svc = CompositionService(
+        retriever, backend, store, ThreadService(ThreadStore(":memory:"), FakeClock()),
+        FakeClock(), Settings(score_threshold=0.4, parent_context_chars=600),
+        parent_context=windows,
+    )
+    brief = _seed_brief(store)
+    _seed_composition(store, brief, ["q-gap"])
+
+    filled = svc.fill("c-1")
+
+    assert filled.sections[0].supported is False
+    assert windows.calls == []
+    assert backend.calls == []

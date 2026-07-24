@@ -24,7 +24,9 @@ from maayan.compose.models import Brief, Composition, Section
 from maayan.compose.store import CompositionStore
 from maayan.config import Settings
 from maayan.generate.base import GenerationBackend, Message
+from maayan.generate.parent import ParentContextProvider
 from maayan.generate.rag import build_context, extract_cited_refs
+from maayan.retrieve.models import SearchResult
 from maayan.retrieve.retriever import Retrieving
 from maayan.threads.service import ThreadService
 
@@ -161,6 +163,7 @@ class CompositionService:
         settings: Settings,
         capture: CaptureService | None = None,
         *,
+        parent_context: ParentContextProvider | None = None,
         outline_system_prompt: str = DEFAULT_OUTLINE_SYSTEM_PROMPT,
         section_system_prompt: str = DEFAULT_SECTION_SYSTEM_PROMPT,
         transition_system_prompt: str = DEFAULT_TRANSITION_SYSTEM_PROMPT,
@@ -173,6 +176,7 @@ class CompositionService:
         self._clock = clock
         self._settings = settings
         self._capture = capture
+        self._parent_context = parent_context
         self._outline_system_prompt = outline_system_prompt
         self._section_system_prompt = section_system_prompt
         self._transition_system_prompt = transition_system_prompt
@@ -235,6 +239,17 @@ class CompositionService:
         updated = composition.model_copy(update={"sections": filled})
         return self._store.save_composition(updated)
 
+    def _attach_parent_context(self, sources: list[SearchResult]) -> None:
+        """Populate each hit's `parent_context` window when parent-context is enabled."""
+        budget = self._settings.parent_context_chars
+        if self._parent_context is None or budget <= 0:
+            return
+        for source in sources:
+            if not source.parent_context:
+                source.parent_context = self._parent_context.window(
+                    source.ref, source.lang, max_chars=budget
+                )
+
     def _fill_section(self, section: Section, brief: Brief) -> Section:
         retrieval = self._retriever.retrieve(
             section.query,
@@ -260,6 +275,11 @@ class CompositionService:
                 "supported": False, "text": self._gap_text, "cited_refs": [], "grounded_in": [],
             })
 
+        # Parent-context windows (Prompt 42), as `ask` already does. Attached AFTER the
+        # gate, so this cannot change the gap rate — only how much surrounding flow the
+        # model sees when writing a section it was already allowed to write. The window
+        # is never citable; `build_context` renders it as an explicitly non-citable block.
+        self._attach_parent_context(sources)
         messages = build_section_messages(section, brief, build_context(sources))
         text = self._backend.generate(self._section_system_prompt, messages)
         return section.model_copy(update={
