@@ -47,6 +47,23 @@ def fold_surface(s: str) -> str:
     return _WHITESPACE.sub(" ", s).strip().casefold()
 
 
+def fold_for_embedding(text: str) -> str:
+    """Fold text before it is handed to the embedder. Never touches stored text.
+
+    bge-m3 tokenizes with a subword vocabulary, and nikkud characters tokenize as
+    separate pieces: the SAME Tanya passage yields 64 sparse terms vocalized vs 38
+    plain, sharing only ~10-17% of them (measured). Queries are typed without nikkud,
+    so a vocalized passage and the query that should match it end up in effectively
+    different lexical spaces and the sparse branch goes blind.
+
+    Applied to documents AND queries through `FoldingEmbedder`, so index-time and
+    query-time normalization cannot drift apart. Unlike `fold_surface` this keeps
+    gershayim/geresh: they mark rashei-teivot, and removing them merges distinct
+    forms (ע״ב → עב) rather than aligning them.
+    """
+    return normalize_whitespace(_NIKKUD.sub("", text))
+
+
 def strip_markup(raw: str) -> str:
     """Remove HTML/editorial markup, keep the underlying text. Keeps nikkud."""
     text = _FOOTNOTE_MARKER.sub("", raw)

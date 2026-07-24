@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     embed_device: str = Field(
         default="auto", description='Torch device: "auto" | "cpu" | "cuda" | "mps".'
     )
+    embed_fold_nikkud: bool = Field(
+        default=True,
+        description=(
+            "Strip nikkud/te'amim from text on its way INTO the embedder (documents and "
+            "queries alike). Stored corpus text keeps its nikkud. bge-m3 tokenizes nikkud "
+            "as separate subwords, so a vocalized passage and the unvocalized query that "
+            "should match it share only ~10-17% of their sparse terms. Takes effect for "
+            "documents only after a re-index (the vectors change); queries are unaffected "
+            "either way, since nobody types nikkud."
+        ),
+    )
 
     # ---- Reranker (local, optional) -----------------------------------------
     rerank_enabled: bool = Field(default=False)
