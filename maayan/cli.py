@@ -296,6 +296,70 @@ def index(
 
 
 @app.command()
+def coverage(
+    remote: bool = typer.Option(
+        False, "--remote",
+        help="Also fetch an INDEPENDENT segment count from Sefaria (network) and compare.",
+    ),
+) -> None:
+    """Audit that everything which should be retrievable actually is.
+
+    Counts the corpus from each side — stored chunks, Qdrant points, and (with
+    `--remote`) the upstream source — and flags any book where they disagree. A
+    silent partial ingest or half-finished re-index shows up here as a mismatch
+    instead of quietly degrading every retrieval metric downstream.
+
+    Exits non-zero when anything fails to reconcile, so it can guard a pipeline.
+    """
+    import asyncio
+
+    from maayan.corpus.store import ChunkStore
+    from maayan.index.coverage import build_report, format_report
+    from maayan.index.qdrant import QdrantIndex, build_qdrant_client
+
+    settings = _cfg()
+    require_qdrant(settings)
+    with ChunkStore(settings.db_path) as store:
+        stored = store.counts_by_book()
+    # Counting never touches a vector, so use the configured dim and skip loading bge-m3.
+    qindex = QdrantIndex(
+        build_qdrant_client(settings), settings.collection_name, settings.embed_dim
+    )
+    indexed = qindex.count_by_book(sorted(stored))
+
+    expected: dict[str, int] | None = None
+    if remote:
+        typer.echo(f"Fetching shapes for {len(settings.books)} Sefaria books…")
+        expected = asyncio.run(_sefaria_expected_counts(settings))
+
+    report = build_report(
+        stored, indexed, expected=expected, total_indexed=qindex.count()
+    )
+    typer.echo(format_report(report))
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+async def _sefaria_expected_counts(settings: Settings) -> dict[str, int]:
+    """Segment count per configured book, straight from Sefaria's shape API."""
+    import httpx
+
+    from maayan.corpus.sefaria import SefariaClient
+
+    counts: dict[str, int] = {}
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        client = SefariaClient(
+            http, SystemClock(),
+            base_url=settings.sefaria_base_url,
+            rate_limit_seconds=settings.sefaria_rate_limit_seconds,
+        )
+        for book in settings.books:
+            shape = await client.fetch_shape(book)
+            counts[book] = sum(shape.chapter_lengths)
+    return counts
+
+
+@app.command()
 def search(
     query: str = typer.Argument(..., help="Query text (Hebrew or English)."),
     k: int = typer.Option(None, "--k", help="How many results to return."),

@@ -181,6 +181,23 @@ class QdrantIndex:
     def count(self) -> int:
         return self._client.count(self._collection).count
 
+    def count_by_book(self, books: Sequence[str]) -> dict[str, int]:
+        """Point count per book, straight from Qdrant — the coverage audit's index side.
+
+        Counting in the index (rather than trusting the store's `indexed` flag) is the
+        whole point: the flag records what the pipeline *believes* it wrote, while this
+        records what is actually retrievable.
+        """
+        return {
+            book: self._client.count(
+                self._collection,
+                count_filter=models.Filter(
+                    must=[models.FieldCondition(key="book", match=models.MatchValue(value=book))]
+                ),
+            ).count
+            for book in books
+        }
+
     def retrieve(self, point_id: str) -> dict[str, Any] | None:
         """Fetch a single point's payload by id (used in tests/demos)."""
         records = self._client.retrieve(
