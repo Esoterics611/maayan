@@ -181,10 +181,21 @@ broke 18 tests that had been assuming `score_threshold` was universal.
   with `ask`, but its effect is on section prose, not on the gap rate — parent context
   attaches *after* the gate, so it cannot change how often compose refuses. Measuring
   the prose effect needs the LLM-judge harness.
-- **Indexing throughput.** A full `index --rebuild` ran at roughly 20 chunks/min on
-  this box (Quadro T1000, `EMBED_BATCH_SIZE=8`), which projects to ~7 hours — slower
-  than the 2h CPU figure in the runbook. GPU memory sat at 1.4GB of 4GB, so the batch
-  size looks like the limiter and is worth raising before the next full re-index.
+- **Indexing throughput is the practical constraint on re-embedding.** A full
+  `index --rebuild` ran at ~20 chunks/min on this box, projecting to ~7 hours for
+  8,764 chunks. This matches the measurement already in `docs/RUNBOOK.md` §3: bge-m3
+  is bottlenecked on its **CPU-side sparse/lexical pass**, so neither `EMBED_DEVICE`
+  nor `EMBED_BATCH_SIZE` moves it (batch 8→32 changed nothing; GPU sat at 1.4GB of
+  4GB and 100% util either way). Do not "fix" this by raising the batch size.
+
+  Consequence worth planning around: `index --rebuild` is **not resumable** — it
+  re-embeds from zero, and killing it leaves the collection partially built. Plain
+  `maayan index` is incremental and resumable. For a change that only affects *some*
+  chunks (the nikkud fold touches only the 702 vocalized ones), re-embedding just
+  those and writing them back with `update_vectors` takes ~8 minutes instead of 7
+  hours — and `update_vectors` leaves payloads alone, which a plain `upsert` with
+  `payload=None` does not (that silently wipes them; it invalidated one run of this
+  audit's own measurements before it was caught).
 - **Gold set size.** 42 positives and 22 negatives is enough to see effects this large
   and not enough to tune finely. The thresholds here are honest fits to a small
   sample; treat them as good starting points, not settled constants.
