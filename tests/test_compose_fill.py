@@ -62,7 +62,8 @@ def _harness(retriever: FakeRetriever, backend: RecordingBackend, *, threshold: 
              auto_outline: bool = False) -> Harness:
     store = CompositionStore(":memory:")
     threads = ThreadService(ThreadStore(":memory:"), FakeClock())
-    settings = Settings(score_threshold=threshold, compose_section_top_k=5,
+    settings = Settings(gate_signal="dense_top", score_threshold=threshold,
+                        compose_section_top_k=5,
                         compose_auto_outline=auto_outline)
     svc = CompositionService(retriever, backend, store, threads, FakeClock(), settings)
     return Harness(svc, store, retriever, backend)
@@ -231,7 +232,8 @@ def _parent_harness(chars: int, windows: _StubWindows) -> Harness:
     backend = RecordingBackend()
     store = CompositionStore(":memory:")
     settings = Settings(
-        score_threshold=0.4, compose_section_top_k=5, parent_context_chars=chars
+        gate_signal="dense_top", score_threshold=0.4, compose_section_top_k=5,
+        parent_context_chars=chars,
     )
     svc = CompositionService(
         retriever, backend, store, ThreadService(ThreadStore(":memory:"), FakeClock()),
@@ -275,7 +277,8 @@ def test_parent_context_never_runs_for_a_gapped_section() -> None:
     backend = RecordingBackend()
     svc = CompositionService(
         retriever, backend, store, ThreadService(ThreadStore(":memory:"), FakeClock()),
-        FakeClock(), Settings(score_threshold=0.4, parent_context_chars=600),
+        FakeClock(),
+        Settings(gate_signal="dense_top", score_threshold=0.4, parent_context_chars=600),
         parent_context=windows,
     )
     brief = _seed_brief(store)

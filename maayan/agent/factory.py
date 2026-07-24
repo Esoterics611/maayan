@@ -38,7 +38,7 @@ def build_agent_service(
         TermStore(settings.db_path),
         TraceStore(settings.db_path),
         SystemClock(),
-        score_threshold=settings.score_threshold,
+        score_threshold=settings.effective_score_threshold,
         max_hops=settings.agent_max_hops,
         max_chunks=settings.agent_max_chunks,
         max_calls=settings.agent_max_calls,

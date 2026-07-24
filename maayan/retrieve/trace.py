@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from maayan.retrieve.models import SearchResult
+from maayan.retrieve.models import GateSignals, SearchResult
 
 
 class StageHit(BaseModel):
@@ -46,24 +46,6 @@ class StageTrace(BaseModel):
             if hit.ref == ref:
                 return hit.rank
         return None
-
-
-class GateSignals(BaseModel):
-    """The absolute relevance signals a refusal gate can be built from.
-
-    All are computed over the same candidate pool. The `_top` values are the single
-    best score in a branch; the `_mean` values average the pool, which is a much
-    lower-variance estimate of "how much relevant material is actually there" — over
-    ~9k points the single top cosine is a max over noise. `rerank_top` is present
-    only when a cross-encoder ran.
-    """
-
-    dense_top: float = 0.0
-    dense_mean: float = 0.0
-    sparse_top: float = 0.0
-    sparse_mean: float = 0.0
-    rerank_top: float | None = None
-    pool: int = 0  # how many hits the means were taken over
 
 
 class QueryTrace(BaseModel):

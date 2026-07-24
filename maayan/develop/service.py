@@ -113,7 +113,7 @@ class DevelopmentService:
         sources = retrieval.results
 
         # DEFAULT-DENY: refuse without calling the model when the corpus doesn't support it.
-        if not sources or retrieval.relevance < self._settings.score_threshold:
+        if not sources or retrieval.relevance < self._settings.effective_score_threshold:
             return self._finish(
                 seed,
                 thread_id,

@@ -44,13 +44,37 @@ class SearchResult(BaseModel):
         return line[:width]
 
 
+class GateSignals(BaseModel):
+    """The absolute relevance signals a refusal gate can be built from.
+
+    All are computed over the same candidate pool. The `_top` values are the single
+    best score in a branch; the `_mean` values average the pool, which is a much
+    lower-variance estimate of "how much relevant material is actually there" — over
+    ~9k points the single top cosine is a max over noise. `rerank_top` is present
+    only when a cross-encoder ran.
+    """
+
+    dense_top: float = 0.0
+    dense_mean: float = 0.0
+    sparse_top: float = 0.0
+    sparse_mean: float = 0.0
+    rerank_top: float | None = None
+    pool: int = 0  # how many hits the means were taken over
+
+
 class RetrievalResult(BaseModel):
     """Ranked results plus an absolute relevance score used for the answer/refuse gate.
 
-    `relevance` is the top dense-cosine similarity (0..1-ish), an *absolute* measure —
-    unlike the RRF fusion `score` on each result, which only reflects rank position
-    and so cannot tell "relevant" from "best of irrelevant".
+    `relevance` is an *absolute* measure — unlike the RRF fusion `score` on each result,
+    which only reflects rank position and so cannot tell "relevant" from "best of
+    irrelevant". WHICH absolute measure depends on the injected `RelevanceGate`, so
+    callers must compare it against `Settings.effective_score_threshold` rather than
+    `score_threshold`: the gates are on different scales.
+
+    `signals` carries the raw per-branch signals the gate judged on, when available —
+    kept so a refusal can be explained after the fact without re-running the query.
     """
 
     results: list[SearchResult]
     relevance: float
+    signals: GateSignals | None = None

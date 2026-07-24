@@ -7,16 +7,18 @@ injected (index, embedder, optional reranker), per the DI house rule.
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from qdrant_client import models
 
-from maayan.embed.base import Embedder
+from maayan.embed.base import Embedder, Embedding
 from maayan.index.qdrant import QdrantIndex
 from maayan.retrieve.expand import QueryExpander
 from maayan.retrieve.fuse import DEFAULT_RRF_K, rrf_fuse
-from maayan.retrieve.models import RetrievalResult, SearchResult
+from maayan.retrieve.gate import RelevanceGate
+from maayan.retrieve.models import GateSignals, RetrievalResult, SearchResult
 from maayan.retrieve.reranker import Reranker
 
 
@@ -95,7 +97,11 @@ class Retriever:
         shiur_boost: float = 1.0,
         summary_boost: float = 1.0,
         hybrid: bool = True,
+        gate: RelevanceGate | None = None,
+        gate_pool: int = 10,
     ) -> None:
+        self._gate = gate
+        self._gate_pool = gate_pool
         self._index = index
         self._embedder = embedder
         self._top_k = top_k
@@ -133,25 +139,22 @@ class Retriever:
         results = [_to_search_result(p) for p in points]
         results = self._apply_source_boosts(results)
 
+        rerank_top: float | None = None
         if self._reranker is not None and results:
             # The cross-encoder score is a far more discriminative relevance signal
             # than bi-encoder cosine, so use it for the gate too (computed for free).
             raw_scores = self._reranker.rerank(query, [r.text for r in results])
             for r, s in zip(results, raw_scores, strict=True):
                 r.score = s * self._source_boost(r.source)
-            results.sort(key=_rank_key)
-            relevance = max(raw_scores) if raw_scores else 0.0
-        else:
-            results.sort(key=_rank_key)
-            if self._hybrid:
-                # Absolute relevance gate: top dense cosine (RRF scores are rank-based).
-                dense_top = self._index.query_dense(emb.dense, limit=1, query_filter=flt)
-                relevance = float(dense_top[0].score) if dense_top else 0.0
-            else:
-                # Dense-only: result scores already are cosine similarities.
-                relevance = results[0].score if results else 0.0
+            rerank_top = max(raw_scores) if raw_scores else 0.0
+        results.sort(key=_rank_key)
 
-        return RetrievalResult(results=results[:final_k], relevance=relevance)
+        signals = self._gate_signals(emb, flt, results, rerank_top)
+        gate = self._gate
+        relevance = gate.relevance(signals) if gate is not None else signals.dense_top
+        return RetrievalResult(
+            results=results[:final_k], relevance=relevance, signals=signals
+        )
 
     def search(
         self,
@@ -166,6 +169,43 @@ class Retriever:
         return self.retrieve(query, k=k, book=book, source=source, langs=langs).results
 
     # -- internals -----------------------------------------------------------
+    def _gate_signals(
+        self,
+        emb: Embedding,
+        flt: models.Filter | None,
+        results: list[SearchResult],
+        rerank_top: float | None,
+    ) -> GateSignals:
+        """Absolute per-branch signals for the gate.
+
+        RRF fusion scores are rank-based and cannot tell "relevant" from "best of
+        irrelevant", so the branches are queried on their own. In dense-only mode the
+        result scores already ARE cosines and no extra query is needed; in hybrid mode
+        this costs two small local Qdrant reads per retrieve.
+        """
+        pool = self._gate_pool
+        if not self._hybrid:
+            scores = [r.score for r in results[:pool]]
+            top = scores[0] if scores else 0.0
+            mean = statistics.fmean(scores) if scores else 0.0
+            return GateSignals(
+                dense_top=top, dense_mean=mean, rerank_top=rerank_top, pool=pool
+            )
+        dense = self._index.query_dense(emb.dense, limit=pool, query_filter=flt)
+        sparse = self._index.query_sparse(
+            emb.sparse_indices, emb.sparse_values, limit=pool, query_filter=flt
+        )
+        d = [float(p.score) for p in dense]
+        s = [float(p.score) for p in sparse]
+        return GateSignals(
+            dense_top=d[0] if d else 0.0,
+            dense_mean=statistics.fmean(d) if d else 0.0,
+            sparse_top=s[0] if s else 0.0,
+            sparse_mean=statistics.fmean(s) if s else 0.0,
+            rerank_top=rerank_top,
+            pool=pool,
+        )
+
     def _source_boost(self, source: str) -> float:
         """Score multiplier per source: expert, derived, term, shiur, summary (all human-gated)."""
         if source == "expert":

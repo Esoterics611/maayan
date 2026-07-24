@@ -79,7 +79,7 @@ def _result(ref: str) -> SearchResult:
 def _setup(backend: _RecordingBackend) -> tuple[DevelopmentService, ThreadService]:
     threads = ThreadService(ThreadStore(":memory:"), FakeClock())
     retriever = _KeyedRetriever([_result("Tanya 1:6"), _result("Tanya 9:1")], high=0.7, low=0.1)
-    settings = Settings(score_threshold=0.4, develop_top_k=5)
+    settings = Settings(gate_signal="dense_top", score_threshold=0.4, develop_top_k=5)
     service = DevelopmentService(
         retriever, backend, DevelopmentStore(":memory:"), threads, FakeClock(),
         settings, HashingEmbedder(dim=DIM),
@@ -117,7 +117,7 @@ def test_run_develop_eval_counts_over_refusal_and_forced_development() -> None:
     backend = _RecordingBackend(reply="[S1]")
     threads = ThreadService(ThreadStore(":memory:"), FakeClock())
     retriever = _KeyedRetriever([_result("Tanya 1:6")], high=0.7, low=0.1)
-    settings = Settings(score_threshold=0.99, develop_top_k=5)
+    settings = Settings(gate_signal="dense_top", score_threshold=0.99, develop_top_k=5)
     service = DevelopmentService(
         retriever, backend, DevelopmentStore(":memory:"), threads, FakeClock(),
         settings, HashingEmbedder(dim=DIM),

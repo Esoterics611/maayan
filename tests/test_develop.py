@@ -82,7 +82,7 @@ def _harness(
     index = QdrantIndex(QdrantClient(location=":memory:"), "t", DIM)
     chunks = ChunkStore(":memory:")
     settings = Settings(
-        score_threshold=threshold, develop_top_k=5,
+        gate_signal="dense_top", score_threshold=threshold, develop_top_k=5,
         develop_auto_approve=auto_approve, derived_boost=derived_boost,
     )
     svc = DevelopmentService(

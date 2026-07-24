@@ -258,14 +258,15 @@ class CompositionService:
             source=brief.source_scope.source,
         )
         sources = retrieval.results
-        supported = bool(sources) and retrieval.relevance >= self._settings.score_threshold
+        threshold = self._settings.effective_score_threshold
+        supported = bool(sources) and retrieval.relevance >= threshold
 
         # Per-section gate trace (R1): makes an intermittent "corpus silent" refusal
         # diagnosable — was retrieval empty, or did relevance just miss the threshold?
         logger.info(
             "compose.fill heading=%r query=%r hits=%d relevance=%.3f threshold=%.3f book=%r -> %s",
             section.heading, section.query, len(sources), retrieval.relevance,
-            self._settings.score_threshold, brief.source_scope.book,
+            threshold, brief.source_scope.book,
             "FILL" if supported else "GAP",
         )
 

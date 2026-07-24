@@ -12,6 +12,7 @@ from maayan.embed.fake import HashingEmbedder
 from maayan.index.pipeline import index_chunks
 from maayan.index.qdrant import QdrantIndex
 from maayan.retrieve.expand import ExpandedQuery
+from maayan.retrieve.gate import DenseTopGate, HybridPoolGate
 from maayan.retrieve.inspect import RetrievalInspector
 from maayan.retrieve.trace import format_trace
 
@@ -47,7 +48,7 @@ def _inspector(**kwargs: object) -> RetrievalInspector:
 
 
 def test_trace_reports_every_branch_separately() -> None:
-    trace = _inspector(threshold=0.0, pool=3).inspect("בחירה חופשית")
+    trace = _inspector(gate=DenseTopGate(0.0), pool=3).inspect("בחירה חופשית")
     assert len(trace.queries) == 1
     names = [s.name for s in trace.queries[0].stages]
     assert names == ["dense", "sparse", "fused"]  # no reranker → no rerank stage
@@ -62,7 +63,7 @@ def test_trace_reports_every_branch_separately() -> None:
 
 
 def test_gate_signals_are_populated_and_pooled() -> None:
-    trace = _inspector(threshold=0.0, pool=3).inspect("בחירה חופשית")
+    trace = _inspector(gate=DenseTopGate(0.0), pool=3).inspect("בחירה חופשית")
     s = trace.signals
     assert s.pool == 3
     # A real lexical overlap exists, so both branches score above zero...
@@ -73,12 +74,12 @@ def test_gate_signals_are_populated_and_pooled() -> None:
 
 
 def test_gate_decision_follows_the_threshold() -> None:
-    answered = _inspector(threshold=0.0).inspect("בחירה חופשית")
+    answered = _inspector(gate=DenseTopGate(0.0)).inspect("בחירה חופשית")
     assert answered.answered and answered.decision == "ANSWER"
     assert answered.gate_signal == "dense_top"
     assert answered.relevance == answered.signals.dense_top
 
-    refused = _inspector(threshold=1.5).inspect("בחירה חופשית")
+    refused = _inspector(gate=DenseTopGate(1.5)).inspect("בחירה חופשית")
     assert not refused.answered and refused.decision == "REFUSE"
     # Refusing does not hide what WAS found — that is the point of the trace.
     assert refused.queries[0].stages[0].hits
@@ -95,7 +96,7 @@ class _FakeReranker:
 
 
 def test_reranker_adds_a_stage_and_becomes_the_gate_signal() -> None:
-    trace = _inspector(threshold=1.0, reranker=_FakeReranker("תפילה")).inspect("עבודת השם")
+    trace = _inspector(gate=DenseTopGate(1.0), reranker=_FakeReranker("תפילה")).inspect("עבודת השם")
     stage_names = [s.name for s in trace.queries[0].stages]
     assert stage_names == ["dense", "sparse", "fused", "rerank"]
     # The cross-encoder score replaces cosine as the gate signal (as in Retriever).
@@ -114,14 +115,14 @@ class _FakeExpander:
 
 
 def test_expansion_shows_every_query_actually_sent() -> None:
-    trace = _inspector(threshold=0.0, expander=_FakeExpander()).inspect("בחירה חופשית")
+    trace = _inspector(gate=DenseTopGate(0.0), expander=_FakeExpander()).inspect("בחירה חופשית")
     assert [q.query for q in trace.queries] == ["בחירה חופשית", "אהבת השם"]
     # Aggregate signals take the best any variant achieved (as MultiQueryRetriever does).
     assert trace.signals.dense_top == max(q.signals.dense_top for q in trace.queries)
 
 
 def test_stage_rank_of_finds_cross_stage_agreement() -> None:
-    trace = _inspector(threshold=0.0).inspect("בחירה חופשית")
+    trace = _inspector(gate=DenseTopGate(0.0)).inspect("בחירה חופשית")
     dense = trace.queries[0].stage("dense")
     fused = trace.queries[0].stage("fused")
     assert dense is not None and fused is not None
@@ -130,8 +131,19 @@ def test_stage_rank_of_finds_cross_stage_agreement() -> None:
     assert dense.rank_of("Nonexistent 9:9") is None
 
 
+def test_trace_reports_whichever_gate_it_was_given() -> None:
+    """No drift: the trace explains the decision the injected gate actually makes."""
+    hybrid = HybridPoolGate(0.795, sparse_weight=3.0)
+    trace = _inspector(gate=hybrid).inspect("בחירה חופשית")
+    assert trace.gate_signal == "hybrid_pool"
+    assert trace.threshold == 0.795
+    assert trace.relevance == hybrid.relevance(trace.signals)
+    # ...and it is a different number from what the dense-top gate would report.
+    assert trace.relevance != trace.signals.dense_top
+
+
 def test_format_trace_renders_stages_signals_and_decision() -> None:
-    text = format_trace(_inspector(threshold=1.5).inspect("בחירה חופשית"))
+    text = format_trace(_inspector(gate=DenseTopGate(1.5)).inspect("בחירה חופשית"))
     assert "[dense]" in text and "[sparse]" in text and "[fused]" in text
     assert "GATE: REFUSE" in text
     assert "dense_top=" in text and "sparse_mean@" in text

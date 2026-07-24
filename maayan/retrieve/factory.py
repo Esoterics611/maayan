@@ -22,9 +22,22 @@ from maayan.retrieve.expand import (
     QueryExpander,
     TermSource,
 )
+from maayan.retrieve.gate import RelevanceGate, build_gate
 from maayan.retrieve.inspect import RetrievalInspector
 from maayan.retrieve.reranker import Reranker
 from maayan.retrieve.retriever import MultiQueryRetriever, Retriever, Retrieving
+
+
+def build_relevance_gate(settings: Settings) -> RelevanceGate:
+    """The configured default-deny gate. One construction point for every surface."""
+    return build_gate(
+        settings.gate_signal,
+        # The RAW per-signal thresholds: `build_gate` selects between them, so passing
+        # `effective_score_threshold` here would be circular.
+        score_threshold=settings.score_threshold,
+        hybrid_threshold=settings.gate_hybrid_threshold,
+        sparse_weight=settings.gate_sparse_weight,
+    )
 
 
 def build_retriever(
@@ -71,6 +84,8 @@ def build_retriever(
         shiur_boost=settings.shiur_boost,
         summary_boost=settings.summary_boost,
         hybrid=True if hybrid is None else hybrid,
+        gate=build_relevance_gate(settings),
+        gate_pool=settings.gate_pool,
     )
 
     retriever: Retrieving = base
@@ -104,7 +119,7 @@ def build_retriever(
             retriever,
             GraphStore(settings.db_path),
             ChunkStore(settings.db_path),
-            score_threshold=settings.score_threshold,
+            score_threshold=settings.effective_score_threshold,
             seeds=settings.graph_expand_seeds,
             limit=settings.graph_expand_limit,
             reranker=reranker,
@@ -157,7 +172,7 @@ def build_inspector(
     return RetrievalInspector(
         index,
         embedder,
-        threshold=settings.score_threshold,
+        gate=build_relevance_gate(settings),
         pool=settings.gate_pool,
         show=settings.inspect_show,
         expander=expander,

@@ -484,7 +484,7 @@ def ask(
         backend=backend if use_expand else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.score_threshold,
+        retriever, backend, score_threshold=settings.effective_score_threshold,
         reasoning=use_reasoning, verify=use_verify,
         parent_context=build_parent_context(settings),
         parent_context_chars=settings.parent_context_chars,
@@ -1352,7 +1352,7 @@ def bench(
         backend=backend if settings.query_expand_enabled else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.score_threshold,
+        retriever, backend, score_threshold=settings.effective_score_threshold,
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
     )
     report = run_benchmark(
@@ -1500,13 +1500,13 @@ def evaluate(
         )
         retriever = build_retriever(settings)
         report = run_eval(
-            retriever, gold, settings.eval_ks, score_threshold=settings.score_threshold
+            retriever, gold, settings.eval_ks, score_threshold=settings.effective_score_threshold
         )
         typer.echo(format_report(report))
         answered = sum(
             1
             for ex in gate_only
-            if retriever.retrieve(ex.question).relevance >= settings.score_threshold
+            if retriever.retrieve(ex.question).relevance >= settings.effective_score_threshold
         )
         if gate_only:
             typer.echo(
@@ -1563,7 +1563,7 @@ def evaluate(
         a_path = goldset or settings.eval_answer_goldset_path
         a_examples = load_goldset(a_path)
         typer.echo(f"Answer gold set: {a_path} ({len(a_examples)} questions)")
-        typer.echo(f"Default-deny gate threshold: {settings.score_threshold}")
+        typer.echo(f"Default-deny gate threshold: {settings.effective_score_threshold}")
         judge_model = settings.eval_judge_model or settings.generation_model
         typer.echo(
             f"Pipeline: expand={settings.query_expand_enabled} "
@@ -1578,7 +1578,7 @@ def evaluate(
             backend=backend if settings.query_expand_enabled else None,
         )
         rag = RAGService(
-            retriever, backend, score_threshold=settings.score_threshold,
+            retriever, backend, score_threshold=settings.effective_score_threshold,
             reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
         )
         a_report = run_answer_eval(rag, build_answer_judge(settings), a_examples)
@@ -1593,7 +1593,7 @@ def evaluate(
         dev_path = goldset or settings.eval_develop_goldset_path
         dev_examples = load_develop_goldset(dev_path)
         typer.echo(f"Develop gold set: {dev_path} ({len(dev_examples)} seeds)")
-        typer.echo(f"Default-deny gate threshold: {settings.score_threshold}\n")
+        typer.echo(f"Default-deny gate threshold: {settings.effective_score_threshold}\n")
         service, dev_threads, clock = build_develop_eval_setup(settings)
         dev_report = run_develop_eval(service, dev_threads, clock, dev_examples)
         typer.echo(format_develop_report(dev_report))
@@ -1612,7 +1612,7 @@ def evaluate(
     path = goldset or settings.eval_goldset_path
     examples = load_goldset(path)
     typer.echo(f"Gold set: {path} ({len(examples)} questions)")
-    typer.echo(f"Default-deny gate threshold: {settings.score_threshold}\n")
+    typer.echo(f"Default-deny gate threshold: {settings.effective_score_threshold}\n")
 
     if compare:
         from maayan.embed.factory import build_embedder
@@ -1623,14 +1623,15 @@ def evaluate(
             default_variants(),
             examples,
             settings.eval_ks,
-            score_threshold=settings.score_threshold,
+            score_threshold=settings.effective_score_threshold,
             embedder=embedder,
         )
         typer.echo(format_comparison(reports, k=k))
     else:
         retriever = build_retriever(settings)
         report = run_eval(
-            retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
+            retriever, examples, settings.eval_ks,
+            score_threshold=settings.effective_score_threshold,
         )
         typer.echo(format_report(report))
 
@@ -1728,7 +1729,8 @@ def eval_expand(
 
     def _scored(retriever: Retrieving, label: str) -> EvalReport:
         report = run_eval(
-            retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
+            retriever, examples, settings.eval_ks,
+            score_threshold=settings.effective_score_threshold,
         )
         return replace(report, variant=label)
 
@@ -2028,7 +2030,7 @@ def ui() -> None:
         backend=backend if settings.query_expand_enabled else None,
     )
     rag = RAGService(
-        retriever, backend, score_threshold=settings.score_threshold,
+        retriever, backend, score_threshold=settings.effective_score_threshold,
         reasoning=settings.rag_reasoning_enabled, verify=settings.answer_verify_enabled,
         parent_context=build_parent_context(settings),
         parent_context_chars=settings.parent_context_chars,

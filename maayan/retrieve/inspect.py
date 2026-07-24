@@ -23,11 +23,11 @@ from qdrant_client import models
 from maayan.embed.base import Embedder
 from maayan.index.qdrant import QdrantIndex
 from maayan.retrieve.expand import QueryExpander
-from maayan.retrieve.models import SearchResult
+from maayan.retrieve.gate import RelevanceGate
+from maayan.retrieve.models import GateSignals, SearchResult
 from maayan.retrieve.reranker import Reranker
 from maayan.retrieve.retriever import _build_filter, _to_search_result
 from maayan.retrieve.trace import (
-    GateSignals,
     QueryTrace,
     RetrievalTrace,
     StageHit,
@@ -76,7 +76,7 @@ class RetrievalInspector:
         index: QdrantIndex,
         embedder: Embedder,
         *,
-        threshold: float,
+        gate: RelevanceGate,
         pool: int = 10,
         show: int = 8,
         expander: QueryExpander | None = None,
@@ -84,7 +84,7 @@ class RetrievalInspector:
     ) -> None:
         self._index = index
         self._embedder = embedder
-        self._threshold = threshold
+        self._gate = gate
         self._pool = pool
         self._show = show
         self._expander = expander
@@ -119,30 +119,22 @@ class RetrievalInspector:
             ),
             pool=self._pool,
         )
-        relevance, signal_name = self._gate_relevance(aggregate)
+        # THE SAME gate object production uses — the trace must never explain a
+        # decision differently from how it was actually made.
+        decision = self._gate.evaluate(aggregate)
         results = traced[0].results[:show] if traced else []
         return RetrievalTrace(
             question=question,
             queries=traces,
             signals=aggregate,
-            relevance=relevance,
-            threshold=self._threshold,
-            gate_signal=signal_name,
-            answered=bool(results) and relevance >= self._threshold,
+            relevance=decision.relevance,
+            threshold=decision.threshold,
+            gate_signal=decision.signal,
+            answered=bool(results) and decision.answered,
             results=results,
         )
 
     # -- internals -----------------------------------------------------------
-    def _gate_relevance(self, signals: GateSignals) -> tuple[float, str]:
-        """The relevance the production gate would use, and which signal it is.
-
-        Mirrors `Retriever.retrieve`: the cross-encoder score when a reranker ran
-        (far more discriminative than bi-encoder cosine), else the top dense cosine.
-        """
-        if signals.rerank_top is not None:
-            return signals.rerank_top, "rerank_top"
-        return signals.dense_top, "dense_top"
-
     def _trace_one(
         self, query: str, flt: models.Filter | None, show: int
     ) -> _TracedQuery:

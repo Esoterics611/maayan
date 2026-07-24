@@ -61,7 +61,7 @@ def build_lexicon_populator(
         SystemClock(),
         model=draft_settings.generation_model,
         top_k=settings.lexicon_draft_top_k,
-        score_threshold=settings.score_threshold,
+        score_threshold=settings.effective_score_threshold,
         verify=settings.lexicon_draft_verify,
     )
     return LexiconPopulator(

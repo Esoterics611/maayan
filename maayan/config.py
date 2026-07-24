@@ -114,6 +114,32 @@ class Settings(BaseSettings):
             "this per corpus via the eval harness; enabling rerank sharpens separation."
         ),
     )
+    gate_signal: str = Field(
+        default="hybrid_pool",
+        description=(
+            'Which signal the default-deny gate judges on: "hybrid_pool" (pooled dense '
+            'cosine + weighted pooled sparse) or "dense_top" (the original single top '
+            "cosine). Each carries its OWN threshold — see `effective_score_threshold` — "
+            "because they are on different scales and must never share a number."
+        ),
+    )
+    gate_hybrid_threshold: float = Field(
+        default=0.795,
+        description=(
+            "Threshold for gate_signal='hybrid_pool' (dense_mean + weight*sparse_mean). "
+            "Derived empirically on the folded index: 42 gold positives vs 22 negatives "
+            "(10 authored + 12 blatantly off-topic) → answers 100% of positives, refuses "
+            "91% of negatives. NOT on the cosine scale; do not reuse SCORE_THRESHOLD here."
+        ),
+    )
+    gate_sparse_weight: float = Field(
+        default=3.0,
+        description=(
+            "Weight on the pooled sparse term in the hybrid gate. Sparse scores sit around "
+            "0.05-0.15 vs cosine's 0.40-0.65, so this puts them on comparable footing. "
+            "Corpus- and model-dependent, hence configured rather than baked in."
+        ),
+    )
     gate_pool: int = Field(
         default=10,
         description=(
@@ -122,6 +148,19 @@ class Settings(BaseSettings):
             "lower-variance estimate of how much relevant material actually exists."
         ),
     )
+
+    @property
+    def effective_score_threshold(self) -> float:
+        """The threshold that matches the configured gate signal.
+
+        `relevance` on a `RetrievalResult` is whatever the injected gate computed, so
+        every caller comparing against a threshold must use THIS, never
+        `score_threshold` directly — the two signals are on different scales and
+        crossing them silently disables the gate in one direction or the other.
+        """
+        if self.gate_signal == "hybrid_pool":
+            return self.gate_hybrid_threshold
+        return self.score_threshold
     inspect_show: int = Field(
         default=8, description="Hits per stage listed by the retrieval inspector (display only)."
     )
