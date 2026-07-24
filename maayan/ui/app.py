@@ -39,6 +39,8 @@ from maayan.generate.rag import Answer, RAGService
 from maayan.graph.apparatus import Apparatus, ApparatusService
 from maayan.graph.models import Relation
 from maayan.graph.store import GraphStore
+from maayan.health.models import HealthReport
+from maayan.health.service import HealthService
 from maayan.inbox.models import InboxItem
 from maayan.inbox.service import InboxService
 from maayan.inquiry.generate import SuggestionSource, generate_inquiries
@@ -274,6 +276,7 @@ def create_app(
     traces: TraceStore | None = None,
     agent: AgentService | None = None,
     captured: CapturedGoldsetStore | None = None,
+    health: HealthService | None = None,
     retriever: Retrieving | None = None,
     settings: Settings | None = None,
     ocr_lang: str = "heb",
@@ -655,6 +658,15 @@ def create_app(
     @app.get("/stats")
     def get_stats() -> Stats:
         return stats.collect()
+
+    # Liveness of the STACK, as opposed to /healthz (liveness of this process) and
+    # /stats (what is in the corpus). Behind the auth wall: it names the configured
+    # models and reports whether an API key is present.
+    @app.get("/api/health")
+    def get_health() -> HealthReport:
+        if health is None:  # health wiring absent — route is inert
+            raise HTTPException(status_code=503, detail="health checks not configured")
+        return health.check()
 
     # -- study traces: the chavrusa's notebook (Prompt 39) ---------------------
     @app.get("/api/traces/{trace_id}")

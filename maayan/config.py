@@ -115,6 +115,21 @@ class Settings(BaseSettings):
         "but 512 covers a passage and keeps latency and VRAM bounded.",
     )
 
+    # ---- Health checks ------------------------------------------------------
+    health_timeout: float = Field(
+        default=5.0, description="Per-probe network timeout (s). Health must fail fast."
+    )
+    health_check_generation: bool = Field(
+        default=True,
+        description=(
+            "Probe the generation backend's reachability. Lists models — it NEVER calls a "
+            "completion endpoint, so asking 'are you alive?' never bills tokens."
+        ),
+    )
+    health_probe_text: str = Field(
+        default="בדיקה", description="Tiny string the embedder probe encodes."
+    )
+
     # ---- Retrieval ----------------------------------------------------------
     top_k: int = Field(default=8, description="Candidates fused/returned by hybrid search.")
     score_threshold: float = Field(

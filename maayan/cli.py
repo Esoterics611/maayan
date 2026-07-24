@@ -297,6 +297,35 @@ def index(
 
 
 @app.command()
+def health(
+    embed: bool = typer.Option(
+        False, "--embed",
+        help="Also load the embedder and probe it (~15s + several GB). Off by default: "
+        "a health check must never be the thing that loads a model.",
+    ),
+) -> None:
+    """Is the stack actually working: vector store, embedder, generation backend.
+
+    Distinct from the knowledge dashboard (`maayan stats`), which counts what is IN
+    the corpus. This says whether the parts that make it usable are reachable right
+    now — the difference between "no results" and "Qdrant is down".
+
+    Exits non-zero if anything is down or degraded, so it can guard a deploy or feed
+    an uptime check.
+    """
+    from maayan.embed.factory import build_embedder
+    from maayan.health.factory import build_health_service
+    from maayan.health.models import format_report
+
+    settings = _cfg()
+    embedder = build_embedder(settings) if embed else None
+    report = build_health_service(settings, embedder=embedder).check()
+    typer.echo(format_report(report))
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def coverage(
     remote: bool = typer.Option(
         False, "--remote",
@@ -2078,6 +2107,7 @@ def ui() -> None:
         chunks_store, graph_store, TermStore(settings.db_path),
         DevelopmentStore(settings.db_path),
     )
+    from maayan.health.factory import build_health_service
 
     application = create_app(
         rag, capture, threads, develop, terms, retraction, stats, compose_service,
@@ -2094,6 +2124,9 @@ def ui() -> None:
         traces=_trace_store(settings),
         agent=build_agent_service(settings, retriever, rag, backend),
         captured=_captured_store(settings),
+        # The UI already holds the loaded embedder, so the health probe can exercise
+        # it for real without paying the ~15s model load a second time.
+        health=build_health_service(settings, embedder=embedder),
         retriever=retriever,
         settings=settings,
         ocr_lang=settings.ocr_lang,

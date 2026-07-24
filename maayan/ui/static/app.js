@@ -414,10 +414,35 @@ async function loadStats() {
       + ` · ${(dev.retracted||0)} retracted</div>`
       + `<div><span class="srcref" title="What left the corpus, and why"
            onclick="openRetractions()">${esc(s.retractions)} retraction(s)</span>`
-      + ` · ${esc(s.threads)} thread(s) · ${esc(s.terms)} term(s)</div>`;
+      + ` · ${esc(s.threads)} thread(s) · ${esc(s.terms)} term(s)</div>`
+      + `<div id="healthLine" class="hint">בודק מצב המערכת…</div>`;
+    loadHealth();
   } catch (e) { $('statsPanel').innerHTML = '<div class="hint">stats unavailable</div>'; }
 }
 window.loadStats = loadStats;
+
+// Liveness of the stack, next to the counts: when retrieval returns nothing, this is
+// what says whether the corpus is silent or Qdrant is simply down. Rendered into the
+// stats panel after the counts so a failure here never blanks the dashboard.
+const HEALTH_GLYPH = { ok: '✓', degraded: '!', down: '✗', skipped: '–' };
+async function loadHealth() {
+  const line = $('healthLine');
+  if (!line) return;
+  let report;
+  try { report = await j(await fetch('/api/health')); }
+  catch (e) { line.innerHTML = '<span class="hint">health unavailable</span>'; return; }
+  const parts = (report.components || []).map(c =>
+    `<span class="badge ${esc(c.status)}" title="${esc(c.detail || '')}">`
+    + `${esc(HEALTH_GLYPH[c.status] || '?')} ${esc(c.name)}</span>`).join(' ');
+  const worst = (report.components || []).some(c => c.status === 'down') ? 'down'
+    : (report.components || []).some(c => c.status === 'degraded') ? 'degraded' : 'ok';
+  const note = worst === 'ok' ? '' :
+    ` <span class="refused">— ${esc((report.components || [])
+      .filter(c => c.status === 'down' || c.status === 'degraded')
+      .map(c => c.name + ': ' + (c.detail || c.status)).join(' · '))}</span>`;
+  line.innerHTML = parts + note;
+}
+window.loadHealth = loadHealth;
 
 // -- the retraction ledger: the audit trail of what left the corpus, and why.
 // Read-only (no write path); an empty ledger is a statement, not an error.
