@@ -193,3 +193,8 @@ a.cite:hover{background:#f3e9d8}
 @keyframes citeFlash{from{background:#f7e9c8}to{background:transparent}}
 .cite-flash{animation:citeFlash 1.4s ease-out}
 @media (prefers-reduced-motion:reduce){.cite-flash{animation:none;outline:2px solid #c9a227}}
+
+/* An older answer's sources, folded so a long thread stays readable (R7). */
+details.sources > summary{cursor:pointer;color:var(--muted);font-size:13px;
+  padding:4px 0;list-style-position:inside}
+details.sources[open] > summary{margin-bottom:4px}

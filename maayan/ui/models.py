@@ -146,6 +146,11 @@ class TurnOut(BaseModel):
     # seed turns:
     is_seed: bool = False
     directive: str | None = None
+    # ask turns (R7): the persisted answer + its sources, in exactly the shape the ask
+    # route returns — one client renderer serves both, so a reopened answer keeps every
+    # teaching affordance (tick two sources and Connect, retract, read in context).
+    # None on turns written before this shipped, which render as plain text as before.
+    answer: AskResponse | None = None
 
 
 class ThreadDetailResponse(BaseModel):

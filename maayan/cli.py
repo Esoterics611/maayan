@@ -523,9 +523,14 @@ def ask(
         typer.echo("error: --agent does not run inside threads yet; drop --thread/--topic.")
         raise typer.Exit(1)
 
+    # Built before the ask: within a thread the session has to exist by the time the
+    # turn is appended, so the turn can carry it (see `ask_in_thread(record=…)`).
+    capture = build_capture_service(settings, embedder=embedder)
+
     # Within a thread, prior turns are passed as NON-citable context; retrieval and
     # default-deny are unchanged. Outside a thread, this is a plain one-shot ask.
     active_thread: str | None = None
+    session_id: str | None = None
     trace = None
     if use_agent:
         from maayan.agent.factory import build_agent_service
@@ -540,16 +545,17 @@ def ask(
         active_thread = threads.start_thread(topic).id if topic else thread_id
         if active_thread is None:  # defensive; one of thread_id/topic is always set here
             raise typer.BadParameter("Pass --thread <id> or --topic '<title>'.")
-        answer = ask_in_thread(
+        result = ask_in_thread(
             rag, threads, active_thread, question,
-            max_context_turns=settings.thread_context_turns,
-        ).answer
+            max_context_turns=settings.thread_context_turns, record=capture,
+        )
+        answer, session_id = result.answer, result.session_id
     else:
         answer = rag.ask(question, k=k, book=book)
 
-    # Record the session so an expert can annotate it later.
-    capture = build_capture_service(settings, embedder=embedder)
-    session = capture.start_session(answer)
+    # Record the session so an expert can annotate it later (the thread flow already did).
+    if session_id is None:
+        session_id = capture.start_session(answer).id
 
     # Ask telemetry (Prompt 37): refusals become inquiries instead of evaporating.
     if settings.ask_log_enabled:
@@ -557,7 +563,7 @@ def ask(
 
         AskLog(settings.db_path, SystemClock()).record(
             question=question, refused=not answer.grounded, top_score=answer.relevance,
-            session_id=session.id, thread_id=active_thread, cited_refs=answer.cited_refs,
+            session_id=session_id, thread_id=active_thread, cited_refs=answer.cited_refs,
         )
 
     if not answer.grounded:
@@ -566,7 +572,7 @@ def ask(
             typer.echo("\n(Closest, but below the relevance threshold:)")
             for s in answer.sources[:3]:
                 typer.echo(f"  - {s.ref}")
-        typer.echo(f"\nSession: {session.id}")
+        typer.echo(f"\nSession: {session_id}")
         if active_thread:
             typer.echo(f"Thread:  {active_thread}  (turn appended)")
         return
@@ -593,12 +599,12 @@ def ask(
             typer.echo("")
             _print_trace(trace)
         typer.echo(f"\nTrace: {trace.id}  (GET /api/traces/{trace.id})")
-    typer.echo(f"\nSession: {session.id}")
+    typer.echo(f"\nSession: {session_id}")
     if active_thread:
         typer.echo(f"Thread:  {active_thread}  (ask turn appended; "
                    "follow up with `maayan ask '...' --thread " + active_thread + "`)")
     typer.echo("Annotate it:  maayan annotate --session "
-               f"{session.id} --author 'Your Name' --kind connection --body '...' "
+               f"{session_id} --author 'Your Name' --kind connection --body '...' "
                "--ref '<ref>' --ref '<ref>'")
 
 

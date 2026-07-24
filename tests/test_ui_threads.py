@@ -253,6 +253,52 @@ def test_ask_in_thread_grounded_appends_turn_and_badges_source() -> None:
     assert turns[-1]["turn_type"] == "ask"
 
 
+def test_reopened_thread_returns_the_answer_with_its_sources() -> None:
+    """R7: switching threads or reloading must not be what erases the material.
+
+    The turn carries the answer in the SAME shape the ask route returns, so the client
+    renders both from one path — a restored answer is not a second-class citizen.
+    """
+    client = _client()
+    tid = _new_thread(client)
+    live = client.post(f"/threads/{tid}/ask", json={"question": "מהי בחירה"}).json()
+
+    turn = client.get(f"/threads/{tid}").json()["turns"][-1]
+
+    restored = turn["answer"]
+    assert restored is not None
+    assert restored["answer"] == live["answer"] == "answer [S1]"
+    assert restored["grounded"] is True
+    assert restored["sources"] == live["sources"]  # ref, text, badge, cited — identical
+    assert restored["cited_refs"] == ["Tanya 1:6"]
+    # The session came from the ask turn itself, so Connect works on a reopened answer.
+    assert turn["record_id"] == restored["session_id"] == live["session_id"]
+
+
+def test_a_restored_answer_can_still_be_annotated() -> None:
+    """The point of persisting the session id: teaching from an old answer still works."""
+    client = _client()
+    tid = _new_thread(client)
+    client.post(f"/threads/{tid}/ask", json={"question": "מהי בחירה"})
+    restored = client.get(f"/threads/{tid}").json()["turns"][-1]["answer"]
+
+    r = client.post("/annotate", json={
+        "session_id": restored["session_id"], "author": "ronnie", "kind": "connection",
+        "body": "these two meet here", "linked_refs": ["Tanya 1:6", "LT 2:1"],
+    })
+
+    assert r.status_code == 200
+    assert r.json()["session_id"] == restored["session_id"]
+
+
+def test_non_ask_turns_carry_no_answer() -> None:
+    """A seed is not an answer — the field stays None rather than an empty shell."""
+    client = _client()
+    tid = _new_thread(client)
+    client.post(f"/threads/{tid}/seed", json={"author": "R. G", "body": "a seed"})
+    assert client.get(f"/threads/{tid}").json()["turns"][-1]["answer"] is None
+
+
 def test_ask_in_thread_refusal_passes_through() -> None:
     client = _client(rag_grounded=False)
     tid = _new_thread(client)

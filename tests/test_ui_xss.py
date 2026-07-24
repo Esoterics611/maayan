@@ -219,3 +219,50 @@ def test_citation_marker_pattern_is_bounded_and_range_checked() -> None:
     # A marker with no matching source stays plain text rather than becoming a dead link.
     assert "return whole" in body
     assert "n <= sourceCount" in body
+    # The link target is scoped to its own answer block (see the next test).
+    assert "esc(key)" in body
+
+
+def test_answer_block_ids_are_scoped_by_key() -> None:
+    """A thread now shows every past ask with its sources — ids must not collide.
+
+    `#src-1` was unique only because exactly one answer was ever on screen. With
+    answers persisted into their turns, an id that does not carry the block's key
+    sends [S1] to the wrong turn's source, and Connect gathers the wrong ticks.
+    """
+    body = APP_JS[
+        APP_JS.index("function answerBlockHTML") : APP_JS.index("function wireAnswerBlock")
+    ]
+    ids = re.findall(r'id="([^"]*)"', body)
+    assert ids, "the answer block emits no ids — has it been rewritten?"
+    for value in ids:
+        assert "${esc(key)}" in value, f'unscoped id in the answer block: id="{value}"'
+    # The connect fields moved from ids to classes for the same reason: several blocks.
+    for field in ("connectBody", "connectAuthor", "connectStatus"):
+        assert f'class="{field}' in body, f"{field} is missing from the connect box"
+        assert f'id="{field}"' not in APP_JS, f"{field} is an id again — it would duplicate"
+
+
+def test_a_folded_answer_is_still_reachable_from_a_citation() -> None:
+    """Older answers fold their sources away; a [S#] link must open the fold.
+
+    Otherwise the click scrolls to an element inside a closed `<details>` and appears
+    to do nothing — the failure mode is silent, which is why it is pinned here.
+    """
+    handler = APP_JS[
+        APP_JS.index("function wireCitationLinks") : APP_JS.index("function answerBlockHTML")
+    ]
+    assert "closest('details')" in handler
+    assert "fold.open = true" in handler
+
+
+def test_teaching_actions_take_the_block_they_act_on() -> None:
+    """No implicit "the last answer": every action names the block whose data it uses."""
+    for handler in ("connectSelected", "retractSource", "teachFromRefusal",
+                    "downloadAnswer", "printAnswer"):
+        calls = re.findall(rf"{handler}\((.*?)\)", APP_JS)
+        invoked = [args for args in calls if args and not args.startswith(("key", "host"))]
+        assert invoked, f"{handler} is never called with a block key"
+        for args in invoked:  # `.*?` stops inside ${esc(key)} — match the prefix
+            assert args.startswith("'${esc(key"), f"{handler} called unscoped: ({args})"
+    assert "lastAnswer" not in APP_JS, "the shared 'last answer' global is back"

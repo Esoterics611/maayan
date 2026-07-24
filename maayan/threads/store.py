@@ -7,11 +7,12 @@ logic: timestamps arrive already set on the models (the service owns the Clock).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from maayan.threads.models import Thread, ThreadTurn, TurnType
+from maayan.threads.models import AnswerSnapshot, Thread, ThreadTurn, TurnType
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -28,10 +29,16 @@ CREATE TABLE IF NOT EXISTS thread_turns (
     timestamp  TEXT NOT NULL,
     author     TEXT NOT NULL,
     record_id  TEXT,
-    text       TEXT NOT NULL
+    text       TEXT NOT NULL,
+    answer     TEXT           -- json AnswerSnapshot on "ask" turns, else NULL
 );
 CREATE INDEX IF NOT EXISTS idx_thread_turns_thread ON thread_turns(thread_id, ordinal);
 """
+
+# Columns added after the table shipped. `CREATE TABLE IF NOT EXISTS` is a no-op on an
+# existing DB, so a new column has to be added explicitly or every already-deployed
+# install would keep the old shape and fail on the first write.
+_ADDED_COLUMNS = (("thread_turns", "answer", "TEXT"),)
 
 
 class ThreadStore:
@@ -45,7 +52,17 @@ class ThreadStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._add_missing_columns()
         self._conn.commit()
+
+    def _add_missing_columns(self) -> None:
+        """Bring a pre-existing table up to the current shape (additive only)."""
+        for table, column, decl in _ADDED_COLUMNS:
+            existing = {
+                row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # -- threads -------------------------------------------------------------
     def create_thread(self, thread: Thread) -> Thread:
@@ -83,7 +100,8 @@ class ThreadStore:
         """Persist a turn and bump the parent thread's updated_at to the turn's time."""
         self._conn.execute(
             "INSERT OR REPLACE INTO thread_turns (id, thread_id, ordinal, turn_type, "
-            "timestamp, author, record_id, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "timestamp, author, record_id, text, answer) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 turn.id,
                 turn.thread_id,
@@ -93,6 +111,9 @@ class ThreadStore:
                 turn.author,
                 turn.record_id,
                 turn.text,
+                json.dumps(turn.answer.model_dump(mode="json"), ensure_ascii=False)
+                if turn.answer is not None
+                else None,
             ),
         )
         self._conn.execute(
@@ -131,6 +152,7 @@ class ThreadStore:
     def _row_to_turn(row: sqlite3.Row) -> ThreadTurn:
         # turn_type is constrained at write time (TurnType); cast on read.
         turn_type: TurnType = row["turn_type"]
+        answer = row["answer"]
         return ThreadTurn(
             id=row["id"],
             thread_id=row["thread_id"],
@@ -140,4 +162,5 @@ class ThreadStore:
             author=row["author"],
             record_id=row["record_id"],
             text=row["text"],
+            answer=AnswerSnapshot.model_validate_json(answer) if answer else None,
         )

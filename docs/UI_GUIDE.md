@@ -52,6 +52,9 @@ Everything happens inside a **topic thread** — start or reopen one from the dr
 - **Ask** — type a question (or dictate it, §5). You get a **grounded, cited** answer or an
   honest refusal when the corpus doesn't support one. Sources are badged
   **sefaria · expert · derived · term · shiur**; tap a ref to **read it in context** (§4).
+  The answer and its sources become part of the thread, so **reopening the topic (or
+  reloading) gives them back** — including the connect/retract affordances. Inline
+  `[S1]` markers link to the source card they cite.
 - **Connect sources** — after an answer, tick **two or more** sources (e.g. a Tanya passage +
   a Likutei Torah passage), write the insight, and **Connect**. Saved as an `expert`
   connection spanning both refs; it surfaces on future questions. (Author required, remembered.)

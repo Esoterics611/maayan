@@ -267,12 +267,25 @@ resolution (with the inquiry text visible + what-was-created field), retract (ta
 ref shown, reason field, author auto), promote-connection (section shown, insight
 field). Errors render inline in the modal, never `alert()`.
 
-### R7 — Answer persistence (Phase 2)
+### R7 — Answer persistence (Phase 2) — **shipped**
 
 Sources render as part of the thread turn (persisted server-side on the ask turn), so
 switching threads/reloading keeps the teachable material; the composer block becomes a
 view of the latest turn rather than a separate transient area. Inline `[S#]` citation
 markers in the answer text link to their source cards, Perplexity-style.
+
+As built: the ask turn carries an `AnswerSnapshot` (answer, verdict, cited refs, and
+each source with its `cited` mark, shiur audio offset and graph `via`), and its
+`record_id` is the capture session — so Connect works on a reopened answer, not only
+the freshest one. `GET /threads/{id}` returns it in the *same shape* the ask route
+returns, so one client renderer serves both. A thread ask no longer renders into the
+composer at all; only a threadless חברותא answer does. Turns written before this
+ships have no snapshot and keep rendering as plain text.
+
+One thing the spec did not anticipate: with every past ask showing its eight source
+cards, a long thread becomes a wall to scroll past. So only the **newest** answer
+keeps its sources open — earlier ones fold into a `<details>` (folded, not dropped:
+Connect still works in there, and a `[S#]` link opens the fold on its way).
 
 ### R8 — Mobile parity
 
@@ -310,8 +323,8 @@ existing pattern. Every route ships with tests (mocked services), mypy-strict, r
   workbench with developments/relations/inquiries/inbox (R3) · Gold panel read-only
   (R4) · verify + teach feedback (R5) · modals (R6) · header IA (R1) · API rows above.
 - **Phase 2:** teach-control consolidation to a single mode switcher (R2 full) ·
-  answer persistence + inline `[S#]` citations (R7) · transcripts/sugya/summaries into
-  the queue · keyboard shortcuts · mobile tab remap (R8).
+  ~~answer persistence + inline `[S#]` citations (R7)~~ *(shipped)* ·
+  transcripts/sugya/summaries into the queue · keyboard shortcuts · mobile tab remap (R8).
 - **Phase 3:** run-eval-from-UI with background job + trend sparkline over report
   history · per-example drill-down (which gold examples regressed).
 

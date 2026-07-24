@@ -51,12 +51,11 @@ from maayan.lexicon.models import TermType
 from maayan.lexicon.service import TermService
 from maayan.ocr.base import OCRer
 from maayan.retract.service import Retracting
-from maayan.retrieve.models import SearchResult
 from maayan.retrieve.retriever import Retrieving
 from maayan.stats.models import Stats
 from maayan.stats.service import Statsing
-from maayan.threads.flow import ask_in_thread
-from maayan.threads.models import Thread, ThreadTurn
+from maayan.threads.flow import ask_in_thread, snapshot_answer
+from maayan.threads.models import AnswerSnapshot, Thread, ThreadTurn, TurnSource
 from maayan.threads.service import ThreadService
 from maayan.transcribe.models import Transcript, TranscriptionJob
 from maayan.transcribe.service import TranscriptionService
@@ -126,22 +125,15 @@ from maayan.users.service import UserService
 _STATIC = Path(__file__).parent / "static"
 
 
-def _source_out(s: SearchResult, *, cited: bool) -> SourceOut:
-    meta = s.payload.get("metadata") or {} if isinstance(s.payload, dict) else {}
-    is_shiur = s.source == "shiur"
-    via = (
-        ViaOut(
+def _source_out(s: TurnSource) -> SourceOut:
+    """Wire form of one snapshotted source (the SearchResult mapping is `snapshot_answer`)."""
+    return SourceOut(
+        ref=s.ref, text=s.text, lang=s.lang, source=s.source, score=s.score, cited=s.cited,
+        audio_id=s.audio_id, start_s=s.start_s,
+        via=ViaOut(
             rel_type=s.via.rel_type, evidence=s.via.evidence, author=s.via.author,
             seed_ref=s.via.seed_ref, note=s.via.note,
-        )
-        if s.via is not None
-        else None
-    )
-    return SourceOut(
-        ref=s.ref, text=s.text, lang=s.lang, source=s.source, score=s.score, cited=cited,
-        audio_id=meta.get("audio_id") if is_shiur else None,
-        start_s=meta.get("start_s") if is_shiur else None,
-        via=via,
+        ) if s.via is not None else None,
     )
 
 
@@ -175,21 +167,27 @@ def _inquiry_out(item: InquiryItem) -> InquiryOut:
     )
 
 
+def _snapshot_to_response(
+    snap: AnswerSnapshot, session_id: str, *, trace_id: str | None = None
+) -> AskResponse:
+    """The one place an answer becomes a wire response — live or restored from a turn."""
+    return AskResponse(
+        session_id=session_id,
+        question=snap.question,
+        answer=snap.text,
+        grounded=snap.grounded,
+        cited_refs=snap.cited_refs,
+        sources=[_source_out(s) for s in snap.sources],
+        reasoning=snap.reasoning,
+        unsupported_claims=snap.unsupported_claims,
+        trace_id=trace_id,
+    )
+
+
 def _answer_to_response(
     answer: Answer, session_id: str, *, trace_id: str | None = None
 ) -> AskResponse:
-    cited = set(answer.cited_refs)
-    return AskResponse(
-        session_id=session_id,
-        question=answer.question,
-        answer=answer.text,
-        grounded=answer.grounded,
-        cited_refs=answer.cited_refs,
-        sources=[_source_out(s, cited=s.ref in cited) for s in answer.sources],
-        reasoning=answer.reasoning,
-        unsupported_claims=answer.unsupported_claims,
-        trace_id=trace_id,
-    )
+    return _snapshot_to_response(snapshot_answer(answer), session_id, trace_id=trace_id)
 
 
 def _thread_out(thread: Thread) -> ThreadOut:
@@ -236,11 +234,16 @@ def _development_to_response(dev: Development) -> DevelopmentResponse:
 def _turn_out(
     turn: ThreadTurn, *, develop: DevelopmentService, capture: CaptureService
 ) -> TurnOut:
-    """Render a turn, enriching develop turns (status/citations) and seed turns (directive)."""
+    """Render a turn: ask turns carry their persisted answer, develop turns their
+    status/citations, seed turns their directive."""
     out = TurnOut(
         id=turn.id, ordinal=turn.ordinal, turn_type=turn.turn_type,
         author=turn.author, text=turn.text, record_id=turn.record_id,
     )
+    if turn.answer is not None:
+        # An ask turn's record_id IS its capture session — that is what Connect
+        # annotates against, so a restored answer teaches like a fresh one.
+        out.answer = _snapshot_to_response(turn.answer, turn.record_id or "")
     if turn.turn_type == "development" and turn.record_id:
         dev = develop.get_development(turn.record_id)
         if dev is not None:
@@ -561,12 +564,15 @@ def create_app(
     ) -> AskResponse:
         if threads.get_thread_with_turns(thread_id) is None:
             raise HTTPException(status_code=404, detail="Thread not found")
+        # `record=capture` opens the session inside the flow, so the ask turn stores it
+        # as its record_id — the answer stays annotatable after a reload, not just now.
         result = ask_in_thread(
-            rag, threads, thread_id, req.question, max_context_turns=context_turns
+            rag, threads, thread_id, req.question,
+            max_context_turns=context_turns, record=capture,
         )
-        session = capture.start_session(result.answer)  # keep the answer annotatable
-        _log_ask(request, result.answer, session.id, thread_id)
-        return _answer_to_response(result.answer, session.id)
+        session_id = result.session_id or ""
+        _log_ask(request, result.answer, session_id, thread_id)
+        return _answer_to_response(result.answer, session_id)
 
     @app.post("/threads/{thread_id}/seed")
     def add_seed(thread_id: str, req: SeedRequest) -> SeedResponse:

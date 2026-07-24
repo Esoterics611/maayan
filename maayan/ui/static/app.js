@@ -1,7 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const AUTHOR_KEY = 'maayan.author';
 let active = null;      // active thread id
-let lastAnswer = null;  // last answer (sources + session_id) for "Connect these sources"
+// Every rendered answer block, by key: 'live' for a threadless חברותא answer, the turn
+// id for one persisted in a thread. A thread shows many at once, so "the last answer"
+// is no longer a thing the teaching actions can be built on — they take a key.
+const ANSWERS = new Map();
 let chavrusaOn = false; // חברותא mode: route Ask through the bounded study loop (Prompt 39)
 
 const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
@@ -501,14 +504,27 @@ function dismissLoopStrip() {
 window.dismissLoopStrip = dismissLoopStrip;
 
 function renderTurns(turns) {
+  ANSWERS.clear();   // the blocks these described are about to leave the DOM
   if (!turns.length) {
     $('turns').innerHTML = '<div class="empty">שאל שאלה — או פתח 🌱 זרע ולַמֵּד ידע חדש.</div>'
       + loopStripHTML();
     return;
   }
   lastTurns = turns;
+  // Only the newest answer keeps its sources open; the earlier ones fold (see
+  // answerBlockHTML) so the thread stays a conversation, not a stack of source lists.
+  const newestAsk = turns.reduce(
+    (best, t) => (t.turn_type === 'ask' && t.answer ? t.id : best), null);
   $('turns').innerHTML = turns.map((t, i) => {
     let extra = '';
+    // A persisted ask renders as the full answer block — sources and all — so
+    // reopening the thread gives back the material, not just the words (R7).
+    if (t.turn_type === 'ask' && t.answer) {
+      return answerBlockHTML(t.answer, t.id, {
+        heading: 'ask · ' + t.author, extra: exportActions(i),
+        collapsed: t.id !== newestAsk,
+      });
+    }
     if (t.turn_type === 'seed' && t.is_seed) {
       if (t.directive) extra += `<div class="hint">הנחיה לפיתוח: ${esc(t.directive)}</div>`;
       extra += `<div class="actions"><button class="ghost" onclick="withBusy(this, () => developSeed('${esc(t.record_id)}'))"
@@ -522,16 +538,25 @@ function renderTurns(turns) {
                + `<button class="secondary" onclick="withBusy(this, () => decide('${esc(t.record_id)}','reject'))"
                     title="שום דבר לא ייכנס">✗ דחה</button></div>`;
     }
-    if (['ask', 'development', 'seed'].includes(t.turn_type) && t.text) {
-      extra += `<div class="actions"><button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadTurn(${i})">⬇︎ .md</button>`
-             + `<button class="ghost" title="הדפס / שמור כ־PDF / שתף" onclick="printTurn(${i})">🖨 שתף</button></div>`;
-    }
+    if (['ask', 'development', 'seed'].includes(t.turn_type) && t.text) extra += exportActions(i);
     const statusBadge = t.status ? `<span class="badge ${esc(t.status)}">${esc(t.status)}</span>` : '';
     return `<div class="turn ${esc(t.turn_type)}">
       <div class="who">${esc(t.turn_type)} · ${esc(t.author)}${statusBadge}</div>
       <div class="body" dir="auto">${esc(t.text)}</div>${extra}</div>`;
   }).join('');
-  $('turns').scrollTop = $('turns').scrollHeight;
+  wireCitationLinks($('turns'));
+  turns.forEach(t => { if (t.turn_type === 'ask' && t.answer) wireAnswerBlock(t.id); });
+  // Land on the TOP of the newest turn, not the bottom of the pane: an answer block
+  // is now tall enough that "scroll to the end" would open on its connect box with
+  // the answer itself off-screen.
+  const newest = $('turns').lastElementChild;
+  $('turns').scrollTop = newest ? Math.max(0, newest.offsetTop - $('turns').offsetTop)
+                                : $('turns').scrollHeight;
+}
+
+function exportActions(i) {
+  return `<div class="actions"><button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadTurn(${i})">⬇︎ .md</button>`
+       + `<button class="ghost" title="הדפס / שמור כ־PDF / שתף" onclick="printTurn(${i})">🖨 שתף</button></div>`;
 }
 
 // --- share / export: a properly-formatted RTL Markdown download, or a print/PDF view ---
@@ -578,11 +603,13 @@ function _answerPayload(d) {
   return { title: d.question || 'תשובה', text: d.answer || '',
            refs, meta: [new Date().toLocaleDateString('he-IL'), 'מעיין'].join(' · ') };
 }
-function downloadAnswer() { const p = _answerPayload(lastAnswer || {}); downloadMd(p.title, p.text, p.refs, p.meta); }
-function printAnswer() { const p = _answerPayload(lastAnswer || {}); printRtl(p.title, p.text, p.refs, p.meta); }
+function downloadAnswer(key) { const p = _answerPayload(ANSWERS.get(key) || {}); downloadMd(p.title, p.text, p.refs, p.meta); }
+function printAnswer(key) { const p = _answerPayload(ANSWERS.get(key) || {}); printRtl(p.title, p.text, p.refs, p.meta); }
 window.downloadAnswer = downloadAnswer; window.printAnswer = printAnswer;
 let lastTurns = [];
 function _turnPayload(t) {
+  // A persisted ask exports as the answer it was, not as the "Q: …/A: …" context snapshot.
+  if (t.answer) return _answerPayload(t.answer);
   const refs = (t.grounded_in && t.grounded_in.length) ? t.grounded_in : (t.cited_refs || []);
   const title = t.directive
     || (t.turn_type === 'development' ? 'פיתוח' : t.turn_type === 'seed' ? 'זרע' : 'לימוד');
@@ -601,26 +628,32 @@ window.downloadTurn = downloadTurn; window.printTurn = printTurn;
 // "[S1]<script>…" cannot inject anything — its angle brackets are already entities
 // by the time this runs. A marker with no matching source is left as plain text
 // rather than turned into a dead link, so a model over-citing is visible, not hidden.
-function linkCitations(escapedAnswer, sourceCount) {
+//
+// Card ids are scoped by `key`: a thread renders several answers at once, and an
+// unscoped "#src-1" would jump to the wrong turn's source.
+function linkCitations(escapedAnswer, sourceCount, key) {
+  const prefix = esc(key);
   return escapedAnswer.replace(/\[S(\d{1,3})\]/g, (whole, digits) => {
     const n = Number(digits);
     if (!(n >= 1 && n <= sourceCount)) return whole;
-    return `<a class="cite" href="#src-${n}" data-src="${n}" title="קפוץ למקור">[S${n}]</a>`;
+    const card = prefix + '-src-' + n;
+    return `<a class="cite" href="#${card}" data-card="${card}" title="קפוץ למקור">[S${n}]</a>`;
   });
 }
 
-// Delegated once, at the container: the answer body is re-rendered constantly, and
+// Delegated once, at each container: answer bodies are re-rendered constantly, and
 // per-render listeners would leak.
-function wireCitationLinks() {
-  const host = $('answerSources');
+function wireCitationLinks(host) {
   if (!host || host.dataset.citeWired) return;
   host.dataset.citeWired = '1';
   host.addEventListener('click', (ev) => {
     const link = ev.target.closest && ev.target.closest('a.cite');
     if (!link) return;
     ev.preventDefault();
-    const card = $('src-' + link.dataset.src);
+    const card = $(link.dataset.card);
     if (!card) return;
+    const fold = card.closest('details');  // an older answer's sources are folded away
+    if (fold) fold.open = true;
     card.scrollIntoView({ block: 'center', behavior: 'smooth' });
     card.classList.remove('cite-flash');
     void card.offsetWidth;              // restart the animation on a repeat click
@@ -628,8 +661,23 @@ function wireCitationLinks() {
   });
 }
 
-function renderAnswerSources(data) {
-  lastAnswer = data;
+// One answer block, live or restored (UI_REDESIGN R7).
+//
+// The sources under an answer are the material the expert teaches from, so they must
+// not be a transient thing that a reload throws away. The server now persists them on
+// the ask turn, and this renders BOTH cases from that one shape — a reopened answer
+// keeps every affordance: tick two sources and Connect, retract, read in context, the
+// [S#] links. `key` scopes the block's ids and looks its data up in ANSWERS.
+//
+// `collapsed` folds the sources away for older answers in a thread: keeping every
+// past ask's eight source cards open turns a long thread into a wall one has to
+// scroll past to reach the next answer. Folded, not dropped — the cards stay in the
+// DOM, so a [S#] link (which opens the fold) and Connect still work on them.
+function answerBlockHTML(data, key, opts) {
+  ANSWERS.set(key, data);
+  const heading = (opts && opts.heading) || 'latest answer';
+  const extra = (opts && opts.extra) || '';
+  const collapsed = !!(opts && opts.collapsed);
   const cls = data.grounded ? '' : ' refused';
   const sources = data.sources || [];
   const srcs = sources.map((s, i) => {
@@ -644,7 +692,7 @@ function renderAnswerSources(data) {
     // Only layered knowledge (expert/derived/term/shiur) is retractable; printed text never is.
     const retract = ['expert', 'derived', 'term', 'shiur'].includes(s.source)
       ? `<button class="ghost" style="color:#a33;margin-left:auto"
-            title="Retract this layered-knowledge chunk" onclick="retractSource(${i})">Retract ✕</button>` : '';
+            title="Retract this layered-knowledge chunk" onclick="retractSource('${esc(key)}', ${i})">Retract ✕</button>` : '';
     // The via-line (graph expansion provenance): WHY this source appeared.
     // Seed hits have no via — the absence is the design.
     const via = s.via ? `<div class="vialine" dir="auto">↳ via ${esc(s.via.rel_type)}
@@ -654,23 +702,26 @@ function renderAnswerSources(data) {
     // The margins affordance (Prompt 36): the daf's apparatus for this source.
     const margins = `<button class="ghost" title="הגליון — מה ידוע סביב המקור"
         onclick='openMargins(${attr(s.ref)})'>גליון ▸</button>`;
-    return `<div class="src ${esc(s.source)}" id="src-${i + 1}">
+    return `<div class="src ${esc(s.source)}" id="${esc(key)}-src-${i + 1}">
       <div class="ref"><input type="checkbox" class="srcpick" data-idx="${i}" title="tick to connect">
         <span class="srcref ${s.cited ? 'cited' : ''}" onclick='openReader(${attr(s.ref)}, ${attr(s.lang)})' title="Read in context">${s.cited ? '✦ ' : ''}${esc(s.ref)}</span>${badge}${play}${margins}${retract}</div>
       ${via}<div dir="auto">${esc(s.text)}</div></div>`;
   }).join('');
   // Teach a connection: tick ≥2 sources (e.g. one Tanya + one Likutei Torah) and link them.
-  const connect = sources.length >= 2 ? `
+  // The fields are scoped by class, not id — a thread shows several answer blocks and
+  // duplicate ids would send every Connect to the first one. No session (a turn from
+  // before answers were persisted) means nothing to annotate against, so no box.
+  const connect = sources.length >= 2 && data.session_id ? `
     <div class="connect">
       <div class="hint"><b>לַמֵּד חיבור</b> — סמן ✓ שניים או יותר מהמקורות למעלה
         (למשל תניא ↔ לקוטי תורה), כתוב את הקשר ביניהם, ולחץ. החיבור נשמר על שמך
         ויעלה בשאלות הבאות.</div>
-      <input id="connectBody" dir="auto" placeholder="התובנה שמקשרת את המקורות המסומנים…" />
+      <input class="connectBody" dir="auto" placeholder="התובנה שמקשרת את המקורות המסומנים…" />
       <div class="row" style="margin-top:6px">
-        <input id="connectAuthor" placeholder="השם שלך (חובה — הידע נרשם עליך)" />
-        <button onclick="withBusy(this, () => connectSelected())">חבר ✓ Connect →</button>
+        <input class="connectAuthor" placeholder="השם שלך (חובה — הידע נרשם עליך)" />
+        <button onclick="withBusy(this, () => connectSelected('${esc(key)}'))">חבר ✓ Connect →</button>
       </div>
-      <span id="connectStatus" class="hint"></span>
+      <span class="connectStatus hint"></span>
     </div>` : '';
   // A refusal is not a dead end (C7): the corpus can't answer — so teach it.
   // The question was already logged to שאלות לרב by the ask telemetry.
@@ -679,7 +730,7 @@ function renderAnswerSources(data) {
       <div class="hint">אין למעיין מקורות לשאלה זו — <b>עדיין</b>. השאלה נרשמה בשאלות לרב;
         אפשר ללמד אותה עכשיו:</div>
       <div class="actions">
-        <button class="secondary" onclick="teachFromRefusal()">🌱 לַמֵּד מזה — פתח זרע עם השאלה</button>
+        <button class="secondary" onclick="teachFromRefusal('${esc(key)}')">🌱 לַמֵּד מזה — פתח זרע עם השאלה</button>
         <button class="ghost" onclick="openGuide()">איך מלמדים? ▸</button>
       </div>
     </div>` : '';
@@ -691,20 +742,42 @@ function renderAnswerSources(data) {
   const readHint = data.grounded && sources.length
     ? `<div class="hint">הקש על מקור לקריאה בהקשר · גליון ▸ מראה מה ידוע סביבו</div>` : '';
   const share = data.grounded ? `<div class="actions">`
-      + `<button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadAnswer()">⬇︎ הורד .md</button>`
-      + `<button class="ghost" title="הדפס או שמור כ־PDF / שתף" onclick="printAnswer()">🖨 הדפס / שתף</button></div>` : '';
-  $('answerSources').innerHTML = `<div class="turn ask"><div class="who">latest answer${data.trace_id ? ' · חברותא' : ''}</div>
-    <div class="body${cls}" dir="auto">${linkCitations(esc(data.answer), sources.length)}</div>${share}${traceLink}${teach}${readHint}${srcs}${connect}</div>`;
-  wireCitationLinks();
-  const ca = $('connectAuthor');
+      + `<button class="ghost" title="הורד כ־Markdown (RTL)" onclick="downloadAnswer('${esc(key)}')">⬇︎ הורד .md</button>`
+      + `<button class="ghost" title="הדפס או שמור כ־PDF / שתף" onclick="printAnswer('${esc(key)}')">🖨 הדפס / שתף</button></div>` : '';
+  const material = collapsed && sources.length
+    ? `<details class="sources"><summary>${sources.length} מקורות · הצג</summary>${readHint}${srcs}${connect}</details>`
+    : `${readHint}${srcs}${connect}`;
+  return `<div class="turn ask" id="ans-${esc(key)}"><div class="who">${esc(heading)}${data.trace_id ? ' · חברותא' : ''}</div>
+    <div class="body${cls}" dir="auto">${linkCitations(esc(data.answer), sources.length, key)}</div>${share}${traceLink}${teach}${material}${extra}</div>`;
+}
+
+// The dictation/OCR buttons and the sticky author are attached after the block is in
+// the DOM (they wrap live elements, so they cannot be built into the HTML string).
+function wireAnswerBlock(key) {
+  const box = $('ans-' + key);
+  if (!box) return;
+  const ca = box.querySelector('.connectAuthor');
   if (ca) ca.value = localStorage.getItem(AUTHOR_KEY) || '';
-  const cb = $('connectBody');                       // dictation + OCR on the connection insight
-  if (cb) { cb.insertAdjacentElement('afterend', mkOcr(cb)); cb.insertAdjacentElement('afterend', mkMic(cb)); }
+  const cb = box.querySelector('.connectBody');       // dictation + OCR on the insight
+  if (cb && !cb.dataset.wired) {
+    cb.dataset.wired = '1';
+    cb.insertAdjacentElement('afterend', mkOcr(cb));
+    cb.insertAdjacentElement('afterend', mkMic(cb));
+  }
+}
+
+// A threadless answer (חברותא) has nowhere to live but the composer — a thread ask
+// renders inside the thread itself, which is what survives the reload.
+function renderAnswerSources(data) {
+  $('answerSources').innerHTML = answerBlockHTML(data, 'live');
+  wireCitationLinks($('answerSources'));
+  wireAnswerBlock('live');
 }
 
 // C7: turn a refusal into teaching — the question becomes the seed's directive.
-function teachFromRefusal() {
-  const q = lastAnswer ? lastAnswer.question : '';
+function teachFromRefusal(key) {
+  const data = ANSWERS.get(key);
+  const q = data ? data.question : '';
   $('seedBox').classList.remove('hidden');
   if (q && !$('directive').value) $('directive').value = q;
   $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -719,7 +792,7 @@ window.teachFromRefusal = teachFromRefusal;
 // the connect confirmation and the contributions panel.
 let lastConnection = null;
 async function plantSeedFrom(body, refs, directive, author) {
-  author = (author || $('connectAuthor').value.trim() || localStorage.getItem(AUTHOR_KEY) || '').trim();
+  author = (author || localStorage.getItem(AUTHOR_KEY) || '').trim();
   if (!author) { toast('שם נדרש — הזרע נרשם עליך.'); return; }
   if (!body) { toast('אין תוכן להפוך לזרע.'); return; }
   localStorage.setItem(AUTHOR_KEY, author);
@@ -735,7 +808,8 @@ async function plantSeedFrom(body, refs, directive, author) {
 }
 async function seedFromConnection() {
   if (!lastConnection) return;
-  await plantSeedFrom(lastConnection.body, lastConnection.refs, lastConnection.question, null);
+  await plantSeedFrom(lastConnection.body, lastConnection.refs, lastConnection.question,
+    lastConnection.author);
 }
 window.seedFromConnection = seedFromConnection;
 
@@ -771,39 +845,46 @@ async function developContribution(i) {
 }
 window.developContribution = developContribution;
 
-async function connectSelected() {
-  const status = $('connectStatus');
-  const picks = [...document.querySelectorAll('.srcpick:checked')];
-  const refs = picks.map(el => lastAnswer.sources[+el.dataset.idx].ref);
+async function connectSelected(key) {
+  const box = $('ans-' + key), data = ANSWERS.get(key);
+  if (!box || !data) return;
+  // Scoped to this block: ticking sources under one answer must not pick up sources
+  // ticked under another answer further up the thread.
+  const status = box.querySelector('.connectStatus');
+  const authorEl = box.querySelector('.connectAuthor'), bodyEl = box.querySelector('.connectBody');
+  const picks = [...box.querySelectorAll('.srcpick:checked')];
+  const refs = picks.map(el => data.sources[+el.dataset.idx].ref);
   if (refs.length < 2) { status.textContent = 'סמן ✓ לפחות שני מקורות — חיבור צריך שני קצוות.'; return; }
-  const author = $('connectAuthor').value.trim();
-  if (!author) { status.textContent = 'שם נדרש — החיבור נרשם עליך.'; $('connectAuthor').focus(); return; }
-  const body = $('connectBody').value.trim();
+  const author = authorEl.value.trim();
+  if (!author) { status.textContent = 'שם נדרש — החיבור נרשם עליך.'; authorEl.focus(); return; }
+  const body = bodyEl.value.trim();
   if (!body) { status.textContent = 'כתוב את התובנה שמקשרת ביניהם.'; return; }
   localStorage.setItem(AUTHOR_KEY, author);
   const r = await fetch('/annotate', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ session_id: lastAnswer.session_id, author, kind: 'connection', body, linked_refs: refs }) });
+    body: JSON.stringify({ session_id: data.session_id, author, kind: 'connection', body, linked_refs: refs }) });
   if (r.ok) {
     // C4: confirm with consequences — what entered, that a gold example was
     // captured, and a one-click retrieval check ("did it learn?").
     const resp = await j(r);
     const vref = 'Expert · connection · ' + String(resp.annotation_id).slice(0, 8);
     // Remember what was connected so it can be promoted into a developable seed.
-    lastConnection = { body, refs, question: lastAnswer.question };
+    lastConnection = { body, refs, question: data.question, author };
+    const verifyId = 'verified-' + key;
     status.innerHTML = `נשמר ✓ החיבור נכנס למאגר (${refs.length} מקורות מקושרים)`
       + ` — וגם נוסף כ־🏅 שאלת־זהב (מבחן קבוע).<br>`
-      + `<button class="ghost" onclick='verifyLearned(${attr(lastAnswer.question)}, ${attr(vref)}, "connectStatus2")'>בדוק שהוא עולה →</button>`
+      + `<button class="ghost" onclick='verifyLearned(${attr(data.question)}, ${attr(vref)}, ${attr(verifyId)})'>בדוק שהוא עולה →</button>`
       + ` <button class="secondary" onclick='withBusy(this, () => seedFromConnection())' title="הפוך את החיבור לזרע שהמודל יפתח, ואתה תכריע">🌱 פתח כזרע — Develop it →</button>`
-      + `<span id="connectStatus2" class="hint"></span>`;
-    $('connectBody').value = '';
+      + `<span id="${esc(verifyId)}" class="hint"></span>`;
+    bodyEl.value = '';
     picks.forEach(el => { el.checked = false; });
     loadReviewCount(); loadContributions();
   } else { const e = await j(r); status.textContent = 'שגיאה: ' + (e.detail || r.status); }
 }
 window.connectSelected = connectSelected;
 
-function retractSource(i) {
-  const src = lastAnswer && lastAnswer.sources[i];
+function retractSource(key, i) {
+  const data = ANSWERS.get(key);
+  const src = data && data.sources[i];
   if (!src) return;
   // The audited eraser deserves a real form (R6): target shown, reason recorded,
   // author sticky. Cancel does nothing.
@@ -853,10 +934,11 @@ async function ask() {
       return;
     }
     if (!active) await newTopic(q.slice(0, 48));
-    const data = await jPost('/threads/' + active + '/ask', { question: q });
+    await jPost('/threads/' + active + '/ask', { question: q });
     $('q').value = '';
+    // The answer is now a turn in the thread — re-reading it is the render. No second
+    // copy in the composer, so there is nothing that a reload could make disappear.
     await openThread(active);
-    renderAnswerSources(data);
   } catch (e) {
     renderAskError(e && e.message ? e.message : 'הבקשה נכשלה', q);
   } finally { $('askBtn').disabled = false; $('askBtn').textContent = 'שאל · Ask'; }
@@ -1577,7 +1659,10 @@ if (selMenu) [...selMenu.querySelectorAll('button')].forEach(b => b.addEventList
     $('seedBox').scrollIntoView({ block: 'center', behavior: 'smooth' }); t.focus();
   } else if (act === 'connect') {             // → existing Connect flow (POST /annotate)
     if (info.srcEl) { const cb = info.srcEl.querySelector('.srcpick'); if (cb) cb.checked = true; }
-    const body = $('connectBody');
+    // The insight field belongs to the answer block the selected source sits in —
+    // several are on screen at once, so reach for that one, not "the" connect box.
+    const block = info.srcEl && info.srcEl.closest('.turn.ask');
+    const body = block && block.querySelector('.connectBody');
     if (body) { body.scrollIntoView({ block: 'center', behavior: 'smooth' }); body.focus();
       toast('Source ticked — tick one more and write the insight, then Connect.'); }
     else { toast('Ask a question first to connect its sources.'); }

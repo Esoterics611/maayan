@@ -10,7 +10,13 @@ from __future__ import annotations
 import uuid
 
 from maayan.clock import Clock
-from maayan.threads.models import Thread, ThreadTurn, ThreadWithTurns, TurnType
+from maayan.threads.models import (
+    AnswerSnapshot,
+    Thread,
+    ThreadTurn,
+    ThreadWithTurns,
+    TurnType,
+)
 from maayan.threads.store import ThreadStore
 
 
@@ -34,8 +40,13 @@ class ThreadService:
         author: str,
         text: str,
         record_id: str | None = None,
+        answer: AnswerSnapshot | None = None,
     ) -> ThreadTurn:
-        """Append a turn; its ordinal is the next 1-based slot in the thread."""
+        """Append a turn; its ordinal is the next 1-based slot in the thread.
+
+        `answer` is the ask turn's sources-and-verdict snapshot (R7) — passed in
+        already built, since mapping a live `Answer` belongs to the flow, not here.
+        """
         ordinal = len(self._store.get_turns(thread_id)) + 1
         turn = ThreadTurn(
             id=str(uuid.uuid4()),
@@ -46,6 +57,7 @@ class ThreadService:
             author=author,
             record_id=record_id,
             text=text,
+            answer=answer,
         )
         return self._store.append_turn(turn)
 
