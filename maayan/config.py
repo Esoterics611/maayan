@@ -103,6 +103,17 @@ class Settings(BaseSettings):
             "this per corpus via the eval harness; enabling rerank sharpens separation."
         ),
     )
+    gate_pool: int = Field(
+        default=10,
+        description=(
+            "Candidate depth the gate's mean relevance signals average over. A single "
+            "top cosine is a max over ~9k points (noisy); pooling the top-N is a much "
+            "lower-variance estimate of how much relevant material actually exists."
+        ),
+    )
+    inspect_show: int = Field(
+        default=8, description="Hits per stage listed by the retrieval inspector (display only)."
+    )
     expert_boost: float = Field(
         default=1.0,
         description="Multiplier applied to source='expert' chunk scores (>1 prefers humans).",

@@ -153,6 +153,31 @@ class QdrantIndex:
         )
         return response.points
 
+    def query_sparse(
+        self,
+        sparse_indices: list[int],
+        sparse_values: list[float],
+        *,
+        limit: int = 1,
+        query_filter: models.Filter | None = None,
+    ) -> list[models.ScoredPoint]:
+        """Sparse-only search → the lexical branch of hybrid search, on its own.
+
+        Hybrid search fuses this with the dense branch and returns only rank-based RRF
+        scores, so the lexical signal is invisible from the outside. Querying it
+        separately is what lets the inspector (and the gate) see whether a hit is
+        lexical, semantic, or both.
+        """
+        response = self._client.query_points(
+            collection_name=self._collection,
+            query=models.SparseVector(indices=sparse_indices, values=sparse_values),
+            using=SPARSE_VECTOR,
+            limit=limit,
+            query_filter=query_filter,
+            with_payload=True,
+        )
+        return response.points
+
     def count(self) -> int:
         return self._client.count(self._collection).count
 

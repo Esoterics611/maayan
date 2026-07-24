@@ -48,6 +48,23 @@ def _build_filter(
     return models.Filter(must=must) if must else None
 
 
+def _to_search_result(point: models.ScoredPoint) -> SearchResult:
+    """Qdrant point → `SearchResult`, carrying the whole payload for citation/display.
+
+    Module-level (not a `Retriever` method) so the inspector builds results exactly
+    the same way the retriever does — one definition, no drift.
+    """
+    payload = dict(point.payload or {})
+    return SearchResult(
+        ref=str(payload.get("ref", "")),
+        text=str(payload.get("text", "")),
+        score=float(point.score),
+        lang=str(payload.get("lang", "")),
+        source=str(payload.get("source", "")),
+        payload=payload,
+    )
+
+
 def _rank_key(result: SearchResult) -> tuple[float, str]:
     """Deterministic total order for ranking: score desc, then ref asc.
 
@@ -113,7 +130,7 @@ class Retriever:
             )
         else:
             points = self._index.query_dense(emb.dense, limit=pool, query_filter=flt)
-        results = [self._to_result(p) for p in points]
+        results = [_to_search_result(p) for p in points]
         results = self._apply_source_boosts(results)
 
         if self._reranker is not None and results:
@@ -149,18 +166,6 @@ class Retriever:
         return self.retrieve(query, k=k, book=book, source=source, langs=langs).results
 
     # -- internals -----------------------------------------------------------
-    @staticmethod
-    def _to_result(point: models.ScoredPoint) -> SearchResult:
-        payload = dict(point.payload or {})
-        return SearchResult(
-            ref=str(payload.get("ref", "")),
-            text=str(payload.get("text", "")),
-            score=float(point.score),
-            lang=str(payload.get("lang", "")),
-            source=str(payload.get("source", "")),
-            payload=payload,
-        )
-
     def _source_boost(self, source: str) -> float:
         """Score multiplier per source: expert, derived, term, shiur, summary (all human-gated)."""
         if source == "expert":

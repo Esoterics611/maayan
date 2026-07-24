@@ -330,6 +330,35 @@ def search(
 
 
 @app.command()
+def inspect(
+    query: str = typer.Argument(..., help="Query text (Hebrew or English)."),
+    k: int = typer.Option(None, "--k", help="Hits to show per stage."),
+    book: str = typer.Option(None, "--book", help="Restrict to a book."),
+    source: str = typer.Option(None, "--source", help="Restrict to a source."),
+    rerank: bool = typer.Option(
+        None, "--rerank/--no-rerank", help="Override RERANK_ENABLED for this run."
+    ),
+    expand: bool = typer.Option(
+        None, "--expand/--no-expand", help="Override QUERY_EXPAND_ENABLED for this run."
+    ),
+) -> None:
+    """Explain one retrieval: per-branch scores and the answer/refuse decision.
+
+    Shows the query as actually sent, the dense / sparse / fused (/ rerank) rankings
+    side by side, the absolute gate signals, and why the gate answered or refused —
+    so "why did this refuse?" is a ten-second question, not an investigation.
+    """
+    from maayan.retrieve.factory import build_inspector
+    from maayan.retrieve.trace import format_trace
+
+    settings = _cfg()
+    require_qdrant(settings)
+    inspector = build_inspector(settings, rerank=rerank, expand=expand)
+    trace = inspector.inspect(query, k=k, book=book, source=source)
+    typer.echo(format_trace(trace))
+
+
+@app.command()
 def ask(
     question: str = typer.Argument(..., help="Your question (Hebrew or English)."),
     k: int = typer.Option(None, "--k", help="How many sources to ground on."),

@@ -22,6 +22,7 @@ from maayan.retrieve.expand import (
     QueryExpander,
     TermSource,
 )
+from maayan.retrieve.inspect import RetrievalInspector
 from maayan.retrieve.reranker import Reranker
 from maayan.retrieve.retriever import MultiQueryRetriever, Retriever, Retrieving
 
@@ -109,3 +110,56 @@ def build_retriever(
             reranker=reranker,
         )
     return retriever
+
+
+def build_inspector(
+    settings: Settings,
+    *,
+    embedder: Embedder | None = None,
+    rerank: bool | None = None,
+    expand: bool | None = None,
+    backend: GenerationBackend | None = None,
+    term_store: TermSource | None = None,
+) -> RetrievalInspector:
+    """Assemble a `RetrievalInspector` from the same parts as `build_retriever`.
+
+    Deliberately shares the embedder, index and (optional) reranker/expander wiring so
+    the trace reports what production actually sees. Graph expansion is not wrapped:
+    the inspector's job is the search itself, and a graph hop adds refs that were never
+    ranked by a branch.
+    """
+    embedder = embedder or build_embedder(settings)
+    index = QdrantIndex(build_qdrant_client(settings), settings.collection_name, embedder.dim)
+    reranker: Reranker | None = None
+    if settings.rerank_enabled if rerank is None else rerank:
+        from maayan.retrieve.reranker import BGEReranker
+
+        reranker = BGEReranker(settings.rerank_model)
+
+    expander: QueryExpander | None = None
+    if settings.query_expand_enabled if expand is None else expand:
+        expanders: list[QueryExpander] = []
+        if settings.query_expand_lexicon:
+            expanders.append(LexiconExpander(term_store or TermStore(settings.db_path)))
+        if backend is not None:
+            expanders.append(
+                LLMQueryExpander(
+                    backend,
+                    variants=settings.query_expand_variants,
+                    hyde=settings.query_expand_hyde,
+                )
+            )
+        if expanders:
+            expander = CompositeExpander(
+                expanders, max_queries=settings.query_expand_max_queries
+            )
+
+    return RetrievalInspector(
+        index,
+        embedder,
+        threshold=settings.score_threshold,
+        pool=settings.gate_pool,
+        show=settings.inspect_show,
+        expander=expander,
+        reranker=reranker,
+    )
