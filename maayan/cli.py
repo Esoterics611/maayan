@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import typer
@@ -1454,11 +1455,25 @@ def evaluate(
         help="Run the machine-grown CAPTURED goldset (every approval drafted a case); "
         "writes a date-stamped JSON report and prints deltas vs the previous run.",
     ),
+    lexical: bool = typer.Option(
+        False, "--lexical",
+        help="Score LEXICAL RECALL (term -> every chunk that contains it) instead. "
+        "Ground truth comes from the corpus, so it measures recall of a term's whole "
+        "discussion rather than top-1 relevance.",
+    ),
+    rebuild: bool = typer.Option(
+        False, "--rebuild",
+        help="With --lexical: regenerate the case file from the current corpus.",
+    ),
     k: int = typer.Option(10, "--k", help="The k to highlight in the comparison table."),
 ) -> None:
     """Score retrieval (hit@k, recall@k, MRR), or the develop / cross-text / answer step."""
     settings = _cfg()
     require_qdrant(settings)
+
+    if lexical:
+        _eval_lexical(settings, goldset=goldset, rebuild=rebuild)
+        return
 
     if captured:
         from maayan.eval.captured import (
@@ -1618,6 +1633,56 @@ def evaluate(
             retriever, examples, settings.eval_ks, score_threshold=settings.score_threshold
         )
         typer.echo(format_report(report))
+
+
+def _eval_lexical(settings: Settings, *, goldset: str | None, rebuild: bool) -> None:
+    """Run (or regenerate) the lexical recall guard."""
+    from maayan.corpus.store import ChunkStore
+    from maayan.eval.lexical import (
+        LexicalGoldset,
+        format_lexical_report,
+        load_lexical_goldset,
+        run_lexical_eval,
+        save_lexical_goldset,
+        select_cases,
+    )
+    from maayan.retrieve.factory import build_retriever
+
+    path = goldset or settings.eval_lexical_goldset_path
+    if rebuild:
+        with ChunkStore(settings.db_path) as store:
+            chunks = store.get_chunks()
+            cases = select_cases(
+                chunks,
+                settings.eval_lexical_terms,
+                min_occurrences=settings.eval_lexical_min_occurrences,
+                max_occurrences=settings.eval_lexical_max_occurrences,
+            )
+            save_lexical_goldset(
+                LexicalGoldset(corpus_chunks=len(chunks), cases=cases), path
+            )
+        skipped = len(settings.eval_lexical_terms) - len(cases)
+        typer.echo(
+            f"Wrote {len(cases)} cases to {path} "
+            f"({skipped} candidate term(s) outside the occurrence range).\n"
+        )
+
+    if not Path(path).exists():
+        typer.echo(f"No lexical gold set at {path}. Generate one with --lexical --rebuild.")
+        raise typer.Exit(1)
+    gold = load_lexical_goldset(path)
+    with ChunkStore(settings.db_path) as store:
+        live = store.count()
+    if gold.corpus_chunks and gold.corpus_chunks != live:
+        typer.echo(
+            f"WARNING: cases were generated against {gold.corpus_chunks} chunks but the "
+            f"store now has {live}. Re-run with --rebuild, or the ground truth is stale.\n"
+        )
+    typer.echo(f"Lexical gold set: {path} ({len(gold.cases)} terms)\n")
+    report = run_lexical_eval(
+        build_retriever(settings), gold.cases, settings.eval_ks
+    )
+    typer.echo(format_lexical_report(report))
 
 
 @app.command(name="eval-expand")

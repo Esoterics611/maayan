@@ -597,6 +597,36 @@ class Settings(BaseSettings):
         description="Questions whose expected refs span ≥2 books, for the cross-text eval.",
     )
     eval_ks: list[int] = Field(default=[1, 3, 5, 10])
+    eval_lexical_goldset_path: str = Field(
+        default="eval/lexical_goldset.yaml",
+        description=(
+            "GENERATED lexical-recall cases (term -> every chunk that contains it). "
+            "Ground truth comes from the corpus, not from authored questions, so it "
+            "measures recall of a term's whole discussion rather than top-1 relevance."
+        ),
+    )
+    eval_lexical_terms: list[str] = Field(
+        default=[
+            "צמצום", "קליפת נוגה", "אין סוף", "דירה בתחתונים", "אתכפיא", "אתהפכא",
+            "ממלא כל עלמין", "סובב כל עלמין", "נפש הבהמית", "נפש האלקית",
+            "יחודא עילאה", "יחודא תתאה", "שבירת הכלים", "תהו ותיקון", "אהבה ויראה",
+            "גילוי אלקות", "עבודת התפלה", "חכמה בינה ודעת", "אור מקיף", "אור פנימי",
+            "הארת הנשמה", "תשובה עילאה", "אתערותא דלתתא", "אתערותא דלעילא",
+            "פנימיות הלב",
+        ],
+        description="Candidate terms for the lexical recall guard; --rebuild keeps those in range.",
+    )
+    eval_lexical_min_occurrences: int = Field(
+        default=3, description="Below this a term's recall@k is noise — skip it."
+    )
+    eval_lexical_max_occurrences: int = Field(
+        default=400,
+        description=(
+            "Skip terms above this. The corpus is dense in its own vocabulary, so most "
+            "real concepts occur in the hundreds; precision@k carries those, while recall "
+            "is capped by k. Far beyond this the term is vocabulary, not a topic."
+        ),
+    )
 
     # ---- Answer-quality eval (Prompt 32) ------------------------------------
     eval_answer_goldset_path: str = Field(
