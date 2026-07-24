@@ -102,6 +102,18 @@ class Settings(BaseSettings):
     rerank_candidates: int = Field(
         default=30, description="Fused candidates fetched for the reranker to reorder."
     )
+    rerank_device: str = Field(
+        default="",
+        description='Torch device for the reranker; blank falls back to EMBED_DEVICE.',
+    )
+    rerank_batch_size: int = Field(
+        default=16, description="Query/document pairs scored per forward pass."
+    )
+    rerank_max_length: int = Field(
+        default=512,
+        description="Token cap per (query, document) pair. bge-reranker-v2-m3 supports more, "
+        "but 512 covers a passage and keeps latency and VRAM bounded.",
+    )
 
     # ---- Retrieval ----------------------------------------------------------
     top_k: int = Field(default=8, description="Candidates fused/returned by hybrid search.")

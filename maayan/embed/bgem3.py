@@ -11,19 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from maayan.embed.base import Embedding
-
-
-def _resolve_device(device: str) -> str:
-    """Map "auto" to the best available torch device."""
-    if device != "auto":
-        return device
-    import torch
-
-    if torch.cuda.is_available():
-        return "cuda:0"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+from maayan.embed.device import resolve_device
 
 
 class BGEM3Embedder:
@@ -41,7 +29,7 @@ class BGEM3Embedder:
     ) -> None:
         from FlagEmbedding import BGEM3FlagModel
 
-        resolved = _resolve_device(device)
+        resolved = resolve_device(device)
         # fp16 only helps (and only works well) on CUDA.
         fp16 = use_fp16 and resolved.startswith("cuda")
         self._model = BGEM3FlagModel(model_name, use_fp16=fp16, devices=resolved)

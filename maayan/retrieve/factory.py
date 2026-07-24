@@ -68,9 +68,9 @@ def build_retriever(
     use_rerank = settings.rerank_enabled if rerank is None else rerank
     reranker: Reranker | None = None
     if use_rerank:
-        from maayan.retrieve.reranker import BGEReranker
+        from maayan.retrieve.reranker import build_reranker
 
-        reranker = BGEReranker(settings.rerank_model)
+        reranker = build_reranker(settings)
     resolved_top_k = top_k if top_k is not None else settings.top_k
     base = Retriever(
         index,
@@ -147,9 +147,9 @@ def build_inspector(
     index = QdrantIndex(build_qdrant_client(settings), settings.collection_name, embedder.dim)
     reranker: Reranker | None = None
     if settings.rerank_enabled if rerank is None else rerank:
-        from maayan.retrieve.reranker import BGEReranker
+        from maayan.retrieve.reranker import build_reranker
 
-        reranker = BGEReranker(settings.rerank_model)
+        reranker = build_reranker(settings)
 
     expander: QueryExpander | None = None
     if settings.query_expand_enabled if expand is None else expand:
