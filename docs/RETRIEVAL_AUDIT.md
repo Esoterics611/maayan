@@ -86,12 +86,35 @@ Expansion is only as strong as what the factory hands `build_retriever`: with no
 HyDE. Only `cli.ask` passed one. Compose `fill`, develop, the lexicon populator and
 the study-program drafter all ran weaker retrieval under the same config, silently.
 
-### 4. The reranker was broken, not merely off
+### 4. The reranker was broken — and once fixed, it makes things worse here
 
 `RERANK_ENABLED=true` raised `AttributeError` on every retrieval: FlagEmbedding's
 `FlagReranker` calls `tokenizer.prepare_for_model`, which transformers 5 removed. The
 embedder uses a different code path, so nothing surfaced it — the reranker is off by
 default, so no test and no default path ever ran it.
+
+Reimplemented on plain transformers, it works. It should then be measured before being
+trusted, and the measurement says **leave it off**:
+
+| | hit@1 | hit@3 | hit@10 | recall@10 | MRR | ms/query |
+|---|---|---|---|---|---|---|
+| RRF only | **0.381** | **0.714** | **0.857** | **0.810** | **0.559** | **441** |
+| + rerank | 0.310 | 0.524 | 0.762 | 0.722 | 0.450 | 32,738 |
+
+It is worse on every ranking metric (MRR −20%, hit@3 −27%), worse as a gate signal
+(AUC 0.988 → 0.926), and **74× slower** — 33 seconds per query, unusable
+interactively on this hardware.
+
+Worth noting *why* the spot-check misled: asked to separate "הנפש האלקית היא חלק אלוק
+ממעל ממש" from a pasta recipe, the cross-encoder scores 0.9995 vs 0.0000 and looks
+excellent. That is an easy discrimination. Its actual job is ordering thirty passages
+of chassidus that are *all* plausibly on-topic, and there it does worse than RRF. A
+convincing anecdote is not a measurement.
+
+`RERANK_ENABLED` stays `false` — now because it was measured, not by inertia. Note
+also that when rerank is on, the cross-encoder score *overrides* the gate signal in
+both gates; given the AUC above, that override is also unjustified on this corpus and
+should be revisited if the reranker is ever reconsidered.
 
 ### 5. One passage could occupy two grounding slots
 
